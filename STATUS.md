@@ -23,8 +23,9 @@
 | Routine prompt (`routines/ideation.md`) | ✅ First draft |
 | Accounts & API keys | ✅ **ALL collected + verified** — Gemini · Groq · Supabase(secret) · Telegram · Pexels · Claude token · YouTube |
 | Supabase database | ✅ 5 tables + RLS + secret-key writes confirmed |
-| YouTube OAuth | ✅ Refresh token verified (upload scope) via `tools/verify_youtube.py` |
+| YouTube OAuth | ✅ Verified (upload+readonly); token bound to the correct **@butitmatters** channel |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
+| YouTube channel *title* | 🟡 Cosmetic: rename `Why It Matters??` → `But It Matters` in YT Studio |
 | Pipeline logic (modules) | 🟡 `db.py` done + tested; other modules still stubs |
 
 ## Module progress (Phase 1)
@@ -67,12 +68,20 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Log
 
+### 2026-06-06 — YouTube channel binding confirmed
+- First OAuth pass was bound to the wrong (main) channel + then revoked. Re-ran cleanly:
+  added `youtube.readonly` scope, regenerated the token selecting the **@butitmatters**
+  channel, no post-revoke. `tools/verify_youtube.py` reads the bound channel and confirms it.
+- Bound channel title is `Why It Matters??`; user confirmed it's the project channel and set
+  the canonical brand to **But It Matters** (matches the handle + repo). Cosmetic to-do:
+  rename the YT channel title to "But It Matters".
+
 ### 2026-06-05 — All credentials complete (YouTube OAuth verified)
 - Generated YouTube OAuth creds (Desktop-app client + published consent screen) and added
   `YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN` to `.env`.
 - Added [tools/verify_youtube.py](tools/verify_youtube.py); confirmed the refresh token mints
-  a live access token (upload scope). **Every API key is now collected and verified** — the
-  full pipeline (incl. `publish_youtube.py`) is unblocked.
+  a live access token. **Every API key is now collected and verified** — the full pipeline
+  (incl. `publish_youtube.py`) is unblocked.
 
 ### 2026-06-05 — Module: db.py implemented + tested
 - Implemented [src/db.py](src/db.py) on supabase-py 2.31.0: `get_client()` (cached, secret
