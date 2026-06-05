@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.1 (pre-MVP — foundation)
+**Version:** 0.0.2 (pre-MVP — foundation + scaffolding)
 **Last updated:** 2026-06-05
 
 ---
@@ -16,23 +16,29 @@
 |------|-------|
 | Design / docs | ✅ Complete — 8 docs in [docs/](docs/) |
 | Project rules | ✅ Written — [CLAUDE.md](CLAUDE.md) |
+| Repo scaffolding (src/, routines/, templates/, tests/, workflows) | ✅ Done — stubs + contracts |
+| `config.py` | ✅ Functional + tested (4/4 pass) |
+| Script templates (N, D, A, C) | ✅ Written |
+| Routine prompt (`routines/ideation.md`) | ✅ First draft |
 | Accounts & API keys | ⬜ Not started — see [docs/03-setup-guide.md](docs/03-setup-guide.md) |
 | `@newsence` handle check (YT/IG/TT) | ⬜ Not verified |
-| Scaffolding (src/, routines/, tests/) | ⬜ Not started |
-| Pipeline code | ⬜ Not started |
+| Pipeline logic (modules) | ⬜ Stubs only — not implemented |
 
 ## Module progress (Phase 1)
 
 | # | Module | Status |
 |---|--------|--------|
-| 1 | Ideation (Claude Routine + fallback) | ⬜ Not started |
-| 2 | Approval (Telegram) | ⬜ Not started |
-| 3 | Scriptwriter (Gemini/Groq) | ⬜ Not started |
-| 4 | Voice (edge-tts) | ⬜ Not started |
-| 5 | Visuals (Pexels/Pixabay) | ⬜ Not started |
-| 6 | Assembly (FFmpeg) | ⬜ Not started |
-| 7 | Subtitles (faster-whisper) | ⬜ Not started |
-| 9 | Publish (YouTube) | ⬜ Not started |
+| 1 | Ideation (Claude Routine + fallback) | 🟡 Routine prompt drafted; `ideation_fallback.py` stub |
+| 2 | Approval (Telegram) | 🟡 Stub + contract |
+| 3 | Scriptwriter (Gemini/Groq) | 🟡 Stub + contract; templates ready |
+| 4 | Voice (edge-tts) | 🟡 Stub + contract |
+| 5 | Visuals (Pexels/Pixabay) | 🟡 Stub + contract |
+| 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
+| 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
+| 9 | Publish (YouTube) | 🟡 Stub + contract |
+| — | `config.py` / `db.py` / `llm.py` | config ✅ · db/llm 🟡 stub |
+
+Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
@@ -40,8 +46,10 @@
 2. Work through [docs/03-setup-guide.md](docs/03-setup-guide.md) — create accounts, run
    `claude setup-token`, collect API keys into a local `.env`.
 3. Verify `@newsence` handle is free on YouTube + Instagram + TikTok.
-4. Scaffold the repo (`src/`, `routines/`, `tests/`, `requirements.txt`, `.env.example`).
-5. Build Module 1 (ideation) first; test in isolation before Module 2.
+4. Build **Module 1** first: create the 5 Supabase tables → implement `db.py` → test against
+   Supabase → set up the Anthropic Routine from `routines/ideation.md`.
+5. Then proceed module-by-module (rule 7): db → ideation → approval → scriptwriter → voice →
+   visuals → assembly → subtitles → publish → wire `production.py`.
 
 ## Open decisions
 
@@ -54,6 +62,16 @@
 ---
 
 ## Log
+
+### 2026-06-05 — Phase-1 scaffolding
+- Created the repo skeleton from [docs/02-implementation-plan.md](docs/02-implementation-plan.md) §0:
+  `src/` (10 module stubs + functional `config.py`), `routines/ideation.md` (first-draft
+  Routine prompt), `templates/` (N, D, A, C), `tests/`, `.github/workflows/` (skeletons,
+  manual-trigger), `requirements.txt`, `.env.example`, `.gitattributes`.
+- Module stubs carry their typed input→output contract + `NotImplementedError` (no pipeline
+  logic yet, per scope). Build them in order, in isolation (rule 7).
+- `config.py` is real (fail-loud, rule 14) and covered by `tests/test_config.py` — **4/4 pass**.
+- Workflows default to `workflow_dispatch`; cron stays commented out until modules work.
 
 ### 2026-06-05 — Foundation set up
 - Imported the 8-doc design package into [docs/](docs/) from the `AI Idea` source folder.

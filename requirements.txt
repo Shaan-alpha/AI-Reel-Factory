@@ -1,0 +1,30 @@
+# Phase-1 dependencies. See docs/02-implementation-plan.md §0.
+# NOTE (rule 18 / reproducible env): pin exact versions after the first successful
+# install — run `pip freeze > requirements.lock.txt` and commit that lock file.
+# Left unpinned here until verified on the target Python so we don't guess versions.
+
+# LLM (scriptwriter + ideation fallback)
+google-generativeai      # Gemini API (primary scriptwriter, ideation fallback)
+groq                     # Groq failover
+
+# Database / state
+supabase                 # Supabase Postgres client
+
+# Approval UI
+python-telegram-bot      # Telegram bot + inline buttons
+
+# Voice (Module 4)
+edge-tts                 # narration (default; Kokoro is the Phase-2 fallback)
+
+# Video (Modules 6, 7)
+ffmpeg-python            # FFmpeg wrapper (assembly + caption burn-in)
+faster-whisper           # word-level timestamps for karaoke captions
+
+# Publishing (Module 9)
+google-api-python-client # YouTube Data API v3
+google-auth              # OAuth for headless upload
+google-auth-oauthlib     # one-time local OAuth flow
+
+# Misc
+requests                 # Pexels/Pixabay HTTP, Telegram polling
+python-dotenv            # load local .env in dev

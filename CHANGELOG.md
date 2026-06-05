@@ -12,3 +12,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - [CLAUDE.md](CLAUDE.md) — 18 operating rules for agents working in this repo.
 - [STATUS.md](STATUS.md) — living progress log.
 - [README.md](README.md) and this changelog.
+- Phase-1 scaffolding: `src/` module stubs with typed contracts, functional `config.py`
+  (+ passing `tests/test_config.py`), `routines/ideation.md`, `templates/` (N/D/A/C),
+  `.github/workflows/` skeletons, `requirements.txt`, `.env.example`, `.gitattributes`.
