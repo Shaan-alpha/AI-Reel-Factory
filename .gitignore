@@ -1,0 +1,29 @@
+# Secrets — never commit (rule 5). Only .env.example (blank) is tracked.
+.env
+.env.*
+!.env.example
+*.key
+client_secret*.json
+*credentials*.json
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Rendered media assets (asset policy: render → upload → delete; never commit video)
+*.mp4
+*.wav
+*.mp3
+tmp/
+output/
+broll/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
