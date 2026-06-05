@@ -3,8 +3,9 @@
 Run: python tools/verify_youtube.py
 
 Confirms YOUTUBE_CLIENT_ID / SECRET / REFRESH_TOKEN can mint a fresh access token
-(i.e. the refresh token is valid and not expired/revoked). Uses the upload-only scope
-(least privilege), so it proves auth works — the channel read is best-effort.
+(i.e. the refresh token is valid and not expired/revoked) AND prints the channel the
+token is bound to, so you can confirm it's "But It Matters" and not your main channel.
+Requires the token to have been generated with the youtube.readonly scope.
 """
 from __future__ import annotations
 
@@ -19,7 +20,10 @@ from google.oauth2.credentials import Credentials
 
 from src import config
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+]
 
 
 def main() -> None:
@@ -39,16 +43,25 @@ def main() -> None:
     creds.refresh(Request())  # raises if the refresh token is bad
     print(f"OK: refresh token valid -> access token minted (expires {creds.expiry} UTC)")
 
-    # Best-effort channel read (upload-only scope may not permit this — that's fine).
+    # Confirm WHICH channel this token uploads to (needs youtube.readonly).
     try:
         from googleapiclient.discovery import build
 
         yt = build("youtube", "v3", credentials=creds, cache_discovery=False)
         items = yt.channels().list(part="snippet", mine=True).execute().get("items", [])
-        if items:
-            print(f"channel: {items[0]['snippet']['title']}")
+        if not items:
+            print("channel: (none returned)")
+            return
+        title = items[0]["snippet"]["title"]
+        expected = config.get("CHANNEL_NAME") or ""
+        print(f"bound channel: {title!r}")
+        if expected and expected.lower() in title.lower():
+            print(f"  ✓ matches CHANNEL_NAME ({expected!r}) — correct channel")
+        else:
+            print(f"  ⚠ does NOT match CHANNEL_NAME ({expected!r}). If this is your main "
+                  "channel, revoke + regenerate the token against But It Matters.")
     except Exception as e:  # noqa: BLE001 — diagnostic only
-        print(f"(channel read unavailable with upload-only scope — expected: {type(e).__name__})")
+        print(f"(channel read failed — did you add the youtube.readonly scope? {type(e).__name__})")
 
 
 if __name__ == "__main__":

@@ -29,8 +29,13 @@ from __future__ import annotations
 import os
 import sys
 
-# Only the upload scope — least privilege.
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# upload = the pipeline's actual need. readonly = lets verify_youtube.py confirm WHICH
+# channel the token is bound to (and supports Phase-4 analytics). Both are "sensitive"
+# scopes — add BOTH under the consent screen's Data Access before regenerating.
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+]
 
 
 def main(client_secret_path: str = "client_secret.json") -> None:
