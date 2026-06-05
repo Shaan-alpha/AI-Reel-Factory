@@ -21,12 +21,11 @@
 | `config.py` | ✅ Functional + tested (4/4 pass) |
 | Script templates (N, D, A, C) | ✅ Written |
 | Routine prompt (`routines/ideation.md`) | ✅ First draft |
-| Accounts & API keys | 🟡 Gemini ✅ · Groq ✅ · Supabase ✅* · Telegram ✅ · Pexels ✅ · Claude token ✅ · YouTube ⬜ |
-| Supabase database | ✅ 5 tables created + RLS enabled + smoke-tested (insert/read/delete) |
+| Accounts & API keys | ✅ **ALL collected + verified** — Gemini · Groq · Supabase(secret) · Telegram · Pexels · Claude token · YouTube |
+| Supabase database | ✅ 5 tables + RLS + secret-key writes confirmed |
+| YouTube OAuth | ✅ Refresh token verified (upload scope) via `tools/verify_youtube.py` |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
-| Pipeline logic (modules) | 🟡 `db.py` implemented + integration-tested; other modules still stubs |
-
-\* `SUPABASE_KEY` in `.env` is still the **publishable** key — swap to the `sb_secret_…` key for server-side writes (RLS denies the publishable key). Only remaining Supabase step.
+| Pipeline logic (modules) | 🟡 `db.py` done + tested; other modules still stubs |
 
 ## Module progress (Phase 1)
 
@@ -46,17 +45,15 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-1. **Supabase secret key:** copy the `sb_secret_…` key (Dashboard → Project Settings →
-   API Keys) into `SUPABASE_KEY` in `.env`. *(Tables already created + RLS + smoke-tested.)*
-2. **YouTube creds:** create the Google Cloud OAuth *Desktop app* (enable YouTube Data API v3,
-   publish consent screen) → save `client_secret.json` → run `python tools/get_youtube_token.py`
-   → paste `YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN` into `.env`.
-3. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
-   (`gh secret set …`) once the keys above are final.
-4. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron.
-5. Build the pipeline module-by-module (rule 7): `db.py` ✅ → **ideation_fallback / approval**
-   → scriptwriter → voice → visuals → assembly → subtitles → publish → wire `production.py`.
-6. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
+- ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
+1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → **`llm.py`** → `approval.py`
+   → `ideation_fallback.py` → `scriptwriter.py` → `voice.py` → `visuals.py` → `assembly.py`
+   → `subtitles.py` → `publish_youtube.py` → wire `production.py`.
+2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
+   (`gh secret set …`) before the first cron run.
+3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
+   Routine from `routines/ideation.md`.
+4. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
 
 ## Open decisions
 
@@ -69,6 +66,13 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-05 — All credentials complete (YouTube OAuth verified)
+- Generated YouTube OAuth creds (Desktop-app client + published consent screen) and added
+  `YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN` to `.env`.
+- Added [tools/verify_youtube.py](tools/verify_youtube.py); confirmed the refresh token mints
+  a live access token (upload scope). **Every API key is now collected and verified** — the
+  full pipeline (incl. `publish_youtube.py`) is unblocked.
 
 ### 2026-06-05 — Module: db.py implemented + tested
 - Implemented [src/db.py](src/db.py) on supabase-py 2.31.0: `get_client()` (cached, secret

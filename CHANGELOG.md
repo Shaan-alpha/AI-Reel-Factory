@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   (+ passing `tests/test_config.py`), `routines/ideation.md`, `templates/` (N/D/A/C),
   `.github/workflows/` skeletons, `requirements.txt`, `.env.example`, `.gitattributes`.
 - `tools/get_youtube_token.py` — one-time OAuth helper to generate the YouTube refresh token.
+- `tools/verify_youtube.py` — checks the YouTube refresh token mints a live access token.
 - **Module: `db.py`** — Supabase data layer (typed helpers + `find_post` idempotency check),
   with a live integration test (`tests/test_db_integration.py`). Supabase project provisioned:
   5 tables + RLS + secret-key access.
