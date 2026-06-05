@@ -56,12 +56,12 @@ def main() -> None:
         expected = config.get("CHANNEL_NAME") or ""
         print(f"bound channel: {title!r}")
         if expected and expected.lower() in title.lower():
-            print(f"  ✓ matches CHANNEL_NAME ({expected!r}) — correct channel")
+            print(f"  [OK] matches CHANNEL_NAME ({expected!r}) - correct channel")
         else:
-            print(f"  ⚠ does NOT match CHANNEL_NAME ({expected!r}). If this is your main "
-                  "channel, revoke + regenerate the token against But It Matters.")
-    except Exception as e:  # noqa: BLE001 — diagnostic only
-        print(f"(channel read failed — did you add the youtube.readonly scope? {type(e).__name__})")
+            print(f"  [NOTE] channel title {title!r} != CHANNEL_NAME ({expected!r}). "
+                  "Confirm this is the @butitmatters channel and not your main one.")
+    except Exception as e:  # noqa: BLE001 - diagnostic only
+        print(f"(channel read failed - is the youtube.readonly scope present? {type(e).__name__})")
 
 
 if __name__ == "__main__":
