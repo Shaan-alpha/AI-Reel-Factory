@@ -25,7 +25,7 @@
 | Supabase database | ✅ 5 tables + RLS + secret-key writes confirmed |
 | YouTube OAuth | ✅ Verified (upload+readonly); token bound to the correct **@butitmatters** channel |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
-| YouTube channel *title* | 🟡 Cosmetic: rename `Why It Matters??` → `But It Matters` in YT Studio |
+| YouTube channel *title* | ✅ Renamed to **But It Matters** (matches handle + CHANNEL_NAME) |
 | Pipeline logic (modules) | 🟡 `db.py` done + tested; other modules still stubs |
 
 ## Module progress (Phase 1)
