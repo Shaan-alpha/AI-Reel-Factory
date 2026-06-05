@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.3 (pre-MVP — foundation + scaffolding + setup underway)
+**Version:** 0.0.4 (pre-MVP — DB layer live + integration-tested)
 **Last updated:** 2026-06-05
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -24,7 +24,7 @@
 | Accounts & API keys | 🟡 Gemini ✅ · Groq ✅ · Supabase ✅* · Telegram ✅ · Pexels ✅ · Claude token ✅ · YouTube ⬜ |
 | Supabase database | ✅ 5 tables created + RLS enabled + smoke-tested (insert/read/delete) |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
-| Pipeline logic (modules) | ⬜ Stubs only — not implemented |
+| Pipeline logic (modules) | 🟡 `db.py` implemented + integration-tested; other modules still stubs |
 
 \* `SUPABASE_KEY` in `.env` is still the **publishable** key — swap to the `sb_secret_…` key for server-side writes (RLS denies the publishable key). Only remaining Supabase step.
 
@@ -40,7 +40,7 @@
 | 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
 | 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
 | 9 | Publish (YouTube) | 🟡 Stub + contract |
-| — | `config.py` / `db.py` / `llm.py` | config ✅ · db/llm 🟡 stub |
+| — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅ (integration-tested)** · llm 🟡 stub |
 
 Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
@@ -54,9 +54,8 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 3. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) once the keys above are final.
 4. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron.
-5. Build the pipeline module-by-module (rule 7): **`db.py`** (tables ready) → ideation →
-   approval → scriptwriter → voice → visuals → assembly → subtitles → publish →
-   wire `production.py`.
+5. Build the pipeline module-by-module (rule 7): `db.py` ✅ → **ideation_fallback / approval**
+   → scriptwriter → voice → visuals → assembly → subtitles → publish → wire `production.py`.
 6. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
 
 ## Open decisions
@@ -70,6 +69,15 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-05 — Module: db.py implemented + tested
+- Implemented [src/db.py](src/db.py) on supabase-py 2.31.0: `get_client()` (cached, secret
+  key), `insert_ideas`, `get_pending_ideas`, `set_idea_status`, `get_approved_ideas`,
+  `insert_script`, `insert_post`, `find_post` (idempotency helper, rule 12). Added a
+  `produced` idea status so cron retries skip shipped reels.
+- Added [tests/test_db_integration.py](tests/test_db_integration.py): full idea→post cycle
+  against the live DB, auto-skips without creds. **Suite: 6 passed.**
+- User swapped `SUPABASE_KEY` to the `sb_secret_…` key — RLS-protected writes confirmed working.
 
 ### 2026-06-05 — Supabase database provisioned
 - Created all 5 tables (`ideas`, `scripts`, `posts`, `analytics`, `hook_performance`) on the
