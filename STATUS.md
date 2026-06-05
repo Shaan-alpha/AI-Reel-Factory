@@ -21,11 +21,12 @@
 | `config.py` | ✅ Functional + tested (4/4 pass) |
 | Script templates (N, D, A, C) | ✅ Written |
 | Routine prompt (`routines/ideation.md`) | ✅ First draft |
-| Accounts & API keys | 🟡 Gemini ✅ · Groq ✅ · Supabase ✅* · Telegram ✅ · Pexels ✅ · YouTube ⬜ · Claude token ⬜ |
+| Accounts & API keys | 🟡 Gemini ✅ · Groq ✅ · Supabase ✅* · Telegram ✅ · Pexels ✅ · Claude token ✅ · YouTube ⬜ |
+| Supabase database | ✅ 5 tables created + RLS enabled + smoke-tested (insert/read/delete) |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
 | Pipeline logic (modules) | ⬜ Stubs only — not implemented |
 
-\* Supabase key in `.env` is the **publishable** key — swap to the `sb_secret_…` key for server-side writes (see Next actions).
+\* `SUPABASE_KEY` in `.env` is still the **publishable** key — swap to the `sb_secret_…` key for server-side writes (RLS denies the publishable key). Only remaining Supabase step.
 
 ## Module progress (Phase 1)
 
@@ -45,20 +46,18 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-1. **YouTube creds:** create the Google Cloud OAuth *Desktop app* (enable YouTube Data API v3,
+1. **Supabase secret key:** copy the `sb_secret_…` key (Dashboard → Project Settings →
+   API Keys) into `SUPABASE_KEY` in `.env`. *(Tables already created + RLS + smoke-tested.)*
+2. **YouTube creds:** create the Google Cloud OAuth *Desktop app* (enable YouTube Data API v3,
    publish consent screen) → save `client_secret.json` → run `python tools/get_youtube_token.py`
    → paste `YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN` into `.env`.
-2. **Supabase:** replace the publishable key with the `sb_secret_…` key (Project Settings →
-   API Keys); run the 5-table SQL from [docs/03-setup-guide.md](docs/03-setup-guide.md) §4.
-3. **Claude Routine auth:** run `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN` (for ideation).
-4. **GitHub Actions secrets:** mirror every `.env` value into the public repo's Actions secrets
+3. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) once the keys above are final.
-5. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron.
-6. Build **Module 1** first: create tables → implement `db.py` → test against Supabase →
-   set up the Routine from `routines/ideation.md`. Then proceed module-by-module (rule 7):
-   db → ideation → approval → scriptwriter → voice → visuals → assembly → subtitles →
-   publish → wire `production.py`.
-7. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
+4. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron.
+5. Build the pipeline module-by-module (rule 7): **`db.py`** (tables ready) → ideation →
+   approval → scriptwriter → voice → visuals → assembly → subtitles → publish →
+   wire `production.py`.
+6. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
 
 ## Open decisions
 
@@ -71,6 +70,18 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-05 — Supabase database provisioned
+- Created all 5 tables (`ideas`, `scripts`, `posts`, `analytics`, `hook_performance`) on the
+  `ai-reel-factory` project (Postgres 17, Seoul) via the Supabase MCP, matching the
+  [docs/03](docs/03-setup-guide.md) §4 schema (FKs + identity PKs + array/timestamp defaults).
+- **RLS enabled** on every table (no policies → public/anon key denied; the server-side
+  `sb_secret_…` key bypasses RLS). Cleared an advisor WARN by revoking public EXECUTE on the
+  pre-existing `rls_auto_enable()` event-trigger (auto-RLS behavior unaffected).
+- Smoke-tested insert → read (defaults applied) → delete. Security advisor now clean
+  (only expected INFO `rls_enabled_no_policy`).
+- User completed `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN` in `.env` (for the Routine).
+- **Remaining:** swap `SUPABASE_KEY` to the `sb_secret_…` key (MCP only exposes publishable keys).
 
 ### 2026-06-05 — Branding + setup underway
 - Channel handle `@newsence` was taken → rebranded to **But It Matters** (`@butitmatters`,
