@@ -16,7 +16,7 @@ facts (YouTube 2026 Inauthentic Content policy — see playbook §1).
 
 ## Prompt skeleton (filled by scriptwriter)
 ```
-You are writing a ≤60s YouTube Short script for "Newsence" (impact news/info explainers).
+You are writing a ≤60s YouTube Short script for "But It Matters" (impact news/info explainers).
 IDEA: {title}
 HOOK: {hook}
 ANGLE (the original take to develop): {angle}

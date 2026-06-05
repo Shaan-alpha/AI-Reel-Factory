@@ -1,6 +1,6 @@
-# 🎬 AI Reel Factory — **Newsence**
+# 🎬 AI Reel Factory — **But It Matters**
 
-**Channel:** *Newsence* — daily impact news/info explainers (India + world).
+**Channel:** *But It Matters* — daily impact news/info explainers (India + world).
 
 A near-zero-cost autonomous system that generates ideas, writes scripts, narrates, assembles
 captioned vertical video, and publishes faceless reels — requiring **one human action per
@@ -56,9 +56,9 @@ day**: approving 4–5 ideas via a Telegram "Morning Digest."
 - [x] Documentation package imported into this repo
 - [x] Project rules written ([CLAUDE.md](CLAUDE.md))
 - [x] Niche locked: daily impact news/info explainers (India + world), soft/positive lean
-- [x] Channel name locked: **Newsence**
-- [ ] Verify `@newsence` handle is free on YouTube + Instagram + TikTok
-- [ ] Accounts & API keys created → [docs/03-setup-guide.md](docs/03-setup-guide.md)
+- [x] Channel name locked: **But It Matters** · YouTube handle **@butitmatters** secured
+- [x] Most API keys collected (Gemini · Groq · Supabase · Telegram · Pexels) — YouTube + Claude token pending
+- [ ] Accounts & API keys finished → [docs/03-setup-guide.md](docs/03-setup-guide.md) · see [STATUS.md](STATUS.md)
 - [ ] Phase-1 MVP build → [docs/02-implementation-plan.md](docs/02-implementation-plan.md)
 
 ---

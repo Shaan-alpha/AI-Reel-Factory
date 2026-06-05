@@ -1,12 +1,13 @@
-# STATUS — AI Reel Factory ("Newsence")
+# STATUS — AI Reel Factory ("But It Matters")
 
 > **Living progress log.** Every agent updates this before finishing a task
 > (rule #1 in [CLAUDE.md](CLAUDE.md)). Keep it short, current, and honest.
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.2 (pre-MVP — foundation + scaffolding)
+**Version:** 0.0.3 (pre-MVP — foundation + scaffolding + setup underway)
 **Last updated:** 2026-06-05
+**Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
 
@@ -20,9 +21,11 @@
 | `config.py` | ✅ Functional + tested (4/4 pass) |
 | Script templates (N, D, A, C) | ✅ Written |
 | Routine prompt (`routines/ideation.md`) | ✅ First draft |
-| Accounts & API keys | ⬜ Not started — see [docs/03-setup-guide.md](docs/03-setup-guide.md) |
-| `@newsence` handle check (YT/IG/TT) | ⬜ Not verified |
+| Accounts & API keys | 🟡 Gemini ✅ · Groq ✅ · Supabase ✅* · Telegram ✅ · Pexels ✅ · YouTube ⬜ · Claude token ⬜ |
+| YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
 | Pipeline logic (modules) | ⬜ Stubs only — not implemented |
+
+\* Supabase key in `.env` is the **publishable** key — swap to the `sb_secret_…` key for server-side writes (see Next actions).
 
 ## Module progress (Phase 1)
 
@@ -42,14 +45,20 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-1. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron.
-2. Work through [docs/03-setup-guide.md](docs/03-setup-guide.md) — create accounts, run
-   `claude setup-token`, collect API keys into a local `.env`.
-3. Verify `@newsence` handle is free on YouTube + Instagram + TikTok.
-4. Build **Module 1** first: create the 5 Supabase tables → implement `db.py` → test against
-   Supabase → set up the Anthropic Routine from `routines/ideation.md`.
-5. Then proceed module-by-module (rule 7): db → ideation → approval → scriptwriter → voice →
-   visuals → assembly → subtitles → publish → wire `production.py`.
+1. **YouTube creds:** create the Google Cloud OAuth *Desktop app* (enable YouTube Data API v3,
+   publish consent screen) → save `client_secret.json` → run `python tools/get_youtube_token.py`
+   → paste `YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN` into `.env`.
+2. **Supabase:** replace the publishable key with the `sb_secret_…` key (Project Settings →
+   API Keys); run the 5-table SQL from [docs/03-setup-guide.md](docs/03-setup-guide.md) §4.
+3. **Claude Routine auth:** run `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN` (for ideation).
+4. **GitHub Actions secrets:** mirror every `.env` value into the public repo's Actions secrets
+   (`gh secret set …`) once the keys above are final.
+5. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron.
+6. Build **Module 1** first: create tables → implement `db.py` → test against Supabase →
+   set up the Routine from `routines/ideation.md`. Then proceed module-by-module (rule 7):
+   db → ideation → approval → scriptwriter → voice → visuals → assembly → subtitles →
+   publish → wire `production.py`.
+7. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
 
 ## Open decisions
 
@@ -62,6 +71,17 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-05 — Branding + setup underway
+- Channel handle `@newsence` was taken → rebranded to **But It Matters** (`@butitmatters`,
+  secured on YouTube). Renamed across all repo files.
+- Collected keys into `.env` (gitignored): Gemini, Groq, Supabase (publishable — swap to
+  secret), Telegram bot `@ai_reel_factory_bot` (+ chat id, in `.env`), Pexels. Verified
+  Gemini + Pexels return HTTP 200.
+- Added [tools/get_youtube_token.py](tools/get_youtube_token.py) to generate the YouTube
+  refresh token (one-time OAuth), with step-by-step setup notes.
+- Repo home decision: use the **public** `Shaan-alpha/AI-Reel-Factory` repo (unlimited
+  Actions minutes). Secret-scanned tracked files before pushing — clean.
 
 ### 2026-06-05 — Phase-1 scaffolding
 - Created the repo skeleton from [docs/02-implementation-plan.md](docs/02-implementation-plan.md) §0:

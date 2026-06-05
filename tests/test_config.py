@@ -23,7 +23,7 @@ def test_require_raises_when_missing(monkeypatch):
 
 def test_get_falls_back_to_default():
     # CHANNEL_NAME has a built-in default even if the env var is unset.
-    assert config.get("CHANNEL_NAME") == os.environ.get("CHANNEL_NAME", "Newsence")
+    assert config.get("CHANNEL_NAME") == os.environ.get("CHANNEL_NAME", "But It Matters")
 
 
 def test_validate_reports_all_missing(monkeypatch):

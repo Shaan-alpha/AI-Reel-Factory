@@ -15,3 +15,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - Phase-1 scaffolding: `src/` module stubs with typed contracts, functional `config.py`
   (+ passing `tests/test_config.py`), `routines/ideation.md`, `templates/` (N/D/A/C),
   `.github/workflows/` skeletons, `requirements.txt`, `.env.example`, `.gitattributes`.
+- `tools/get_youtube_token.py` — one-time OAuth helper to generate the YouTube refresh token.
+
+### Changed
+- Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
+  `CHANNEL_NAME` default updated.

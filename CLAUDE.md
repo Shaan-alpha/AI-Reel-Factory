@@ -1,4 +1,4 @@
-# CLAUDE.md — AI Reel Factory ("Newsence")
+# CLAUDE.md — AI Reel Factory ("But It Matters")
 
 > **Read this first, every session.** It is the operating contract for any agent
 > (cold or warm) working in this repo. Rules here **override** default behavior.
@@ -9,7 +9,7 @@ A near-zero-cost **autonomous content system** that publishes **4–5 captioned
 YouTube Shorts per day**, requiring exactly **one human action daily**: approving
 4–5 ideas via a Telegram "Morning Digest."
 
-- **Channel:** *Newsence* — daily impact news/info explainers (India + world), soft/positive lean.
+- **Channel:** *But It Matters* — daily impact news/info explainers (India + world), soft/positive lean.
 - **Primary goal:** Reliably ship 4–5 captioned Shorts/day. **Consistency beats sophistication.**
 - **Cost target:** **$0/month** beyond the existing Claude Pro subscription.
 

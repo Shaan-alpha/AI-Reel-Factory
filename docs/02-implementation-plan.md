@@ -111,7 +111,7 @@ it before writing the Routine. Originality, sourcing, and the sensitivity filter
 - [ ] Caption includes **source links + AI-disclosure line** (see Module 9)
 - [ ] **SEO (where discoverability actually comes from):** generate a **keyword-rich title**
       front-loading the topic + intent (e.g. "ISRO's new mission, explained — why it matters")
-      and 3–5 search-style hashtags/tags. The channel name (*Newsence*) is only a minor signal;
+      and 3–5 search-style hashtags/tags. The channel name (*But It Matters*) is only a minor signal;
       titles/descriptions/tags carry the search. Patterns that match volume: "X explained",
       "what … means", "why … matters", + India/world + year where relevant.
 - [ ] Append `#Shorts` so YouTube classifies it correctly

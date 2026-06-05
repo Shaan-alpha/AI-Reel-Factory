@@ -42,7 +42,7 @@ REQUIRED = (
 
 # Settings with sensible defaults (see .env.example for meaning).
 DEFAULTS = {
-    "CHANNEL_NAME": "Newsence",
+    "CHANNEL_NAME": "But It Matters",
     "NICHE": "impact-news",
     "NICHE_LEAN": "soft-positive",
     "CONTENT_STYLE": "daily-impact-explainer",

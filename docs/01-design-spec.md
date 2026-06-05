@@ -3,7 +3,7 @@
 **Date:** 2026-05-31
 **Status:** Approved (design phase)
 **Owner:** Shaan Satsangi
-**Channel:** Newsence (daily impact news/info explainers, India + world)
+**Channel:** But It Matters (daily impact news/info explainers, India + world)
 
 ---
 

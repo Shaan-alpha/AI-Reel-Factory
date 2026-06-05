@@ -194,7 +194,7 @@ YOUTUBE_CLIENT_SECRET=
 YOUTUBE_REFRESH_TOKEN=
 
 # Config
-CHANNEL_NAME=Newsence     # brand name (also used in disclosure/branding)
+CHANNEL_NAME=But It Matters     # brand name (also used in disclosure/branding)
 NICHE=impact-news         # daily impact news/info explainers (India + world)
 NICHE_LEAN=soft-positive  # science/tech/economy/breakthroughs; avoid partisan/communal
 CONTENT_STYLE=daily-impact-explainer   # what happened -> why it matters -> impact
