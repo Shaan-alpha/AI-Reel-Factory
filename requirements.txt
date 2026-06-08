@@ -4,7 +4,8 @@
 # Left unpinned here until verified on the target Python so we don't guess versions.
 
 # LLM (scriptwriter + ideation fallback)
-google-generativeai      # Gemini API (primary scriptwriter, ideation fallback)
+google-genai             # Gemini API — current SDK (`from google import genai`).
+                         # NOTE: replaces google-generativeai, which was deprecated/EOL late 2025.
 groq                     # Groq failover
 
 # Database / state

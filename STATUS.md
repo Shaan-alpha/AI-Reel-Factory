@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.4 (pre-MVP — DB layer live + integration-tested)
-**Last updated:** 2026-06-05
+**Version:** 0.0.5 (pre-MVP — DB + LLM engine done; 11/11 tests pass)
+**Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -26,13 +26,14 @@
 | YouTube OAuth | ✅ Verified (upload+readonly); token bound to the correct **@butitmatters** channel |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
 | YouTube channel *title* | ✅ Renamed to **But It Matters** (matches handle + CHANNEL_NAME) |
-| Pipeline logic (modules) | 🟡 `db.py` done + tested; other modules still stubs |
+| Pipeline logic (modules) | 🟡 `db.py` + `llm.py` done + tested; other modules still stubs |
+| Local `.venv` | ✅ Created — pytest + supabase + google-genai + groq installed (suite green) |
 
 ## Module progress (Phase 1)
 
 | # | Module | Status |
 |---|--------|--------|
-| 1 | Ideation (Claude Routine + fallback) | 🟡 Routine prompt drafted; `ideation_fallback.py` stub |
+| 1 | Ideation (Claude Routine + fallback) | 🟡 Routine prompt drafted; `ideation_fallback.py` stub (llm.py ready) |
 | 2 | Approval (Telegram) | 🟡 Stub + contract |
 | 3 | Scriptwriter (Gemini/Groq) | 🟡 Stub + contract; templates ready |
 | 4 | Voice (edge-tts) | 🟡 Stub + contract |
@@ -40,16 +41,17 @@
 | 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
 | 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
 | 9 | Publish (YouTube) | 🟡 Stub + contract |
-| — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅ (integration-tested)** · llm 🟡 stub |
+| — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
 
 Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
-1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → **`llm.py`** → `approval.py`
-   → `ideation_fallback.py` → `scriptwriter.py` → `voice.py` → `visuals.py` → `assembly.py`
-   → `subtitles.py` → `publish_youtube.py` → wire `production.py`.
+1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
+   **`scriptwriter.py`** (next — has `llm.py` + templates ready) / `ideation_fallback.py`
+   → `approval.py` → `voice.py` → `visuals.py` → `assembly.py` → `subtitles.py`
+   → `publish_youtube.py` → wire `production.py`.
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) before the first cron run.
 3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
@@ -67,6 +69,20 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: llm.py implemented + tested; SDK + venv fixes
+- Implemented [src/llm.py](src/llm.py): `generate(prompt, *, json, max_tokens)` with a
+  **Gemini → Groq** failover chain (rule 11) — logs + fails over on error/quota/empty, raises
+  only when *every* provider fails. JSON mode for both; models overridable via `GEMINI_MODEL`/
+  `GROQ_MODEL` env. Defaults: `gemini-2.5-flash`, `llama-3.3-70b-versatile`.
+- Added [tests/test_llm.py](tests/test_llm.py) — 5 cases mocking both providers (no keys/network)
+  to prove the failover, empty-response handling, all-fail RuntimeError, and json/max_tokens
+  threading. **Suite: 11 passed** (4 config + 6 db live + 5 llm).
+- **SDK fix:** `requirements.txt` `google-generativeai` → **`google-genai`** (the old SDK was
+  deprecated/EOL late 2025; verified the current `from google import genai` API via Context7).
+- **Env:** created local `.venv` (first one) and installed pytest + supabase + google-genai +
+  groq so the suite collects and runs green from a clean checkout. (Lock file deferred until
+  the heavier video deps install — `pip freeze` now would be a partial/misleading lock.)
 
 ### 2026-06-06 — YouTube channel binding confirmed
 - First OAuth pass was bound to the wrong (main) channel + then revoked. Re-ran cleanly:

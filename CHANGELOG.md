@@ -20,7 +20,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **Module: `db.py`** — Supabase data layer (typed helpers + `find_post` idempotency check),
   with a live integration test (`tests/test_db_integration.py`). Supabase project provisioned:
   5 tables + RLS + secret-key access.
+- **Module: `llm.py`** — shared free-tier text engine with Gemini→Groq failover (rule 11),
+  JSON mode, and env-overridable models. Unit tests (`tests/test_llm.py`, 5 cases) mock both
+  providers to verify the failover chain with no keys/network.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
   `CHANNEL_NAME` default updated.
+- **`requirements.txt`:** `google-generativeai` → **`google-genai`** (the former was
+  deprecated/EOL in late 2025; `llm.py` uses the current `from google import genai` SDK).
