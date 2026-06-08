@@ -39,6 +39,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   FFmpeg binary (scale-to-fill/center-crop, ~6s cuts, concat, trim to narration length, mux
   audio, `+faststart`). Robust binary resolution (env → PATH → winget). Tests
   (`tests/test_assembly.py`, 7 cases) cover argv build + a **live end-to-end render**.
+- **Module: `subtitles.py`** — faster-whisper word-level timestamps → karaoke `.ass`
+  (one word at a time, gap-filled) → FFmpeg burn-in (large bold lower-third, pixel-baked).
+  Tests (`tests/test_subtitles.py`, 9 cases) mock whisper+ffmpeg + a **live** transcribe+burn.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.9 (pre-MVP — first full reel renders end-to-end; 43/43 tests pass)
+**Version:** 0.0.10 (pre-MVP — full captioned reel renders end-to-end; 52/52 tests pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -40,7 +40,7 @@
 | 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
-| 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
+| 7 | Subtitles (faster-whisper) | ✅ Done — word-by-word ASS burn; 9 tests (incl. live whisper+burn) |
 | 9 | Publish (YouTube) | 🟡 Stub + contract |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
 
@@ -51,10 +51,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
    `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → `assembly.py` ✅ →
-   **`subtitles.py`** (next — faster-whisper karaoke captions, ★ in MVP) →
-   `publish_youtube.py`; plus `ideation_fallback.py` + `approval.py` (front end);
-   → wire `production.py`.
+   `subtitles.py` ✅ → **`publish_youtube.py`** (next — videos.insert + AI-disclosure flag) →
+   `ideation_fallback.py` + `approval.py` (front end) → wire `production.py`.
    **NOTE:** FFmpeg 8.1.1 installed locally (winget `Gyan.FFmpeg`); CI must install it onto PATH.
+   faster-whisper downloads its model from HF on first run (CI needs network or a cache step).
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) before the first cron run.
 3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
@@ -72,6 +72,20 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: subtitles.py — FULL CAPTIONED REEL END-TO-END
+- Implemented [src/subtitles.py](src/subtitles.py): `burn_captions(video_path, audio_path,
+  out_path)` runs **faster-whisper** (CPU int8, env `WHISPER_MODEL`=`base`) for word-level
+  timestamps, builds a karaoke **.ass** (one word at a time, each held until the next starts
+  → no blank frames), and burns it with FFmpeg (`ass=` filter). Style: 112px bold white, thick
+  black outline, lower-third — readable on a phone (retention driver, ★ MVP).
+- Burn runs with `cwd` set to the subtitle's dir so the filter arg is a bare filename — dodges
+  Windows drive-colon/backslash escaping in libass. Reuses assembly's FFmpeg resolver.
+- Added [tests/test_subtitles.py](tests/test_subtitles.py): 8 unit cases (ts formatting,
+  gap-fill, ASS build, escape, orchestration with mocked whisper+ffmpeg, error paths) + 1
+  **live** test — real faster-whisper(tiny) + burn on a real reel. **Suite: 52 passed.**
+- ⭐ The entire production pipeline now runs: idea → script → narration → B-roll → 1080×1920
+  video → **burned-in word-synced captions**. Only publishing remains for a shippable Short.
 
 ### 2026-06-09 — Module: assembly.py — FIRST FULL REEL RENDERS END-TO-END
 - Implemented [src/assembly.py](src/assembly.py): `assemble(audio_path, clip_paths, out_path)`
