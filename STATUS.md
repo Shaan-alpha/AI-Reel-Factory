@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.11 (pre-MVP — all 9 pipeline modules done; 59 pass / 1 gated skip)
+**Version:** 0.0.12 (pre-MVP — ideation fallback done; 68 pass / 1 gated skip)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -34,7 +34,7 @@
 
 | # | Module | Status |
 |---|--------|--------|
-| 1 | Ideation (Claude Routine + fallback) | 🟡 Routine prompt drafted; `ideation_fallback.py` stub (llm.py ready) |
+| 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
 | 2 | Approval (Telegram) | 🟡 Stub + contract |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
 | 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
@@ -51,8 +51,8 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
    `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → `assembly.py` ✅ →
-   `subtitles.py` ✅ → `publish_youtube.py` ✅ → **`approval.py`** + **`ideation_fallback.py`**
-   (front end — next) → wire **`production.py`** orchestrator.
+   `subtitles.py` ✅ → `publish_youtube.py` ✅ → `ideation_fallback.py` ✅ →
+   **`approval.py`** (Telegram digest — next) → wire **`production.py`** orchestrator + cron.
    **NOTE:** FFmpeg 8.1.1 installed locally (winget `Gyan.FFmpeg`); CI must install it onto PATH.
    faster-whisper downloads its model from HF on first run (CI needs network or a cache step).
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
@@ -72,6 +72,18 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: ideation_fallback.py implemented + tested (live)
+- Implemented [src/ideation_fallback.py](src/ideation_fallback.py): `run_fallback_ideation()`
+  mirrors `routines/ideation.md`'s JSON contract via `llm.generate` (Gemini→Groq), then
+  validates/cleans: requires title+hook+angle, ≥`MIN_SOURCES` real http(s) URLs (drops the
+  rest), dedupes by title, clamps `est_score`∈[0,1], caps at 20, inserts as `pending`.
+  Idempotent (rule 12): no-op if pending ideas already exist. Thin-digest guard: raises rather
+  than ship <5 ideas. Honest caveat documented: no live web-search on the free path, so the
+  human approval is the source-quality net.
+- Added [tests/test_ideation_fallback.py](tests/test_ideation_fallback.py): 8 mocked cases +
+  1 **live** (real llm; DB mocked). Live run hit a Gemini 503 → **failed over to Groq** → 18
+  valid sourced ideas — the rule-11 fallback proven under a real upstream outage. **Suite: 68 passed.**
 
 ### 2026-06-09 — Module: publish_youtube.py — all 9 pipeline modules done
 - Implemented [src/publish_youtube.py](src/publish_youtube.py): `publish(video_path, metadata,

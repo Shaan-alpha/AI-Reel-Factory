@@ -46,6 +46,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   flag (`status.containsSyntheticMedia`) + `#Shorts`, records the post, deletes the local file,
   and is idempotent against cron retries. Tests (`tests/test_publish_youtube.py`, 8 cases) are
   fully mocked, with a gated live PRIVATE upload behind `YOUTUBE_LIVE_UPLOAD_TEST=1`.
+- **Module: `ideation_fallback.py`** — free-API (Gemini→Groq) ideation mirroring the Routine's
+  JSON contract, with source/field validation, dedup, score clamping, idempotency, and a
+  thin-digest guard. Tests (`tests/test_ideation_fallback.py`, 9 cases) mock llm/db + one live run.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
