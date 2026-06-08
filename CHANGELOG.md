@@ -23,6 +23,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **Module: `llm.py`** — shared free-tier text engine with Gemini→Groq failover (rule 11),
   JSON mode, and env-overridable models. Unit tests (`tests/test_llm.py`, 5 cases) mock both
   providers to verify the failover chain with no keys/network.
+- **Module: `scriptwriter.py`** — turns an approved idea into `{script_id, script_body,
+  caption, hashtags[]}` via Template N + `llm.py`, persisting to `scripts`. Enforces the
+  monetization gate in code (source links, AI-disclosure line, `#Shorts`). Unit tests
+  (`tests/test_scriptwriter.py`, 8 cases) mock `llm`/`db` — no keys/network/DB.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

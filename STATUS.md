@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.5 (pre-MVP — DB + LLM engine done; 11/11 tests pass)
+**Version:** 0.0.6 (pre-MVP — DB + LLM + scriptwriter done; 19/19 tests pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -35,7 +35,7 @@
 |---|--------|--------|
 | 1 | Ideation (Claude Routine + fallback) | 🟡 Routine prompt drafted; `ideation_fallback.py` stub (llm.py ready) |
 | 2 | Approval (Telegram) | 🟡 Stub + contract |
-| 3 | Scriptwriter (Gemini/Groq) | 🟡 Stub + contract; templates ready |
+| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
 | 4 | Voice (edge-tts) | 🟡 Stub + contract |
 | 5 | Visuals (Pexels/Pixabay) | 🟡 Stub + contract |
 | 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
@@ -49,9 +49,9 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
-   **`scriptwriter.py`** (next — has `llm.py` + templates ready) / `ideation_fallback.py`
-   → `approval.py` → `voice.py` → `visuals.py` → `assembly.py` → `subtitles.py`
-   → `publish_youtube.py` → wire `production.py`.
+   `scriptwriter.py` ✅ → **`voice.py`** (next — edge-tts, no new creds) → `visuals.py`
+   → `assembly.py` → `subtitles.py` → `publish_youtube.py`; plus `ideation_fallback.py`
+   + `approval.py` (front end); → wire `production.py`.
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) before the first cron run.
 3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
@@ -69,6 +69,19 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: scriptwriter.py implemented + tested
+- Implemented [src/scriptwriter.py](src/scriptwriter.py): `write_script(idea, template='N')`
+  builds the Template-N prompt, calls `llm.generate(json=True)`, parses the JSON (tolerant of
+  markdown fences), and persists via `db.insert_script`. Returns `{script_id, script_body,
+  caption, hashtags}`.
+- **Monetization-gate enforcement in code, not trusted to the LLM** (docs/08 §1-3): source
+  links + the AI-disclosure line are guaranteed in the caption, and `#Shorts` in the hashtags —
+  added only if missing (no duplication). Soft word-count warning (~130-150) per rule 14.
+- Only Template N is wired (rule 9 / YAGNI); D/A/C raise a loud `ValueError`.
+- Added [tests/test_scriptwriter.py](tests/test_scriptwriter.py) — 8 cases mocking `llm` + `db`
+  (no keys/network/DB): happy path, compliance enforcement, no-duplication, fenced JSON,
+  empty-body / unparseable / unsupported-template / missing-id errors. **Suite: 19 passed.**
 
 ### 2026-06-09 — Module: llm.py implemented + tested; SDK + venv fixes
 - Implemented [src/llm.py](src/llm.py): `generate(prompt, *, json, max_tokens)` with a
