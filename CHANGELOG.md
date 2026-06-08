@@ -31,6 +31,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   `(audio_path, duration_s)` measured from boundary events; deterministic filename for
   idempotent reruns; wrapped for a Phase-2 Kokoro fallback. Tests (`tests/test_voice.py`,
   6 cases) mock the stream + one live synthesis that skips offline.
+- **Module: `visuals.py`** — `extract_keywords` (LLM + heuristic fallback) and `fetch_broll`
+  (Pexels CC0 portrait B-roll → Pixabay backup), with variety interleaving, target-duration
+  coverage, and content-hashed idempotent caching. Tests (`tests/test_visuals.py`, 11 cases)
+  mock HTTP + one live Pexels search/download.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

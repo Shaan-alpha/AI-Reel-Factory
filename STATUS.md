@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.7 (pre-MVP — DB + LLM + scriptwriter + voice done; 25/25 tests pass)
+**Version:** 0.0.8 (pre-MVP — text+audio+visuals modules done; 36/36 tests pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -37,7 +37,7 @@
 | 2 | Approval (Telegram) | 🟡 Stub + contract |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
 | 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
-| 5 | Visuals (Pexels/Pixabay) | 🟡 Stub + contract |
+| 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
 | 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
 | 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
 | 9 | Publish (YouTube) | 🟡 Stub + contract |
@@ -49,9 +49,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
-   `scriptwriter.py` ✅ → `voice.py` ✅ → **`visuals.py`** (next — Pexels/Pixabay CC0 B-roll)
-   → `assembly.py` → `subtitles.py` → `publish_youtube.py`; plus `ideation_fallback.py`
-   + `approval.py` (front end); → wire `production.py`.
+   `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → **`assembly.py`** (next — FFmpeg
+   stitch to 1080×1920 .mp4) → `subtitles.py` → `publish_youtube.py`; plus
+   `ideation_fallback.py` + `approval.py` (front end); → wire `production.py`.
+   **NOTE:** `assembly.py` needs **FFmpeg** installed on the dev box + CI (system dep).
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) before the first cron run.
 3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
@@ -69,6 +70,18 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: visuals.py implemented + tested (live)
+- Implemented [src/visuals.py](src/visuals.py): `extract_keywords(script_body, n)` (LLM with a
+  frequency-heuristic fallback, rule 11) + `fetch_broll(keywords, target_seconds, out_dir)` →
+  CC0 vertical clips from **Pexels** (→ **Pixabay** backup). Picks portrait mp4 closest to
+  1080w, interleaves across keywords for variety, downloads until ~target coverage (8s/clip,
+  matching assembly cuts), content-hashed filenames for idempotent caching (rule 12).
+- **Verified the Pexels video endpoint** is `https://api.pexels.com/videos/search` (no `/v1`),
+  auth via bare `Authorization` header; live search returns true 1080×1920 portrait clips.
+- Added [tests/test_visuals.py](tests/test_visuals.py) — 10 mocked cases (keywords LLM+heuristic,
+  portrait selection, coverage/stop, idempotent cache, Pixabay fallback, error paths) + 1 **live**
+  Pexels search+download (skips offline). **Suite: 36 passed.**
 
 ### 2026-06-09 — Module: voice.py implemented + tested (live)
 - Implemented [src/voice.py](src/voice.py): `synthesize(script_body, out_dir) → (audio_path,
