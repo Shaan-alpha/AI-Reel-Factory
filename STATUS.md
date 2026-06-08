@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.10 (pre-MVP — full captioned reel renders end-to-end; 52/52 tests pass)
+**Version:** 0.0.11 (pre-MVP — all 9 pipeline modules done; 59 pass / 1 gated skip)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -41,7 +41,7 @@
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
 | 7 | Subtitles (faster-whisper) | ✅ Done — word-by-word ASS burn; 9 tests (incl. live whisper+burn) |
-| 9 | Publish (YouTube) | 🟡 Stub + contract |
+| 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
 
 Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
@@ -51,8 +51,8 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
    `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → `assembly.py` ✅ →
-   `subtitles.py` ✅ → **`publish_youtube.py`** (next — videos.insert + AI-disclosure flag) →
-   `ideation_fallback.py` + `approval.py` (front end) → wire `production.py`.
+   `subtitles.py` ✅ → `publish_youtube.py` ✅ → **`approval.py`** + **`ideation_fallback.py`**
+   (front end — next) → wire **`production.py`** orchestrator.
    **NOTE:** FFmpeg 8.1.1 installed locally (winget `Gyan.FFmpeg`); CI must install it onto PATH.
    faster-whisper downloads its model from HF on first run (CI needs network or a cache step).
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
@@ -72,6 +72,24 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: publish_youtube.py — all 9 pipeline modules done
+- Implemented [src/publish_youtube.py](src/publish_youtube.py): `publish(video_path, metadata,
+  script_id)` → resumable `videos.insert` via the .env refresh token, records `(video_id, url)`
+  to `posts`, then deletes the local .mp4 (rule 15). Idempotent: `db.find_post` short-circuits
+  a re-upload on cron retry (rule 12).
+- **AI disclosure wired the official way:** sets `status.containsSyntheticMedia=true` (the
+  Data-API "altered/synthetic content" flag, available since 2024-10) when `AI_DISCLOSURE=true`,
+  plus the description disclosure line from the scriptwriter (docs/08 §2). Forces `#Shorts`,
+  caps title at 100 chars, strips `#` from tags, `selfDeclaredMadeForKids=false`. Privacy/
+  category env-overridable (`YOUTUBE_PRIVACY` default `public`, `YOUTUBE_CATEGORY_ID` `25`).
+- Added [tests/test_publish_youtube.py](tests/test_publish_youtube.py): 7 mocked cases (body/
+  disclosure/#Shorts/title, idempotency, record→delete, validation) + 1 **gated** live PRIVATE
+  upload (runs only with `YOUTUBE_LIVE_UPLOAD_TEST=1`). **Suite: 59 passed, 1 skipped.**
+- Quota note: `videos.insert` ≈ 1600 units; default 10k/day → ~6 uploads, fits 4-5 Shorts/day.
+- ⭐ Every pipeline module (ideation-fallback + approval + orchestrator aside) is built & tested.
+  Remaining for MVP: `approval.py` (Telegram digest), `ideation_fallback.py`, and wiring
+  `production.py` + the GitHub Actions cron.
 
 ### 2026-06-09 — Module: subtitles.py — FULL CAPTIONED REEL END-TO-END
 - Implemented [src/subtitles.py](src/subtitles.py): `burn_captions(video_path, audio_path,

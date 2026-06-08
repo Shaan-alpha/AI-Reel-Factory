@@ -42,6 +42,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **Module: `subtitles.py`** — faster-whisper word-level timestamps → karaoke `.ass`
   (one word at a time, gap-filled) → FFmpeg burn-in (large bold lower-third, pixel-baked).
   Tests (`tests/test_subtitles.py`, 9 cases) mock whisper+ffmpeg + a **live** transcribe+burn.
+- **Module: `publish_youtube.py`** — resumable `videos.insert`, sets the official AI-disclosure
+  flag (`status.containsSyntheticMedia`) + `#Shorts`, records the post, deletes the local file,
+  and is idempotent against cron retries. Tests (`tests/test_publish_youtube.py`, 8 cases) are
+  fully mocked, with a gated live PRIVATE upload behind `YOUTUBE_LIVE_UPLOAD_TEST=1`.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
