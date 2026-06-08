@@ -27,6 +27,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   caption, hashtags[]}` via Template N + `llm.py`, persisting to `scripts`. Enforces the
   monetization gate in code (source links, AI-disclosure line, `#Shorts`). Unit tests
   (`tests/test_scriptwriter.py`, 8 cases) mock `llm`/`db` — no keys/network/DB.
+- **Module: `voice.py`** — edge-tts narration (`en-IN`, env-overridable), returns
+  `(audio_path, duration_s)` measured from boundary events; deterministic filename for
+  idempotent reruns; wrapped for a Phase-2 Kokoro fallback. Tests (`tests/test_voice.py`,
+  6 cases) mock the stream + one live synthesis that skips offline.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

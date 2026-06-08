@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.6 (pre-MVP — DB + LLM + scriptwriter done; 19/19 tests pass)
+**Version:** 0.0.7 (pre-MVP — DB + LLM + scriptwriter + voice done; 25/25 tests pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -36,7 +36,7 @@
 | 1 | Ideation (Claude Routine + fallback) | 🟡 Routine prompt drafted; `ideation_fallback.py` stub (llm.py ready) |
 | 2 | Approval (Telegram) | 🟡 Stub + contract |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
-| 4 | Voice (edge-tts) | 🟡 Stub + contract |
+| 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
 | 5 | Visuals (Pexels/Pixabay) | 🟡 Stub + contract |
 | 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
 | 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
@@ -49,7 +49,7 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
-   `scriptwriter.py` ✅ → **`voice.py`** (next — edge-tts, no new creds) → `visuals.py`
+   `scriptwriter.py` ✅ → `voice.py` ✅ → **`visuals.py`** (next — Pexels/Pixabay CC0 B-roll)
    → `assembly.py` → `subtitles.py` → `publish_youtube.py`; plus `ideation_fallback.py`
    + `approval.py` (front end); → wire `production.py`.
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
@@ -69,6 +69,18 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: voice.py implemented + tested (live)
+- Implemented [src/voice.py](src/voice.py): `synthesize(script_body, out_dir) → (audio_path,
+  duration_s)` via **edge-tts** (free, no key). Uses `stream_sync()` to write the MP3 and
+  measure duration from boundary events in one pass — no extra audio-probe dep. Deterministic
+  filename `narration_<sha1>.mp3` (idempotent reruns, rule 12). Voice/rate env-overridable
+  (`VOICE`=`en-IN-NeerjaNeural`, `VOICE_RATE`). edge-tts wrapped so Kokoro slots in (Phase 2).
+- **edge-tts 7.2.8 gotcha:** default boundary is `SentenceBoundary`, not `WordBoundary` (the
+  older docs). Duration now reads either type. Found via a real stream-type probe.
+- Added [tests/test_voice.py](tests/test_voice.py) — 5 mocked cases (write, duration math,
+  deterministic name, empty/no-audio/error wrapping) + 1 **live** edge-tts synth (skips
+  offline). Confirmed a real ~4s en-IN MP3 renders. **Suite: 25 passed.**
 
 ### 2026-06-09 — Module: scriptwriter.py implemented + tested
 - Implemented [src/scriptwriter.py](src/scriptwriter.py): `write_script(idea, template='N')`
