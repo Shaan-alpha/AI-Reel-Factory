@@ -18,7 +18,9 @@ python-telegram-bot      # Telegram bot + inline buttons
 edge-tts                 # narration (default; Kokoro is the Phase-2 fallback)
 
 # Video (Modules 6, 7)
-ffmpeg-python            # FFmpeg wrapper (assembly + caption burn-in)
+# NOTE: assembly.py calls the FFmpeg *binary* directly via subprocess (no Python wrapper) —
+# install FFmpeg as a system dep: `winget install Gyan.FFmpeg` (Windows) / apt/brew elsewhere;
+# on GitHub Actions, install it onto PATH in the workflow. (ffprobe ships with it.)
 faster-whisper           # word-level timestamps for karaoke captions
 
 # Publishing (Module 9)

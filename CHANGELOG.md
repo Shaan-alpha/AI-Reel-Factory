@@ -35,9 +35,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   (Pexels CC0 portrait B-roll → Pixabay backup), with variety interleaving, target-duration
   coverage, and content-hashed idempotent caching. Tests (`tests/test_visuals.py`, 11 cases)
   mock HTTP + one live Pexels search/download.
+- **Module: `assembly.py`** — composes B-roll + narration into a 1080×1920 H.264 reel via the
+  FFmpeg binary (scale-to-fill/center-crop, ~6s cuts, concat, trim to narration length, mux
+  audio, `+faststart`). Robust binary resolution (env → PATH → winget). Tests
+  (`tests/test_assembly.py`, 7 cases) cover argv build + a **live end-to-end render**.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
   `CHANNEL_NAME` default updated.
 - **`requirements.txt`:** `google-generativeai` → **`google-genai`** (the former was
   deprecated/EOL in late 2025; `llm.py` uses the current `from google import genai` SDK).
+- **`requirements.txt`:** dropped `ffmpeg-python` — `assembly.py` calls the FFmpeg binary
+  directly via subprocess (FFmpeg is a documented system dependency).

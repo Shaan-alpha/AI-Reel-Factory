@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.8 (pre-MVP — text+audio+visuals modules done; 36/36 tests pass)
+**Version:** 0.0.9 (pre-MVP — first full reel renders end-to-end; 43/43 tests pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -27,7 +27,8 @@
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
 | YouTube channel *title* | ✅ Renamed to **But It Matters** (matches handle + CHANNEL_NAME) |
 | Pipeline logic (modules) | 🟡 `db.py` + `llm.py` done + tested; other modules still stubs |
-| Local `.venv` | ✅ Created — pytest + supabase + google-genai + groq installed (suite green) |
+| Local `.venv` | ✅ pytest + supabase + google-genai + groq + edge-tts (suite green) |
+| FFmpeg (system dep) | ✅ Installed locally — winget `Gyan.FFmpeg` 8.1.1 (assembly module) |
 
 ## Module progress (Phase 1)
 
@@ -38,7 +39,7 @@
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
 | 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
-| 6 | Assembly (FFmpeg) | 🟡 Stub + contract |
+| 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
 | 7 | Subtitles (faster-whisper) | 🟡 Stub + contract |
 | 9 | Publish (YouTube) | 🟡 Stub + contract |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
@@ -49,10 +50,11 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 - ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
 1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
-   `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → **`assembly.py`** (next — FFmpeg
-   stitch to 1080×1920 .mp4) → `subtitles.py` → `publish_youtube.py`; plus
-   `ideation_fallback.py` + `approval.py` (front end); → wire `production.py`.
-   **NOTE:** `assembly.py` needs **FFmpeg** installed on the dev box + CI (system dep).
+   `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → `assembly.py` ✅ →
+   **`subtitles.py`** (next — faster-whisper karaoke captions, ★ in MVP) →
+   `publish_youtube.py`; plus `ideation_fallback.py` + `approval.py` (front end);
+   → wire `production.py`.
+   **NOTE:** FFmpeg 8.1.1 installed locally (winget `Gyan.FFmpeg`); CI must install it onto PATH.
 2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
    (`gh secret set …`) before the first cron run.
 3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
@@ -70,6 +72,22 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Module: assembly.py — FIRST FULL REEL RENDERS END-TO-END
+- Implemented [src/assembly.py](src/assembly.py): `assemble(audio_path, clip_paths, out_path)`
+  calls the **FFmpeg binary** directly (subprocess) — normalizes each clip (scale-to-fill +
+  center-crop to 1080×1920, ~6s slice), concats, trims to the narration length (via `ffprobe`),
+  and muxes the narration → H.264/yuv420p/AAC `.mp4`, `+faststart`. Clips are cycled to
+  over-cover the audio; cuts land ~every 6s (retention + copyright, docs/08 §3).
+- Binary resolution: `FFMPEG_BINARY`/`FFPROBE_BINARY` env → PATH → Windows winget fallback;
+  fails loud if absent (rule 14). **Installed FFmpeg 8.1.1** locally (`winget install Gyan.FFmpeg`).
+- **MVP scope** (rule 16): no Ken Burns / music bed yet — deferred until the core is proven;
+  easy follow-ups. `requirements.txt`: dropped `ffmpeg-python` (binary called directly).
+- Added [tests/test_assembly.py](tests/test_assembly.py): 6 unit cases (argv build, clip cycling,
+  input validation) + 1 **live end-to-end** test — edge-tts → Pexels → FFmpeg renders a real
+  1080×1920 reel with audio, length within 1.5s of narration. **Suite: 43 passed.**
+- ⭐ The text→audio→visuals→video chain is now complete: an approved idea produces a real,
+  watchable (un-captioned) Short. Next: burn in karaoke captions (`subtitles.py`).
 
 ### 2026-06-09 — Module: visuals.py implemented + tested (live)
 - Implemented [src/visuals.py](src/visuals.py): `extract_keywords(script_body, n)` (LLM with a
