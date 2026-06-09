@@ -37,7 +37,7 @@
 | 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
 | 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
-| 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
+| 4 | Voice | ✅ Done — **Kokoro (humanized) → edge-tts fallback**; 8 tests (incl. live Kokoro) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
 | 7 | Subtitles (faster-whisper) | ✅ Done — word-by-word ASS burn; 9 tests (incl. live whisper+burn) |
@@ -106,7 +106,14 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 - **AI disclosure — kept minimal (researched):** removing it risks forced labels + YPP suspension
   and does NOT improve reach, so we keep the synthetic-content FLAG and trimmed the description line
   to a discreet "AI-generated narration; stock visuals."
-- Still in progress (this session): background music bed + Kokoro humanized voice.
+- **Voice → Kokoro (humanized):** `voice.py` now defaults to **Kokoro** (open-weight, Apache-2.0,
+  CPU via kokoro-onnx int8 — far more natural) with **edge-tts fallback** (rule 11). int8 model
+  (~120 MB) auto-downloads once; voice/speed via `KOKORO_VOICE`(`af_heart`)/`KOKORO_SPEED`; engine
+  via `VOICE_ENGINE`. CI installs **espeak-ng**. Verified live locally (4.5s natural WAV).
+- **Background music:** `assembly.py` mixes a quiet looped track from `assets/music/` under the
+  narration (FFmpeg `amix`, ~12%). **Operator must drop 1–3 royalty-free tracks in `assets/music/`**
+  (see its README); empty → skipped. Verified the mix renders in real FFmpeg.
+- All four upgrade asks delivered. **105 tests pass.**
 
 ### 2026-06-09 — 🎉 FIRST CLOUD SHORTS PUBLISHED — Phase-1 MVP live (v0.1.0)
 - Ran the **entire system in the cloud, PC off**: make-short workflow → grounded/fallback

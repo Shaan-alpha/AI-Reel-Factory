@@ -16,7 +16,9 @@ supabase                 # Supabase Postgres client
 # no async framework. (python-telegram-bot intentionally not used: simpler for a polling script.)
 
 # Voice (Module 4)
-edge-tts                 # narration (default; Kokoro is the Phase-2 fallback)
+kokoro-onnx              # primary humanized TTS (Apache-2.0, CPU/ONNX; int8 model auto-downloads)
+edge-tts                 # narration fallback (free, no key)
+# NOTE: Kokoro needs espeak-ng on Linux for phonemization — install it in CI (apt-get).
 
 # Video (Modules 6, 7)
 # NOTE: assembly.py calls the FFmpeg *binary* directly via subprocess (no Python wrapper) —
