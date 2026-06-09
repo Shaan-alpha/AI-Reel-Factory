@@ -35,7 +35,7 @@
 | # | Module | Status |
 |---|--------|--------|
 | 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
-| 2 | Approval (Telegram) | ✅ Done — digest + buttons + cap via Bot HTTP API; 11 tests (live gated) |
+| 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
 | 4 | Voice (edge-tts) | ✅ Done — en-IN voice, duration measured; 6 tests (incl. live synth) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
@@ -82,6 +82,14 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Add Telegram "Pass" button; clean dry-run test rows
+- User confirmed the unlisted Short is live (title/description/disclosure all correct in Studio).
+- Added a third digest button **⏭️ Pass** (`p:{id}`) → new idea status **`passed`** (soft skip:
+  not posted, distinct from a hard `rejected`; drops out of the pending queue). Wired through
+  `db.IDEA_STATUSES`, `approval._keyboard`/`_apply_callback`/`_DECISION_TEXT` + tests. **86 passed.**
+- Cleaned the dry-run test rows from Supabase (post 12 / script 12 / idea 13) → DB back to empty.
+  (The unlisted test video remains on the channel for the user to delete in Studio if desired.)
 
 ### 2026-06-09 — First real end-to-end run (unlisted upload) ✅
 - Seeded one approved idea (id 13) and ran `production.run_production(limit=1)` with

@@ -7,9 +7,10 @@ Contract:
     depends on   : requests (Telegram Bot HTTP API), src.db, src.config.
 
 This is the ONLY human step (rule 16: keep the human approval layer). Each idea shows its
-source links so the operator can sanity-check (docs/08 §6). Soft-cap at APPROVAL_CAP (4-5)
-approvals to protect daily volume. We talk to the Bot HTTP API directly via requests — no
-async framework — which suits a short polling script run by the production workflow.
+source links so the operator can sanity-check (docs/08 §6). Three buttons: Approve (queue it),
+Reject (bad idea), Pass (soft skip — not posted, but not a hard reject). Soft-cap at
+APPROVAL_CAP (4-5) approvals to protect daily volume. We talk to the Bot HTTP API directly via
+requests — no async framework — which suits a short polling script run by the production workflow.
 
 Idempotency (rule 12): decisions write idea status; re-tapping just re-sets the same status.
 Security: callbacks from any chat other than TELEGRAM_CHAT_ID are ignored.
@@ -32,6 +33,7 @@ _TIMEOUT = 40  # HTTP timeout; must exceed the long-poll timeout below
 _DECISION_TEXT = {
     "approved": "✅ Approved",
     "rejected": "❌ Rejected",
+    "passed": "⏭️ Passed",
     "capped": "⚠️ Daily approval cap reached — not approved",
     "unknown": "Could not process that.",
 }
@@ -52,6 +54,7 @@ def _keyboard(idea_id: int) -> dict:
     return {"inline_keyboard": [[
         {"text": "✅ Approve", "callback_data": f"a:{idea_id}"},
         {"text": "❌ Reject", "callback_data": f"r:{idea_id}"},
+        {"text": "⏭️ Pass", "callback_data": f"p:{idea_id}"},
     ]]}
 
 
@@ -97,6 +100,9 @@ def _apply_callback(action: str, idea_id: int, cap: int) -> str:
     if action == "r":
         db.set_idea_status(idea_id, "rejected")
         return "rejected"
+    if action == "p":
+        db.set_idea_status(idea_id, "passed")
+        return "passed"
     return "unknown"
 
 

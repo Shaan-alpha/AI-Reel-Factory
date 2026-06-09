@@ -56,6 +56,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   drain approvals → produce approved queue), idempotent and fail-soft per reel with a Telegram
   failure alert and a daily cap. Tests (`tests/test_production.py`, 8 cases) mock every module.
   **Phase-1 pipeline is code-complete; only go-live steps remain.**
+- **Telegram digest: third "⏭️ Pass" button** → new `passed` idea status (a soft skip, distinct
+  from a hard reject; not posted). Wired through `db.IDEA_STATUSES` + `approval`.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

@@ -36,7 +36,7 @@ def test_format_idea_escapes_and_lists_sources():
 def test_keyboard_encodes_action_and_id():
     kb = approval._keyboard(7)
     btns = kb["inline_keyboard"][0]
-    assert btns[0]["callback_data"] == "a:7" and btns[1]["callback_data"] == "r:7"
+    assert [b["callback_data"] for b in btns] == ["a:7", "r:7", "p:7"]
 
 
 # --- send_digest -----------------------------------------------------------------------
@@ -77,6 +77,13 @@ def test_apply_callback_reject(monkeypatch):
     monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
     assert approval._apply_callback("r", 7, cap=5) == "rejected"
     assert statuses == [(7, "rejected")]
+
+
+def test_apply_callback_pass(monkeypatch):
+    statuses = []
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    assert approval._apply_callback("p", 7, cap=5) == "passed"
+    assert statuses == [(7, "passed")]  # soft skip, distinct from reject
 
 
 # --- callback handling -----------------------------------------------------------------

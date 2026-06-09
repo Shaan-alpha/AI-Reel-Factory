@@ -19,8 +19,9 @@ from supabase import Client, create_client
 from src import config
 
 # Allowed idea lifecycle states. 'produced' marks an approved idea whose reel has shipped,
-# so a cron retry skips it (rule 12: idempotent reruns).
-IDEA_STATUSES = ("pending", "approved", "rejected", "produced")
+# so a cron retry skips it (rule 12: idempotent reruns). 'passed' is a soft skip from the
+# Telegram digest — not posted, but distinct from a hard 'rejected'.
+IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced")
 
 
 @lru_cache(maxsize=1)
