@@ -94,6 +94,20 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-09 — Anthropic Routine created; delivery blocked (read-only git token)
+- Created routine **Daily ideation — But It Matters** (`trig_01APQkpZG1i14A5HJm8AsVDc`),
+  daily 08:00 IST (cron `30 2 * * *`), Sonnet 4.6, repo Shaan-alpha/AI-Reel-Factory, WebSearch
+  enabled. **It researches well** — a test run produced 17 sourced, sensitivity-filtered ideas.
+- **BLOCKER:** the routine's CCR GitHub token is **read-only** → `git push` returns 403; the
+  sandbox commit (`1e55f45`) is discarded with the sandbox. So the file-bridge (commit
+  `data/daily-ideas.json`) **cannot work from a cloud routine** — not a prompt issue, an infra limit.
+- **Open decision — how the routine delivers ideas:** (a) add a **Supabase MCP connector** at
+  claude.ai so the routine inserts ideas straight into the DB (then `make_on_demand` prefers
+  existing pending), or (b) keep the **Gemini/Groq fallback** for ideas and treat the routine as
+  deferred. The bridge code (`seed_ideas`/`load_routine_ideas` + `data/`) stays either way —
+  it's still used by the fallback and would work if a writable delivery is added later.
+- **Not blocked:** the on-demand make-short button works today via the Gemini/Groq fallback.
+
 ### 2026-06-09 — On-demand "Make a Short" (cloud button + Telegram confirm)
 - New operating model per user choice: trigger Shorts on demand, machine-off, with a Telegram
   confirm step. Added `.github/workflows/make-short.yml` (`workflow_dispatch`, inputs `ideas` /
