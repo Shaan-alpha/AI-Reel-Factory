@@ -108,7 +108,7 @@ def test_run_smoke(monkeypatch):
 def test_make_on_demand_flow(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
     calls = []
-    monkeypatch.setattr(production.ideation_fallback, "generate_ideas",
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
                         lambda n: calls.append(("gen", n)) or 3)
     monkeypatch.setattr(production.approval, "send_digest", lambda: calls.append(("digest",)))
     monkeypatch.setattr(production.approval, "process_responses",
@@ -128,7 +128,7 @@ def test_make_on_demand_flow(monkeypatch):
 
 def test_make_on_demand_nothing_approved(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
-    monkeypatch.setattr(production.ideation_fallback, "generate_ideas", lambda n: 3)
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n: 3)
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
     monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})

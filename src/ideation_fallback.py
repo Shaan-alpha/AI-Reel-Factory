@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from src import config, db, llm
 
@@ -25,6 +26,10 @@ log = logging.getLogger(__name__)
 
 _MAX_IDEAS = 20
 _MIN_IDEAS = 5  # below this, treat the run as failed rather than ship a thin digest
+
+# The daily Anthropic Routine (Claude + web research) commits its ideas here; the on-demand
+# flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
+_ROUTINE_IDEAS_FILE = "data/daily-ideas.json"
 
 _PROMPT = """You are the ideation engine for "But It Matters", a channel of daily impact \
 news/info explainers (India + world), soft/positive-impact lean. Generate {n} ideas a human \
@@ -149,3 +154,38 @@ def generate_ideas(n: int = 3) -> int:
     inserted = db.insert_ideas(clean)
     log.info("ideation: generated %d on-demand idea(s).", len(inserted))
     return len(inserted)
+
+
+def load_routine_ideas() -> list[dict]:
+    """Load + validate ideas the daily Anthropic Routine committed to the repo. [] if none."""
+    if not os.path.exists(_ROUTINE_IDEAS_FILE):
+        return []
+    try:
+        with open(_ROUTINE_IDEAS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("ideation: could not read %s (%s)", _ROUTINE_IDEAS_FILE, e)
+        return []
+    ideas = raw.get("ideas", []) if isinstance(raw, dict) else raw
+    return _validate_and_clean(ideas if isinstance(ideas, list) else [])
+
+
+def seed_ideas(n: int = 3) -> int:
+    """Seed ~n fresh 'pending' ideas for the on-demand digest. Return the count inserted.
+
+    Prefers the daily Routine's web-researched ideas (data/daily-ideas.json); falls back to
+    the Gemini/Groq generator when that file is absent/empty. De-duplicates against ideas
+    already in the table so repeated triggers don't re-propose the same ones.
+    """
+    n = max(1, n)
+    routine = load_routine_ideas()
+    pool = routine if routine else _produce_ideas(max(n * 2, 4))
+    source = "routine file" if routine else "gemini/groq fallback"
+
+    seen = db.existing_idea_titles()
+    fresh = sorted((i for i in pool if i["title"].lower() not in seen),
+                   key=lambda d: -d["est_score"])[:n]
+    if not fresh:
+        raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")
+    log.info("ideation: seeding %d idea(s) from %s.", len(fresh), source)
+    return len(db.insert_ideas(fresh))

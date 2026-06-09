@@ -156,7 +156,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     """On-demand 'make a Short': propose fresh ideas to Telegram, wait for taps, produce the
     approved ones, and reply with the links. Triggered by the make-short workflow button."""
     config.validate()
-    n = ideation_fallback.generate_ideas(num_ideas)
+    n = ideation_fallback.seed_ideas(num_ideas)  # prefers the daily Routine's ideas
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
     approval.send_digest()

@@ -62,6 +62,12 @@ def get_approved_ideas() -> list[dict]:
     )
 
 
+def existing_idea_titles() -> set[str]:
+    """Lowercased titles of every idea already in the table (any status) — for dedup."""
+    rows = get_client().table("ideas").select("title").execute().data
+    return {r["title"].lower() for r in rows if r.get("title")}
+
+
 # --- scripts / posts ------------------------------------------------------------------
 
 def insert_script(idea_id: int, template: str, body: str, caption: str,

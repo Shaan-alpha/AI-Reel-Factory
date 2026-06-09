@@ -30,13 +30,17 @@ director will approve 4–5 of via Telegram, then a pipeline turns into captione
    graphic violence/tragedy exploitation, medical/financial advice stated as fact.
 4. **Capture ≥ `MIN_SOURCES` (2) reputable, independent source URLs per idea.** If a story
    can't clear the two-source bar, skip it — better no reel than a wrong one.
-5. Read the top performers from the `hook_performance` table and produce **fresh variants** of
-   what's working (do not copy verbatim).
-6. Generate **15–20 ideas**, each ensuring a clear "why it matters to you / India / the world"
+5. Generate **15–20 ideas**, each ensuring a clear "why it matters to you / India / the world"
    angle that enables original analysis (not a summary).
-7. **Insert each idea as a row** into the Supabase `ideas` table with `status = 'pending'`.
+6. **Write the ideas to [`data/daily-ideas.json`](../data/daily-ideas.json)** in the repo
+   (overwrite it) using the schema below, then **commit and push to `main`**
+   (`feat(ideas): daily ideation YYYY-MM-DD`). The pipeline ingests this file into Supabase from
+   GitHub Actions (which holds the DB key) — the Routine itself must **never** touch Supabase or
+   any secret (rule 4/5).
 
-## Output contract (per idea)
+## Output contract — `data/daily-ideas.json`
+
+Overwrite the file with one JSON object: `{"ideas": [ … ]}`, each idea:
 
 ```json
 {
@@ -59,4 +63,5 @@ director will approve 4–5 of via Telegram, then a pipeline turns into captione
 
 ## Done when
 
-15–20 valid rows exist in `ideas` for today with `status='pending'`, each with ≥2 sources.
+`data/daily-ideas.json` holds 15–20 valid ideas for today (each with ≥2 real sources) and the
+change is **committed and pushed to `main`**. The pipeline ingests it on the next make-short run.

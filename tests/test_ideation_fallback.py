@@ -116,6 +116,49 @@ def test_generate_ideas_raises_when_none_valid(monkeypatch):
         fb.generate_ideas(3)
 
 
+def test_load_routine_ideas_reads_file(monkeypatch, tmp_path):
+    f = tmp_path / "daily-ideas.json"
+    f.write_text(json.dumps({"ideas": [_idea("Routine A"), _idea("Routine B")]}), encoding="utf-8")
+    monkeypatch.setattr(fb, "_ROUTINE_IDEAS_FILE", str(f))
+    out = fb.load_routine_ideas()
+    assert {i["title"] for i in out} == {"Routine A", "Routine B"}
+
+
+def test_load_routine_ideas_absent_or_bad(monkeypatch, tmp_path):
+    monkeypatch.setattr(fb, "_ROUTINE_IDEAS_FILE", str(tmp_path / "nope.json"))
+    assert fb.load_routine_ideas() == []
+    bad = tmp_path / "bad.json"; bad.write_text("not json", encoding="utf-8")
+    monkeypatch.setattr(fb, "_ROUTINE_IDEAS_FILE", str(bad))
+    assert fb.load_routine_ideas() == []
+
+
+def test_seed_ideas_prefers_routine_file(monkeypatch):
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [_idea(f"R{i}", est_score=0.1 * i) for i in range(6)])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda t: pytest.fail("must not call LLM when routine file present"))
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    captured = {}
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
+    assert fb.seed_ideas(3) == 3
+    assert [r["est_score"] for r in captured["rows"]] == pytest.approx([0.5, 0.4, 0.3])
+
+
+def test_seed_ideas_falls_back_to_llm(monkeypatch):
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda t: [_idea(f"G{i}") for i in range(5)])
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
+    assert fb.seed_ideas(2) == 2
+
+
+def test_seed_ideas_dedupes_against_db(monkeypatch):
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [_idea("Dup"), _idea("New1"), _idea("New2")])
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: {"dup"})
+    captured = {}
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
+    fb.seed_ideas(5)
+    assert "Dup" not in [r["title"] for r in captured["rows"]]
+
+
 def test_live_real_llm_ideation(monkeypatch):
     """Real Gemini/Groq generates parseable, well-sourced ideas (DB mocked). Skips offline."""
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])
