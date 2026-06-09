@@ -114,6 +114,11 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
   narration (FFmpeg `amix`, ~12%). **Operator must drop 1–3 royalty-free tracks in `assets/music/`**
   (see its README); empty → skipped. Verified the mix renders in real FFmpeg.
 - All four upgrade asks delivered. **105 tests pass.**
+- **Operator follow-ups (same day):** added 5 CC0 cinematic/suspense beds to `assets/music/`
+  (gitignore exception so they're committed); BGM default lowered to **0.10** (narration stays
+  clear). **Narration tone switched to sarcastic/witty/roasting** (scriptwriter Template N) —
+  facts stay accurate; hard limits keep it punching at situations/irony, not personal attacks
+  (harassment = demonetization), per operator request.
 
 ### 2026-06-09 — 🎉 FIRST CLOUD SHORTS PUBLISHED — Phase-1 MVP live (v0.1.0)
 - Ran the **entire system in the cloud, PC off**: make-short workflow → grounded/fallback

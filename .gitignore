@@ -21,6 +21,12 @@ __pycache__/
 tmp/
 output/
 broll/
+# …but DO commit the curated background-music beds (intentional repo assets, not renders)
+!assets/music/
+!assets/music/*.mp3
+!assets/music/*.wav
+!assets/music/*.m4a
+!assets/music/*.ogg
 
 # OS / editor
 .DS_Store

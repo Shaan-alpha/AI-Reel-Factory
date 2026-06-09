@@ -117,8 +117,9 @@ def _build_cmd(ordered: list[str], audio_path: str, duration: float, out_path: s
     cmd += ["-i", audio_path]  # narration = input n
 
     if music_path:
-        # music looped to cover narration, mixed quietly under it (faint bed, docs/08 §7)
-        vol = config.get("MUSIC_VOLUME", "0.12")
+        # music looped to cover narration, mixed quietly UNDER it so speech stays clear.
+        # Narration stays at full volume; music sits low (env MUSIC_VOLUME, default 0.10).
+        vol = config.get("MUSIC_VOLUME", "0.10")
         cmd += ["-stream_loop", "-1", "-i", music_path]  # music = input n+1
         parts.append(f"[{n + 1}:a]volume={vol}[abg]")
         parts.append(f"[{n}:a][abg]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]")

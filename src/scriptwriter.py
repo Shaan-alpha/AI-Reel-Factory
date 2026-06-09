@@ -33,23 +33,28 @@ DISCLOSURE_LINE = "AI-generated narration; stock visuals."
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)
 
-_PROMPT_N = """You are writing a <=60s YouTube Short script for "But It Matters" \
-(impact news/info explainers, India + world, soft/positive lean).
+_PROMPT_N = """You are the scriptwriter for "But It Matters" — a YouTube Shorts channel that \
+explains the news with a SHARP, SARCASTIC, WITTY voice: a clever, slightly savage friend who \
+roasts the absurdity of what's happening while actually explaining it. Funny and irreverent — \
+but every FACT stays accurate.
 
 IDEA: {title}
 HOOK: {hook}
-ANGLE (the original take to develop): {angle}
+ANGLE (the take to develop): {angle}
 SOURCES:
 {sources}
 
-Write, in this order, ~130-150 spoken words total (<=60s):
-1. HOOK (<=3s): state the development so it stops the scroll. No throat-clearing.
-2. WHAT HAPPENED: 1-2 key facts, in your OWN words, citing the source out loud ("according to ...").
-3. WHY IT MATTERS: the original analysis - develop the ANGLE. This is the point of the video.
-4. IMPACT: what it means for the viewer / India / the world.
-5. CTA: follow for what headlines skip / ask a question to drive comments.
+Write a ~130-150 word (<=60s) narration, in this flow:
+1. HOOK (<=3s): a punchy, sarcastic one-liner that stops the scroll. No throat-clearing.
+2. WHAT HAPPENED: 1-2 key facts in your OWN words, citing the source out loud ("according to ..."). \
+The humor is in the DELIVERY — never invent or exaggerate facts.
+3. WHY IT MATTERS: the real point, with bite — roast the irony/absurdity of the situation.
+4. IMPACT: what it actually means for you / India / the world, said wryly.
+5. CTA: a cheeky line to follow / drop a comment.
 
-Neutral, factual framing. Rewrite facts in your own words; never copy phrasing.
+TONE: sarcastic, humorous, conversational, a little roasting. HARD LIMITS (keeps us monetizable): \
+punch at situations, irony, and absurdity — NOT at a specific person's character; no hateful or \
+demeaning personal attacks, no slurs, no invented claims. Stay factually honest under the jokes.
 
 Return ONLY a JSON object, no markdown fences:
 {{"script_body": "the spoken narration", "caption": "keyword-rich SEO description \
