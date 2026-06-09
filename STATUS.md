@@ -62,7 +62,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
    and our token lacks the `youtube` (write) scope to re-confirm — so confirm it shows "Yes"
    in Studio. (The description disclosure line is present regardless.) Test artifacts to clean:
    delete that unlisted video in Studio; DB has test idea 13 / post 12.
-2. **Mirror `.env` → GitHub Actions secrets** (`gh secret set …`) before any cron run (rule 5).
+2. ✅ **GitHub Actions secrets set (2026-06-09):** 10 secrets mirrored to
+   `Shaan-alpha/AI-Reel-Factory` via `gh secret set` (values piped via stdin, never printed).
+   `CLAUDE_CODE_OAUTH_TOKEN` deliberately excluded (rule 4). `PIXABAY_API_KEY` not set (optional
+   backup, empty locally) — workflow reference resolves to empty, Pixabay fallback just no-ops.
 3. **Create the ideation runner:** an **Anthropic Routine** from `routines/ideation.md`
    (recommended) so ideas land in `ideas` each morning; the `ideation_fallback` covers misses.
 4. **Enable the crons:** uncomment `schedule:` in `.github/workflows/production.yml` (UTC,
@@ -82,6 +85,13 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — GitHub Actions secrets mirrored (go-live step 2 ✅)
+- Set 10 Actions secrets on `Shaan-alpha/AI-Reel-Factory` (GEMINI/GROQ/SUPABASE_URL+KEY/
+  TELEGRAM_BOT_TOKEN+CHAT_ID/PEXELS/YOUTUBE_CLIENT_ID+SECRET+REFRESH_TOKEN) via `gh secret set`,
+  values piped through stdin (never on argv, never printed). `CLAUDE_CODE_OAUTH_TOKEN` excluded
+  by design (rule 4); `PIXABAY_API_KEY` left unset (optional). Verified via `gh secret list`.
+- Remaining go-live: ideation Routine, enable crons, first unattended day → tag v0.1.0.
 
 ### 2026-06-09 — Add Telegram "Pass" button; clean dry-run test rows
 - User confirmed the unlisted Short is live (title/description/disclosure all correct in Studio).
