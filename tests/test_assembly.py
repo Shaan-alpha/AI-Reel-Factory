@@ -31,6 +31,7 @@ def test_build_cmd_structure(monkeypatch):
     cmd = assembly._build_cmd(["c0.mp4", "c1.mp4"], "narr.mp3", 9.0, "out.mp4")
     # two video inputs + one audio input
     assert cmd.count("-i") == 3
+    assert "2:a" in cmd  # narration mapped directly when no music
     assert cmd[cmd.index("narr.mp3") - 1] == "-i"
     # audio is the last input → mapped as stream index 2
     assert "-map" in cmd and "2:a" in cmd
@@ -41,6 +42,36 @@ def test_build_cmd_structure(monkeypatch):
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "concat=n=2:v=1:a=0" in fc
     assert f"scale={assembly._W}:{assembly._H}" in fc
+
+
+def test_build_cmd_mixes_music_when_present(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    cmd = assembly._build_cmd(["c0.mp4"], "narr.mp3", 9.0, "out.mp4", music_path="bed.mp3")
+    assert "-stream_loop" in cmd and "bed.mp3" in cmd
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "amix=inputs=2:duration=first" in fc
+    assert "[aout]" in cmd  # mixed audio is mapped
+
+
+def test_pick_music_none_when_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv("MUSIC_DIR", str(tmp_path))  # empty dir
+    assert assembly._pick_music("narr.mp3") is None
+
+
+def test_pick_music_deterministic(monkeypatch, tmp_path):
+    for name in ("a.mp3", "b.mp3", "c.mp3"):
+        (tmp_path / name).write_bytes(b"x")
+    monkeypatch.setenv("MUSIC_DIR", str(tmp_path))
+    p1 = assembly._pick_music("/some/narration.mp3")
+    p2 = assembly._pick_music("/some/narration.mp3")
+    assert p1 == p2 and os.path.basename(p1) in {"a.mp3", "b.mp3", "c.mp3"}
+
+
+def test_pick_music_disabled(monkeypatch, tmp_path):
+    (tmp_path / "a.mp3").write_bytes(b"x")
+    monkeypatch.setenv("MUSIC_DIR", str(tmp_path))
+    monkeypatch.setenv("ENABLE_MUSIC", "false")
+    assert assembly._pick_music("narr.mp3") is None
 
 
 # --- input validation (no ffmpeg) ------------------------------------------------------

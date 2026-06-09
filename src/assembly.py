@@ -20,6 +20,7 @@ winget fallback. On GitHub Actions (UTC) FFmpeg is installed onto PATH in the wo
 from __future__ import annotations
 
 import glob
+import hashlib
 import logging
 import math
 import os
@@ -34,6 +35,24 @@ _W, _H = 1080, 1920     # 9:16 Short
 _FPS = 30
 _SLICE = 6.0            # seconds per clip cut (within the 5-8s target)
 _MAX_SLICES = 40        # safety cap on filter-graph size
+_MUSIC_EXTS = (".mp3", ".m4a", ".wav", ".ogg", ".aac")
+
+
+def _pick_music(audio_path: str) -> str | None:
+    """Pick a royalty-free track from MUSIC_DIR (default assets/music) to bed under narration.
+
+    Returns None if the dir is missing/empty (BGM is optional). Deterministic per reel (hashes
+    the narration path) so reruns reuse the same track, but different reels vary."""
+    if str(config.get("ENABLE_MUSIC", "true")).lower() != "true":
+        return None
+    music_dir = config.get("MUSIC_DIR", "assets/music")
+    if not os.path.isdir(music_dir):
+        return None
+    tracks = sorted(f for f in os.listdir(music_dir) if f.lower().endswith(_MUSIC_EXTS))
+    if not tracks:
+        return None
+    idx = int(hashlib.sha1(audio_path.encode("utf-8")).hexdigest(), 16) % len(tracks)
+    return os.path.join(music_dir, tracks[idx])
 
 
 def _resolve_binary(name: str, env_key: str) -> str:
@@ -77,8 +96,9 @@ def _ordered_clips(clip_paths: list[str], duration: float) -> list[str]:
     return [clip_paths[i % len(clip_paths)] for i in range(n)]
 
 
-def _build_cmd(ordered: list[str], audio_path: str, duration: float, out_path: str) -> list[str]:
-    """Construct the ffmpeg argv: normalize → concat → trim → mux narration."""
+def _build_cmd(ordered: list[str], audio_path: str, duration: float, out_path: str,
+               music_path: str | None = None) -> list[str]:
+    """Construct the ffmpeg argv: normalize → concat → trim → mux narration (+ optional music bed)."""
     n = len(ordered)
     parts = []
     for k in range(n):
@@ -90,15 +110,25 @@ def _build_cmd(ordered: list[str], audio_path: str, duration: float, out_path: s
     concat_in = "".join(f"[v{k}]" for k in range(n))
     parts.append(f"{concat_in}concat=n={n}:v=1:a=0[vc]")
     parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS[v]")
-    filter_complex = ";".join(parts)
 
     cmd = [_ffmpeg(), "-y"]
     for clip in ordered:
         cmd += ["-i", clip]
-    cmd += ["-i", audio_path]
+    cmd += ["-i", audio_path]  # narration = input n
+
+    if music_path:
+        # music looped to cover narration, mixed quietly under it (faint bed, docs/08 §7)
+        vol = config.get("MUSIC_VOLUME", "0.12")
+        cmd += ["-stream_loop", "-1", "-i", music_path]  # music = input n+1
+        parts.append(f"[{n + 1}:a]volume={vol}[abg]")
+        parts.append(f"[{n}:a][abg]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]")
+        audio_map = "[aout]"
+    else:
+        audio_map = f"{n}:a"
+
     cmd += [
-        "-filter_complex", filter_complex,
-        "-map", "[v]", "-map", f"{n}:a",
+        "-filter_complex", ";".join(parts),
+        "-map", "[v]", "-map", audio_map,
         "-t", f"{duration:.3f}",
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
@@ -121,10 +151,11 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     duration = probe_duration(audio_path)
     ordered = _ordered_clips(clip_paths, duration)
-    cmd = _build_cmd(ordered, audio_path, duration, out_path)
+    music = _pick_music(os.path.abspath(audio_path))
+    cmd = _build_cmd(ordered, audio_path, duration, out_path, music_path=music)
 
-    log.info("assembly: rendering %s (%.1fs, %d slices from %d clips)",
-             out_path, duration, len(ordered), len(clip_paths))
+    log.info("assembly: rendering %s (%.1fs, %d slices from %d clips, music=%s)",
+             out_path, duration, len(ordered), len(clip_paths), os.path.basename(music) if music else "none")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"assembly: ffmpeg failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
