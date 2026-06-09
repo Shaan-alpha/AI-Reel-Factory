@@ -94,6 +94,20 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-09 — Upgrades from deep research: trending topics + disclosure trim
+- Deep-research workflow hit a session limit, but direct verified searches answered all 4 asks.
+- **Trending (new `src/trends.py`):** pulls live Google-Trends-India RSS (no key/quota) and seeds
+  the ideation prompt → timely, current ideas instead of generic evergreen. Best-effort (rule 11).
+- **Topic policy — operator override:** user chose to INCLUDE politics/government/court topics
+  (against the original soft/positive playbook). Loosened the ideation filter to allow them
+  **only with strictly neutral, well-sourced framing**; kept the hard guards (communal/religious
+  incitement, violence, unverified rumors-as-fact, deepfakes, tragedy exploitation, med/financial
+  advice). ⚠️ Higher demonetization/strike risk acknowledged by operator.
+- **AI disclosure — kept minimal (researched):** removing it risks forced labels + YPP suspension
+  and does NOT improve reach, so we keep the synthetic-content FLAG and trimmed the description line
+  to a discreet "AI-generated narration; stock visuals."
+- Still in progress (this session): background music bed + Kokoro humanized voice.
+
 ### 2026-06-09 — 🎉 FIRST CLOUD SHORTS PUBLISHED — Phase-1 MVP live (v0.1.0)
 - Ran the **entire system in the cloud, PC off**: make-short workflow → grounded/fallback
   ideation → Telegram digest → user approved 2 / passed 1 → script → voice → visuals → assemble

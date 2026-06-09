@@ -27,6 +27,7 @@ def _idea(title, n_sources=2, **over):
 
 def _patch(monkeypatch, ideas, pending=None):
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: pending or [])
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])  # no network in tests
     # _produce_ideas tries grounded research first; mock that as the primary path.
     monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": ideas}))
     captured = {}
@@ -127,6 +128,7 @@ def test_parse_ideas_tolerates_raw_control_chars():
 
 
 def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: ["NASDAQ", "ISRO"])
     def _boom(*a, **k):
         raise RuntimeError("grounding unavailable")
     monkeypatch.setattr(fb.llm, "generate_grounded", _boom)
@@ -136,6 +138,7 @@ def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
 
 
 def test_produce_ideas_falls_back_on_malformed_grounded_json(monkeypatch):
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
     # grounded returns broken JSON (missing comma / truncated) → must fall back, not crash
     monkeypatch.setattr(fb.llm, "generate_grounded",
                         lambda *a, **k: '{"ideas": [{"title": "Broken" "hook": "x"}]')

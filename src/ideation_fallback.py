@@ -20,7 +20,7 @@ import json
 import logging
 import os
 
-from src import config, db, llm
+from src import config, db, llm, trends
 
 log = logging.getLogger(__name__)
 
@@ -31,21 +31,27 @@ _MIN_IDEAS = 5  # below this, treat the run as failed rather than ship a thin di
 # flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
 _ROUTINE_IDEAS_FILE = "data/daily-ideas.json"
 
-_PROMPT = """You are the ideation engine for "But It Matters", a channel of daily impact \
-news/info explainers (India + world), soft/positive-impact lean. Generate {n} ideas a human \
-will approve 4-5 of, each enabling ORIGINAL "why it matters" analysis (not a summary).
+_PROMPT = """You are the ideation engine for "But It Matters", a channel of daily news/info \
+explainers (India + world). Generate {n} TIMELY, TRENDING ideas a human will approve 4-5 of, \
+each enabling ORIGINAL "why it matters" analysis (not a bare summary).
 
-Lean into: science & space (ISRO, missions), technology & AI, economy & business, health & \
-medicine, climate & energy, big constructive policy/law, neutral global affairs, India \
-growth/infrastructure, world-firsts & breakthroughs.
+TODAY'S TRENDING IN INDIA (prefer ideas tied to these where a solid, factual explainer fits):
+{trending}
 
-EXCLUDE (sensitivity filter): active communal/religious flashpoints, inflammatory partisan \
-conflict, unverified election claims, deepfake/impersonation, graphic violence/tragedy \
-exploitation, medical/financial advice stated as fact.
+Cover what people are searching for NOW across: current affairs, government & policy, major \
+court/legal rulings, economy & business, science & space (ISRO), technology & AI, health, \
+climate & energy, India infrastructure, sports, and notable world events. Be CURRENT, not generic.
 
-Rules: neutral factual framing; one development per idea; keyword-rich search-style titles \
-("X explained", "what ... means", "why ... matters", + India/world/year). Provide >= {min_src} \
-reputable, independent source URLs per idea from real outlets; do not invent URLs.
+FRAMING RULES (monetization safety): strictly NEUTRAL and factual — explain what happened and \
+why it matters; never take political sides or editorialize. Politics, government actions, and \
+court rulings ARE allowed when covered neutrally and well-sourced. EXCLUDE only: communal/ \
+religious incitement or hate; anything that could inflame violence; unverified rumors/claims \
+stated as fact; deepfakes/impersonation; graphic tragedy exploitation; medical/financial advice \
+stated as fact.
+
+Each idea: keyword-rich search-style title ("X explained", "what ... means", "why ... matters", \
++ India/world/year); >= {min_src} reputable, independent source URLs from real outlets; never \
+invent URLs.
 
 Return ONLY JSON:
 {{"ideas": [{{"niche": "impact-news", "title": "...", "hook": "the first 3 seconds", \
@@ -119,7 +125,10 @@ def _produce_ideas(target: int) -> list[dict]:
     Researches the live web via Gemini Google Search grounding for current, well-sourced
     ideas; falls back to ungrounded generation (Gemini→Groq) if grounding is unavailable.
     """
-    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"))
+    topics = trends.fetch_trending(15)
+    trending_block = "\n".join(f"- {t}" for t in topics) or \
+        "- (live trends unavailable — use your own knowledge of today's biggest stories)"
+    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"), trending=trending_block)
     # Try web-grounded research first, INCLUDING the parse — grounded JSON is sometimes
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     try:

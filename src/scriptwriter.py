@@ -24,10 +24,11 @@ from src import db, llm
 
 log = logging.getLogger(__name__)
 
-# Required description disclosure (docs/08 §2). Kept verbatim so Module 9 can also assert it.
-DISCLOSURE_LINE = (
-    "Narration is AI-generated; visuals are stock/illustrative; sources linked above."
-)
+# Minimal compliant disclosure (docs/08 §2). The primary disclosure is YouTube's
+# synthetic-content FLAG set on upload (publish_youtube); this short line is the discreet
+# description backup. Removing disclosure entirely risks forced labels + YPP suspension and
+# does NOT help reach (researched 2026-06-09), so we keep a minimal honest line.
+DISCLOSURE_LINE = "AI-generated narration; stock visuals."
 
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)

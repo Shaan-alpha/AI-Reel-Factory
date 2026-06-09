@@ -75,7 +75,7 @@ def test_does_not_duplicate_existing_compliance(monkeypatch):
     })
     _patch(monkeypatch, reply)
     out = scriptwriter.write_script(IDEA)
-    assert out["caption"].lower().count("narration is ai-generated") == 1
+    assert out["caption"].lower().count("ai-generated") == 1  # disclosure not duplicated
     assert out["hashtags"].count("#Shorts") == 1
 
 
