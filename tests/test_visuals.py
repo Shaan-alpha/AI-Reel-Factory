@@ -72,6 +72,7 @@ def _fake_download(monkeypatch):
 
 
 def test_fetch_broll_covers_target_and_stops(monkeypatch, tmp_path):
+    monkeypatch.setenv("VISUAL_SOURCE", "video")
     cands = [{"url": f"http://x/{i}.mp4", "duration": 8.0} for i in range(5)]
     monkeypatch.setattr(visuals, "_gather_candidates", lambda kws: cands)
     calls = _fake_download(monkeypatch)
@@ -81,6 +82,7 @@ def test_fetch_broll_covers_target_and_stops(monkeypatch, tmp_path):
 
 
 def test_fetch_broll_idempotent_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("VISUAL_SOURCE", "video")
     cands = [{"url": f"http://x/{i}.mp4", "duration": 8.0} for i in range(3)]
     monkeypatch.setattr(visuals, "_gather_candidates", lambda kws: cands)
     calls = _fake_download(monkeypatch)
@@ -98,9 +100,46 @@ def test_fetch_broll_pixabay_fallback(monkeypatch):
 
 
 def test_fetch_broll_no_results_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("VISUAL_SOURCE", "video")
     monkeypatch.setattr(visuals, "_gather_candidates", lambda kws: [])
     with pytest.raises(RuntimeError, match="no B-roll found"):
         visuals.fetch_broll(["a"], 15, str(tmp_path))
+
+
+# --- image-based visuals (photos / AI) -------------------------------------------------
+
+def test_fetch_broll_photos_makes_kenburns_clips(monkeypatch, tmp_path):
+    monkeypatch.delenv("VISUAL_SOURCE", raising=False)  # default = photos
+
+    def fake_fetch_image(kw, dest, seed, source):
+        with open(dest, "wb") as f:
+            f.write(b"\xff" * 2048)
+        return True
+    monkeypatch.setattr(visuals, "_fetch_image", fake_fetch_image)
+
+    def fake_kb(img, dest, seconds):
+        with open(dest, "wb") as f:
+            f.write(b"\x00" * 4096)
+    monkeypatch.setattr(visuals, "_image_to_kenburns_clip", fake_kb)
+
+    paths = visuals.fetch_broll(["courtroom", "rocket"], target_seconds=18, out_dir=str(tmp_path))
+    assert len(paths) == 4 and all(p.endswith(".mp4") and os.path.exists(p) for p in paths)  # ceil(18/6)+1
+
+
+def test_fetch_broll_photos_fall_back_to_video(monkeypatch, tmp_path):
+    monkeypatch.delenv("VISUAL_SOURCE", raising=False)  # photos default
+    monkeypatch.setattr(visuals, "_fetch_image", lambda *a, **k: False)  # no images at all
+    cands = [{"url": "http://x/0.mp4", "duration": 8.0}, {"url": "http://x/1.mp4", "duration": 8.0}]
+    monkeypatch.setattr(visuals, "_gather_candidates", lambda kws: cands)
+    _fake_download(monkeypatch)
+    paths = visuals.fetch_broll(["a"], target_seconds=12, out_dir=str(tmp_path))
+    assert paths and all(p.endswith(".mp4") for p in paths)  # fell back to stock video
+
+
+def test_cloudflare_image_no_creds_returns_false(monkeypatch):
+    monkeypatch.delenv("CF_API_TOKEN", raising=False)
+    monkeypatch.delenv("CF_ACCOUNT_ID", raising=False)
+    assert visuals._cloudflare_image("x", "/tmp/none.jpg") is False
 
 
 def test_fetch_broll_no_keywords_raises(tmp_path):

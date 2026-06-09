@@ -94,6 +94,24 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-10 — Video assessment → fixes: anti-hallucination + photo/AI visuals
+- **Assessed a generated Short** (frames + whisper transcript). Findings: (1) 🔴 CRITICAL —
+  fabricated news: it invented a fake "Claude Fable 5" Anthropic launch ("according to
+  Anthropic…"); (2) clips off-topic (Gundam statue / Nashville skyline for an AI story);
+  (3) minor caption split ("-level"). Assessed video then deleted per operator.
+- **Anti-hallucination guardrails** added to ideation + scriptwriter prompts (only REAL,
+  source-supported facts; never invent products/versions/quotes/attribution).
+- **Visuals upgrade — photos + Ken Burns (default) + optional AI:** free AI image gen is now
+  paywalled (Pollinations 402 queue-gate, Gemini image 429). So `visuals.fetch_broll` now has
+  `VISUAL_SOURCE`: **`photos`** (default — Pexels stock PHOTOS, far more abundant/on-topic than
+  video, rendered with a Ken Burns slow-zoom to 1080×1920), **`ai`** (Cloudflare Workers AI Flux —
+  free tier, needs `CF_API_TOKEN`+`CF_ACCOUNT_ID`), or **`video`** (old stock-video). Image sources
+  fall back to stock video on failure (rule 11). Verified live (on-topic courtroom/parliament/
+  rocket Ken Burns clips). Workflows pass the new env. **108 tests pass.**
+- ⚙️ **To enable true AI images:** make a free Cloudflare account → Workers AI → create an API
+  token + grab the account id → add repo secrets `CF_API_TOKEN`/`CF_ACCOUNT_ID` and repo var
+  `VISUAL_SOURCE=ai`.
+
 ### 2026-06-09 — Upgrades from deep research: trending topics + disclosure trim
 - Deep-research workflow hit a session limit, but direct verified searches answered all 4 asks.
 - **Trending (new `src/trends.py`):** pulls live Google-Trends-India RSS (no key/quota) and seeds

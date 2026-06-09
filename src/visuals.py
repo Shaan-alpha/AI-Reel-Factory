@@ -16,10 +16,15 @@ Clips are render artifacts: download to a temp dir, let assembly consume them, t
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
+import math
 import os
 import re
+import subprocess
+
+from functools import lru_cache
 
 import requests
 
@@ -28,10 +33,15 @@ from src import config, llm
 log = logging.getLogger(__name__)
 
 _PEXELS_VIDEO_SEARCH = "https://api.pexels.com/videos/search"
+_PEXELS_PHOTO_SEARCH = "https://api.pexels.com/v1/search"
 _PIXABAY_VIDEO_SEARCH = "https://pixabay.com/api/videos/"
 _TIMEOUT = 30          # seconds per HTTP call
 _SLICE_SECONDS = 8.0   # planned cut length in assembly → coverage unit per clip
 _PER_KEYWORD = 3       # candidates pulled per keyword
+
+# Image-based visuals (photos / AI) → Ken Burns clips. Default source is "photos".
+_IMAGE_CLIP_SECONDS = 7.0   # a touch longer than assembly's 6s slice
+_MAX_IMG_CLIPS = 12         # cap API calls + ffmpeg conversions per reel
 
 # Minimal stopword set for the heuristic keyword fallback (no NLTK dependency).
 _STOPWORDS = frozenset(
@@ -197,16 +207,139 @@ def _download(url: str, dest: str) -> None:
                     f.write(chunk)
 
 
-def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> list[str]:
-    """Download enough CC0 vertical clips to cover target_seconds. Pexels then Pixabay.
+# --- image-based visuals (photos / AI) → Ken Burns clips -------------------------------
 
-    Returns local clip paths (≥1). Raises RuntimeError if no clip could be obtained — the
-    orchestrator skips that reel (rule 14). Re-uses already-cached files (rule 12).
+def _img_prompt(keyword: str) -> str:
+    return (f"{keyword}, cinematic news b-roll, photorealistic, dramatic lighting, "
+            f"high detail, vertical 9:16")
+
+
+@lru_cache(maxsize=64)
+def _pexels_photo_urls(keyword: str) -> tuple[str, ...]:
+    """Portrait stock-photo URLs from Pexels for one keyword (cached). () on failure."""
+    try:
+        resp = requests.get(
+            _PEXELS_PHOTO_SEARCH,
+            headers={"Authorization": config.require("PEXELS_API_KEY")},
+            params={"query": keyword, "orientation": "portrait", "per_page": 8, "size": "large"},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return tuple(
+            p["src"].get("large2x") or p["src"].get("portrait") or p["src"]["original"]
+            for p in resp.json().get("photos", []) if p.get("src")
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("visuals: Pexels photo search failed for %r (%s)", keyword, e)
+        return ()
+
+
+def _cloudflare_image(prompt: str, dest: str) -> bool:
+    """Generate an AI image via Cloudflare Workers AI (Flux). Needs CF_API_TOKEN + CF_ACCOUNT_ID."""
+    token, acct = config.get("CF_API_TOKEN"), config.get("CF_ACCOUNT_ID")
+    if not (token and acct):
+        return False
+    model = config.get("CF_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell")
+    try:
+        r = requests.post(
+            f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"prompt": prompt[:2000]}, timeout=90,
+        )
+        r.raise_for_status()
+        if "application/json" in r.headers.get("content-type", ""):
+            b64 = (r.json().get("result") or {}).get("image")
+            if not b64:
+                return False
+            with open(dest, "wb") as f:
+                f.write(base64.b64decode(b64))
+        else:
+            with open(dest, "wb") as f:
+                f.write(r.content)
+        return os.path.getsize(dest) > 1000
+    except Exception as e:  # noqa: BLE001
+        log.warning("visuals: Cloudflare image gen failed (%s)", e)
+        return False
+
+
+def _fetch_image(keyword: str, dest: str, seed: int, source: str) -> bool:
+    """Put one image at dest: AI (if source='ai' and CF set) else a Pexels photo. Bool = success."""
+    if source == "ai" and _cloudflare_image(_img_prompt(keyword), dest):
+        return True
+    urls = _pexels_photo_urls(keyword)
+    if not urls:
+        return False
+    try:
+        _download(urls[seed % len(urls)], dest)
+        return os.path.getsize(dest) > 1000
+    except Exception as e:  # noqa: BLE001
+        log.warning("visuals: photo download failed for %r (%s)", keyword, e)
+        return False
+
+
+def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float) -> None:
+    """Render a slow Ken Burns zoom over an image → 1080x1920 mp4 clip (FFmpeg)."""
+    from src.assembly import _ffmpeg
+
+    frames = int(seconds * 30)
+    vf = (
+        "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
+        f"zoompan=z='min(zoom+0.0010,1.18)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+        f"d={frames}:s=1080x1920:fps=30,setsar=1"
+    )
+    proc = subprocess.run(
+        [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
+         "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30", dest],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"ken burns failed ({proc.returncode}): {proc.stderr[-400:]}")
+
+
+def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str) -> list[str]:
+    """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made."""
+    n = min(_MAX_IMG_CLIPS, math.ceil(target_seconds / 6.0) + 1)
+    clips: list[str] = []
+    for i in range(n):
+        kw = keywords[i % len(keywords)]
+        img = os.path.join(out_dir, f"img_{i:02d}.jpg")
+        if not _fetch_image(kw, img, i, source):
+            continue
+        clip = os.path.join(out_dir, f"imgclip_{i:02d}.mp4")
+        try:
+            _image_to_kenburns_clip(img, clip, _IMAGE_CLIP_SECONDS)
+            clips.append(clip)
+        except Exception as e:  # noqa: BLE001
+            log.warning("visuals: ken burns failed (%s); skipping", e)
+    if not clips:
+        raise RuntimeError(f"visuals: produced no image clips from source={source}")
+    log.info("visuals: %d %s Ken Burns clips for target %.0fs", len(clips), source, target_seconds)
+    return clips
+
+
+def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> list[str]:
+    """Return vertical clip paths covering target_seconds. VISUAL_SOURCE picks the strategy:
+    'photos' (default, Pexels stock photos + Ken Burns), 'ai' (Cloudflare Flux + Ken Burns),
+    or 'video' (Pexels/Pixabay stock video). Image sources fall back to stock video on failure.
+
+    Raises RuntimeError if no clip could be obtained — the orchestrator skips that reel (rule 14).
     """
     if not keywords:
         raise ValueError("visuals.fetch_broll: no keywords provided.")
     os.makedirs(out_dir, exist_ok=True)
 
+    source = str(config.get("VISUAL_SOURCE", "photos")).lower()
+    if source in ("photos", "ai"):
+        try:
+            return _fetch_image_broll(keywords, target_seconds, out_dir, source)
+        except Exception as e:  # noqa: BLE001 — fall back to stock video (rule 11)
+            log.warning("visuals: %s source failed (%s); falling back to stock video", source, e)
+
+    return _fetch_video_broll(keywords, target_seconds, out_dir)
+
+
+def _fetch_video_broll(keywords: list[str], target_seconds: float, out_dir: str) -> list[str]:
+    """Stock-video B-roll: Pexels then Pixabay (the original strategy)."""
     candidates = _gather_candidates(keywords)
     if not candidates:
         raise RuntimeError(f"visuals: no B-roll found on Pexels/Pixabay for {keywords}.")
