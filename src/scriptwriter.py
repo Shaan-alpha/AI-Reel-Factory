@@ -63,9 +63,16 @@ product names, version numbers, figures, dates, or quotes, and never say "accord
 unless the sources actually say it. If a specific detail isn't in the sources, keep it general and \
 true rather than fabricating — a fabricated claim gets the channel demonetized.
 
+ALSO produce, for YouTube discoverability:
+- "title": a punchy, click-worthy, SEO-optimized title (<=80 chars) that front-loads the topic \
+and makes people want to tap — not clickbait-lie, just compelling and accurate.
+- "tags": 10-15 specific search keywords/phrases people would actually type (the topic, the \
+people/orgs involved, the category, and close synonyms). No '#'.
+
 Return ONLY a JSON object, no markdown fences:
-{{"script_body": "the spoken narration", "caption": "keyword-rich SEO description \
-including the source link(s)", "hashtags": ["#keyword", "#Shorts"]}}
+{{"title": "the SEO title", "script_body": "the spoken narration", "caption": "keyword-rich \
+SEO description including the source link(s)", "hashtags": ["#keyword", "#Shorts"], \
+"tags": ["search keyword", "another phrase"]}}
 """
 
 
@@ -142,9 +149,15 @@ def write_script(idea: dict, template: str = "N") -> dict:
 
     caption = _ensure_disclosure(_ensure_sources(data.get("caption") or "", idea.get("sources") or []))
 
+    # SEO extras (used by publish for title + tags; fall back to the idea title downstream).
+    title = (data.get("title") or "").strip()
+    tags = data.get("tags")
+    tags = [str(t).lstrip("#").strip() for t in tags if str(t).strip()] if isinstance(tags, list) else []
+
     words = len(body.split())
     if not 90 <= words <= 200:  # ~130-150 target; warn on a wild miss, don't block (rule 14)
         log.warning("scriptwriter: idea %s script is %d words (target ~130-150)", idea_id, words)
 
     script_id = db.insert_script(idea_id, template, body, caption, hashtags)
-    return {"script_id": script_id, "script_body": body, "caption": caption, "hashtags": hashtags}
+    return {"script_id": script_id, "script_body": body, "caption": caption,
+            "hashtags": hashtags, "title": title, "tags": tags}

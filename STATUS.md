@@ -94,6 +94,15 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-10 — Channel went PUBLIC + SEO (titles + tags) + Cloudflare AI visuals live
+- **`YOUTUBE_PRIVACY=public`** — Shorts now publish publicly.
+- **Cloudflare AI images working in CI** (after removing the token's IP filter; verified 200).
+  `VISUAL_SOURCE=ai` → true on-topic Flux images + Ken Burns; auto-falls back to Pexels photos.
+- **SEO discoverability:** scriptwriter now also outputs an optimized **`title`** (click-worthy,
+  <=80 chars) and **`tags`** (10-15 search keywords). `production._build_metadata` prefers the SEO
+  title and merges hashtags+tags (de-duped); `publish._cap_tags` keeps tags within YouTube's
+  ~500-char budget. **111 tests pass.**
+
 ### 2026-06-10 — Video assessment → fixes: anti-hallucination + photo/AI visuals
 - **Assessed a generated Short** (frames + whisper transcript). Findings: (1) 🔴 CRITICAL —
   fabricated news: it invented a fake "Claude Fable 5" Anthropic launch ("according to

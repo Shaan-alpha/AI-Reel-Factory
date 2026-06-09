@@ -97,6 +97,21 @@ def test_ensure_ideas_noop_when_queue_has_work(monkeypatch):
     assert production.ensure_ideas_and_digest() == 0
 
 
+def test_build_metadata_prefers_seo_title_and_merges_tags():
+    idea = {"title": "fallback title"}
+    script = {"title": "SEO Title", "caption": "desc",
+              "hashtags": ["#ISRO", "#Shorts"], "tags": ["isro", "space mission", "rocket"]}
+    meta = production._build_metadata(idea, script)
+    assert meta["title"] == "SEO Title"
+    # hashtags(#-stripped) + tags, case-insensitively de-duped, order preserved
+    assert meta["tags"] == ["ISRO", "Shorts", "space mission", "rocket"]
+
+
+def test_build_metadata_falls_back_to_idea_title():
+    meta = production._build_metadata({"title": "Idea T"}, {"caption": "d", "hashtags": []})
+    assert meta["title"] == "Idea T" and meta["tags"] == []
+
+
 def test_run_smoke(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
     monkeypatch.setattr(production, "ensure_ideas_and_digest", lambda: 0)

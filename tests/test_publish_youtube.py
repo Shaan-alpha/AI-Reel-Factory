@@ -16,6 +16,12 @@ from src import publish_youtube as pub
 
 # --- body construction -----------------------------------------------------------------
 
+def test_cap_tags_stays_within_budget():
+    many = [f"tag number {i}" for i in range(100)]
+    capped = pub._cap_tags(many, limit=100)
+    assert capped == many[: len(capped)] and len(capped) < len(many)
+
+
 def test_build_body_sets_disclosure_and_shorts(monkeypatch):
     monkeypatch.setenv("AI_DISCLOSURE", "true")
     body = pub._build_body({

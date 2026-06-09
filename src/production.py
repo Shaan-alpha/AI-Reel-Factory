@@ -46,12 +46,18 @@ def _work_root() -> str:
 
 
 def _build_metadata(idea: dict, script: dict) -> dict:
-    """Map an idea + its script into YouTube upload metadata (publish enforces disclosure/#Shorts)."""
-    return {
-        "title": idea.get("title", ""),
-        "description": script.get("caption", ""),
-        "tags": script.get("hashtags", []),
-    }
+    """Map an idea + its script into YouTube upload metadata (publish enforces disclosure/#Shorts).
+
+    Prefers the scriptwriter's SEO title; merges hashtags + SEO tags (de-duped) for discoverability.
+    """
+    title = (script.get("title") or idea.get("title") or "").strip()
+    seen, tags = set(), []
+    for t in [*script.get("hashtags", []), *script.get("tags", [])]:
+        t = str(t).lstrip("#").strip()
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            tags.append(t)
+    return {"title": title, "description": script.get("caption", ""), "tags": tags}
 
 
 def produce_one(idea: dict, work_root: str) -> tuple[str, str]:

@@ -43,6 +43,18 @@ def _youtube_client():
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
+def _cap_tags(tags: list[str], limit: int = 480) -> list[str]:
+    """Keep tags within YouTube's ~500-char total budget (quotes count); preserve order."""
+    out, used = [], 0
+    for t in tags:
+        cost = len(t) + (3 if " " in t else 1)  # quoted tags with spaces cost extra
+        if used + cost > limit:
+            break
+        out.append(t)
+        used += cost
+    return out
+
+
 def _build_body(metadata: dict) -> dict:
     """Map pipeline metadata → a videos.insert request body. Enforces #Shorts + disclosure."""
     title = (metadata.get("title") or "").replace("<", "").replace(">", "").strip()[:100]
@@ -54,6 +66,7 @@ def _build_body(metadata: dict) -> dict:
         desc = (desc.rstrip() + "\n\n#Shorts").strip()
 
     tags = [str(t).lstrip("#").strip() for t in (metadata.get("tags") or []) if str(t).strip()]
+    tags = _cap_tags(tags)  # YouTube allows ~500 chars of tags total
     category = str(metadata.get("category_id") or config.get("YOUTUBE_CATEGORY_ID", "25"))
     privacy = metadata.get("privacy") or config.get("YOUTUBE_PRIVACY", "public")
     disclose = str(config.get("AI_DISCLOSURE", "true")).lower() == "true"
