@@ -57,9 +57,18 @@ def _keywords_heuristic(script_body: str, n: int) -> list[str]:
 
 def _keywords_via_llm(script_body: str, n: int) -> list[str]:
     prompt = (
-        f"Extract {n} short visual search phrases (1-3 words each) for finding stock B-roll "
-        f"that matches this narration. Prefer concrete, filmable subjects (places, objects, "
-        f"actions, maps/charts). Avoid abstract words.\n\n"
+        f"You pick stock-VIDEO search queries for a news Short. Give {n} CONCRETE, literal, "
+        f"FILMABLE queries (1-3 words each) that stock sites (Pexels/Pixabay) actually have "
+        f"footage for, matching this narration.\n"
+        f"KEY RULE: stock sites do NOT have clips of specific people, brands, or named events — "
+        f"so TRANSLATE those into filmable stand-ins:\n"
+        f"  politician/government -> 'parliament building', 'indian flag', 'government office'\n"
+        f"  court case/legal -> 'courtroom', 'judge gavel', 'law books'\n"
+        f"  ISRO/space mission -> 'rocket launch', 'satellite orbit', 'mission control'\n"
+        f"  economy/stocks -> 'stock market screen', 'indian currency', 'city skyline'\n"
+        f"  AI/tech -> 'data center', 'circuit board', 'person using laptop'\n"
+        f"Use tangible subjects: places, objects, people doing things, nature, city, crowds, maps. "
+        f"AVOID proper nouns and abstract words entirely.\n\n"
         f"NARRATION:\n{script_body}\n\n"
         f'Return ONLY JSON: {{"keywords": ["...", "..."]}}'
     )

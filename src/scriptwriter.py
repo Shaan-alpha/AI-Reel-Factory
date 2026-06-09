@@ -33,10 +33,10 @@ DISCLOSURE_LINE = "AI-generated narration; stock visuals."
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)
 
-_PROMPT_N = """You are the scriptwriter for "But It Matters" — a YouTube Shorts channel that \
-explains the news with a SHARP, SARCASTIC, WITTY voice: a clever, slightly savage friend who \
-roasts the absurdity of what's happening while actually explaining it. Funny and irreverent — \
-but every FACT stays accurate.
+_PROMPT_N = """You are the scriptwriter for "But It Matters" — punchy, fast-paced YouTube Shorts \
+that make people STOP scrolling. Your voice is NATURAL and conversational with a bit of edge — \
+like a sharp friend who tells you something wild and makes it click. Energetic and gripping, \
+never a stiff news-anchor, never forced or corny. Every FACT stays 100% accurate.
 
 IDEA: {title}
 HOOK: {hook}
@@ -44,17 +44,19 @@ ANGLE (the take to develop): {angle}
 SOURCES:
 {sources}
 
-Write a ~130-150 word (<=60s) narration, in this flow:
-1. HOOK (<=3s): a punchy, sarcastic one-liner that stops the scroll. No throat-clearing.
-2. WHAT HAPPENED: 1-2 key facts in your OWN words, citing the source out loud ("according to ..."). \
-The humor is in the DELIVERY — never invent or exaggerate facts.
-3. WHY IT MATTERS: the real point, with bite — roast the irony/absurdity of the situation.
-4. IMPACT: what it actually means for you / India / the world, said wryly.
-5. CTA: a cheeky line to follow / drop a comment.
+Write a ~110-130 word (<=45s) narration that FLOWS naturally when spoken out loud:
+1. HOOK (first 3s): a scroll-stopping opener — a surprising fact, bold claim, or curiosity gap \
+that makes the viewer go "wait, what?". Make it THRILLING and specific. No "in this video", no \
+throat-clearing.
+2. WHAT HAPPENED: 1-2 real facts in your own words, citing the source out loud ("according to ..."). \
+Keep it true — the energy is in the delivery, never in exaggeration.
+3. WHY IT MATTERS: the real stakes, with a little bite — why anyone should actually care.
+4. PAYOFF: what it means for you / India / the world.
+5. CTA: one natural, snappy line to follow or comment.
 
-TONE: sarcastic, humorous, conversational, a little roasting. HARD LIMITS (keeps us monetizable): \
-punch at situations, irony, and absurdity — NOT at a specific person's character; no hateful or \
-demeaning personal attacks, no slurs, no invented claims. Stay factually honest under the jokes.
+WRITE FOR THE EAR: short punchy sentences, contractions, natural rhythm, a touch of wit. It must \
+sound like a real person talking, not an essay. No hateful or personal attacks; punch at ideas \
+and irony, not people.
 
 Return ONLY a JSON object, no markdown fences:
 {{"script_body": "the spoken narration", "caption": "keyword-rich SEO description \
