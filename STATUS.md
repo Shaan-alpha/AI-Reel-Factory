@@ -94,6 +94,24 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-09 — Web-researched ideas IN-CLOUD via Gemini grounding (routine retired)
+- **Resolved the routine-delivery dead end.** The cloud Anthropic Routine can't feed the
+  pipeline: its git token is read-only (can't push) AND custom MCP connectors (Supabase) don't
+  attach to routines — only directory connectors (Vercel/Gmail/Drive) do. Giving it a GitHub
+  write token was rejected as a security hole (this repo's Actions hold upload/DB/Telegram
+  secrets → a leaked write token = secret exfiltration).
+- **Pivot that meets the goal (full cloud, PC off, researched ideas):** added
+  `llm.generate_grounded()` — Gemini with **Google Search grounding** (live web research, real
+  sources). `ideation_fallback._produce_ideas()` now researches the web first and falls back to
+  ungrounded Gemini→Groq. This runs inside the make-short GitHub Action — **no routine, no PC, no
+  embedded credential, no security tradeoff.**
+- **Verified live:** produced 5 current, well-sourced ideas (isro.gov.in, thehindu.com,
+  npci.org.in, mnre.gov.in, roche.com). **Suite: 100 passed, 2 skipped.**
+- **Disabled** the cloud routine `trig_01APQkpZG1i14A5HJm8AsVDc` (kept for reference; re-enableable
+  only if a writable delivery ever exists). The `data/daily-ideas.json` file-bridge stays as a
+  still-supported secondary path (e.g. if you ever push ideas there from a writable context).
+- ⭐ **Goal met: end-to-end cloud automation with web-researched ideas, machine never on.**
+
 ### 2026-06-09 — Anthropic Routine created; delivery blocked (read-only git token)
 - Created routine **Daily ideation — But It Matters** (`trig_01APQkpZG1i14A5HJm8AsVDc`),
   daily 08:00 IST (cron `30 2 * * *`), Sonnet 4.6, repo Shaan-alpha/AI-Reel-Factory, WebSearch

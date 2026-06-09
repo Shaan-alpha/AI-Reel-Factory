@@ -42,6 +42,17 @@ def test_raises_when_all_providers_fail(monkeypatch):
         llm.generate("hi")
 
 
+def test_generate_grounded_returns_text(monkeypatch):
+    monkeypatch.setattr(llm, "_gen_gemini_grounded", lambda prompt, *, max_tokens: "grounded")
+    assert llm.generate_grounded("x") == "grounded"
+
+
+def test_generate_grounded_raises_on_empty(monkeypatch):
+    monkeypatch.setattr(llm, "_gen_gemini_grounded", lambda prompt, *, max_tokens: "   ")
+    with pytest.raises(RuntimeError, match="empty"):
+        llm.generate_grounded("x")
+
+
 def test_json_flag_threads_through(monkeypatch):
     captured = {}
 

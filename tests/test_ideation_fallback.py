@@ -27,7 +27,8 @@ def _idea(title, n_sources=2, **over):
 
 def _patch(monkeypatch, ideas, pending=None):
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: pending or [])
-    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": ideas}))
+    # _produce_ideas tries grounded research first; mock that as the primary path.
+    monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": ideas}))
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas",
                         lambda rows: captured.setdefault("rows", rows) or rows)
@@ -83,7 +84,7 @@ def test_thin_digest_raises(monkeypatch):
 def test_parses_fenced_json(monkeypatch):
     ideas = [_idea(f"f{i}") for i in range(6)]
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])
-    monkeypatch.setattr(fb.llm, "generate",
+    monkeypatch.setattr(fb.llm, "generate_grounded",
                         lambda *a, **k: "```json\n" + json.dumps({"ideas": ideas}) + "\n```")
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     assert fb.run_fallback_ideation() == 6
@@ -100,7 +101,7 @@ def test_generate_ideas_on_demand_no_pending_guard(monkeypatch):
     # generate_ideas must NOT skip just because pending ideas already exist
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [{"id": 1}])
     ideas = [_idea(f"od{i}", est_score=0.1 * i) for i in range(8)]
-    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": ideas}))
+    monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": ideas}))
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
     n = fb.generate_ideas(3)
@@ -110,10 +111,19 @@ def test_generate_ideas_on_demand_no_pending_guard(monkeypatch):
 
 
 def test_generate_ideas_raises_when_none_valid(monkeypatch):
-    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
+    monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": []}))
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     with pytest.raises(RuntimeError, match="could not generate"):
         fb.generate_ideas(3)
+
+
+def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("grounding unavailable")
+    monkeypatch.setattr(fb.llm, "generate_grounded", _boom)
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": [_idea("Fallback")]}))
+    out = fb._produce_ideas(3)
+    assert out and out[0]["title"] == "Fallback"
 
 
 def test_load_routine_ideas_reads_file(monkeypatch, tmp_path):

@@ -113,9 +113,17 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
 
 
 def _produce_ideas(target: int) -> list[dict]:
-    """Ask the LLM for ~target ideas and return the validated/cleaned subset."""
-    raw = llm.generate(_PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2")),
-                       json=True, max_tokens=4096)
+    """Ask the LLM for ~target ideas and return the validated/cleaned subset.
+
+    Researches the live web via Gemini Google Search grounding for current, well-sourced
+    ideas; falls back to ungrounded generation (Gemini→Groq) if grounding is unavailable.
+    """
+    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"))
+    try:
+        raw = llm.generate_grounded(prompt, max_tokens=4096)
+    except Exception as e:  # noqa: BLE001 — grounding is best-effort; never block ideation
+        log.warning("ideation: web-grounded research unavailable (%s); using ungrounded llm", e)
+        raw = llm.generate(prompt, json=True, max_tokens=4096)
     return _validate_and_clean(_parse_ideas(raw))
 
 

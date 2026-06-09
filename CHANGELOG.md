@@ -61,6 +61,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **On-demand "Make a Short":** `make-short.yml` (`workflow_dispatch`) + `production.make_on_demand`
   + `ideation_fallback.generate_ideas(n)` — click *Run workflow* → propose ideas to Telegram →
   tap Make-it → produce + reply with the link. Machine-off, frequency under operator control.
+- **Web-researched ideas in-cloud:** `llm.generate_grounded()` (Gemini + Google Search grounding)
+  gives ideation live web research with real source URLs, inside the GitHub Action — no PC, no
+  routine. `ideation_fallback` researches first, falls back to ungrounded Gemini→Groq. (The
+  cloud Anthropic Routine was retired: read-only git token + custom connectors can't attach.)
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

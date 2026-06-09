@@ -54,6 +54,34 @@ def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
     return resp.text or ""
 
 
+def _gen_gemini_grounded(prompt: str, *, max_tokens: int) -> str:
+    """Gemini with Google Search grounding — live web research with real sources.
+
+    Note: the google_search tool can't combine with forced-JSON mime, so the caller must
+    ask for JSON in the prompt text and parse it (grounding still makes the model use real,
+    current facts + cite genuine sources).
+    """
+    from google.genai import types
+
+    cfg = types.GenerateContentConfig(
+        max_output_tokens=max_tokens,
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+    )
+    resp = _gemini_client().models.generate_content(
+        model=_GEMINI_MODEL, contents=prompt, config=cfg
+    )
+    return resp.text or ""
+
+
+def generate_grounded(prompt: str, *, max_tokens: int = 4096) -> str:
+    """Generate with live web research (Gemini Google Search grounding). Raises on failure so
+    callers can fall back to plain generate(). Gemini-only — Groq has no grounding."""
+    text = _gen_gemini_grounded(prompt, max_tokens=max_tokens)
+    if not text or not text.strip():
+        raise RuntimeError("llm.generate_grounded: empty response")
+    return text
+
+
 def _gen_groq(prompt: str, *, json: bool, max_tokens: int) -> str:
     # Groq's json_object mode requires the word "json" to appear in the prompt; callers
     # that pass json=True already phrase the prompt as "return a JSON object …".
