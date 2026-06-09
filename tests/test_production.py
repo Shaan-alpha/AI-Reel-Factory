@@ -107,6 +107,7 @@ def test_run_smoke(monkeypatch):
 
 def test_make_on_demand_flow(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])  # empty → generate
     calls = []
     monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
                         lambda n: calls.append(("gen", n)) or 3)
@@ -126,8 +127,21 @@ def test_make_on_demand_flow(monkeypatch):
     assert any("https://yt/x" in n for n in notes)  # link sent to Telegram
 
 
+def test_make_on_demand_prefers_existing_pending(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 1}, {"id": 2}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
+                        lambda n: pytest.fail("must not generate when ideas already queued"))
+    monkeypatch.setattr(production.approval, "send_digest", lambda: None)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 1)
+    monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
+    monkeypatch.setattr(production, "_notify", lambda t: None)
+    production.make_on_demand()  # uses the 2 queued ideas, no generation
+
+
 def test_make_on_demand_nothing_approved(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])
     monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n: 3)
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)

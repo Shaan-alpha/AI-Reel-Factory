@@ -156,7 +156,14 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     """On-demand 'make a Short': propose fresh ideas to Telegram, wait for taps, produce the
     approved ones, and reply with the links. Triggered by the make-short workflow button."""
     config.validate()
-    n = ideation_fallback.seed_ideas(num_ideas)  # prefers the daily Routine's ideas
+    # Prefer ideas already queued (the daily Anthropic Routine inserts these straight into
+    # Supabase). Only generate via the Gemini/Groq fallback when the queue is empty.
+    existing = db.get_pending_ideas()
+    if existing:
+        n = len(existing)
+        log.info("make_on_demand: %d pending idea(s) already queued (Routine).", n)
+    else:
+        n = ideation_fallback.seed_ideas(num_ideas)
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
     approval.send_digest()
