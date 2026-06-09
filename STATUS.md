@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.13 (pre-MVP — all 10 modules done; only orchestrator + cron left; 78 pass / 2 gated)
+**Version:** 0.0.14 (**MVP code-complete** — full pipeline wired + tested; 85 pass / 3 gated live)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -42,24 +42,27 @@
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
 | 7 | Subtitles (faster-whisper) | ✅ Done — word-by-word ASS burn; 9 tests (incl. live whisper+burn) |
 | 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |
+| 10 | Orchestrator (`production.py`) | ✅ Done — wires the full chain, idempotent + fail-soft; 8 tests |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
 
 Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-- ✅ **All credentials collected + verified** (Supabase secret key + YouTube OAuth done).
-1. **Build the pipeline module-by-module** (rule 7): `db.py` ✅ → `llm.py` ✅ →
-   `scriptwriter.py` ✅ → `voice.py` ✅ → `visuals.py` ✅ → `assembly.py` ✅ →
-   `subtitles.py` ✅ → `publish_youtube.py` ✅ → `ideation_fallback.py` ✅ → `approval.py` ✅ →
-   **wire `production.py`** orchestrator (next) → GitHub Actions cron + mirror secrets.
-   **NOTE:** FFmpeg 8.1.1 installed locally (winget `Gyan.FFmpeg`); CI must install it onto PATH.
-   faster-whisper downloads its model from HF on first run (CI needs network or a cache step).
-2. **GitHub Actions secrets:** mirror every `.env` value into the repo's Actions secrets
-   (`gh secret set …`) before the first cron run.
-3. Decide ideation runner: **Anthropic Routines** (recommended) vs Oracle VM cron; create the
-   Routine from `routines/ideation.md`.
-4. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
+- ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (85 pass).
+
+### Go-live checklist (Phase-1 DoD — these are deploy steps, no new modules)
+1. **End-to-end dry run locally:** `python -m src.production` against the live DB after
+   approving 1-2 ideas — confirm a real captioned Short uploads (set `YOUTUBE_PRIVACY=unlisted`
+   for the first run). *(The one step not yet exercised live: a real `videos.insert`.)*
+2. **Mirror `.env` → GitHub Actions secrets** (`gh secret set …`) before any cron run (rule 5).
+3. **Create the ideation runner:** an **Anthropic Routine** from `routines/ideation.md`
+   (recommended) so ideas land in `ideas` each morning; the `ideation_fallback` covers misses.
+4. **Enable the crons:** uncomment `schedule:` in `.github/workflows/production.yml` (UTC,
+   staggered). CI already installs FFmpeg; faster-whisper pulls its model on first run.
+5. **First unattended day:** approve 4-5 via the Telegram digest → confirm 4-5 captioned Shorts
+   go live with the AI-disclosure label. → then tag **v0.1.0** (Phase-1 MVP done).
+6. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
 
 ## Open decisions
 
@@ -72,6 +75,22 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — Orchestrator: production.py wired — MVP CODE-COMPLETE
+- Implemented [src/production.py](src/production.py): `run()` validates config →
+  `ensure_ideas_and_digest()` (fallback ideation + digest if the queue is dry) → best-effort
+  `approval.process_responses()` drain → `run_production()`. `produce_one(idea)` runs the full
+  chain (script → voice → visuals → assemble → subtitle → publish), marks the idea `produced`,
+  and `rmtree`s the work dir in a `finally` (rule 15).
+- **Idempotent** (rule 12): `find_post` short-circuits an already-published script; produced
+  ideas drop out of `get_approved_ideas`. **Fail-soft** (rule 14): a per-reel exception is
+  logged, Telegram-alerted (best-effort, rule 13), and skipped — the batch continues. Daily
+  cap via `DAILY_REEL_CAP` (default 5).
+- Added [tests/test_production.py](tests/test_production.py): 8 cases (full chain, idempotency,
+  fail-soft batching, cap, dry-queue bootstrap, run() smoke) — all modules mocked, no real
+  uploads. **Suite: 85 passed, 3 skipped (gated live).**
+- ⭐ **Every module of the Phase-1 pipeline is built and tested.** What remains is go-live only
+  (secrets mirror, Routine, enable crons, first real run) — see the Go-live checklist above.
 
 ### 2026-06-09 — Module: approval.py implemented + tested — all 10 modules done
 - Implemented [src/approval.py](src/approval.py) on the **Telegram Bot HTTP API via requests**

@@ -52,6 +52,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **Module: `approval.py`** — Telegram Morning Digest over the Bot HTTP API (requests): per-idea
   messages with Approve/Reject buttons, long-poll callback handling, soft approval cap, and a
   chat-id security check. Tests (`tests/test_approval.py`, 11 cases) mock the API + one gated live send.
+- **Orchestrator: `production.py`** — wires the full daily cycle (bootstrap ideas+digest →
+  drain approvals → produce approved queue), idempotent and fail-soft per reel with a Telegram
+  failure alert and a daily cap. Tests (`tests/test_production.py`, 8 cases) mock every module.
+  **Phase-1 pipeline is code-complete; only go-live steps remain.**
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
