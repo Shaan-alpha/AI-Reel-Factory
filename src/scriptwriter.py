@@ -77,7 +77,7 @@ def _parse_llm_json(raw: str) -> dict:
     start, end = raw.find("{"), raw.rfind("}")
     if start == -1 or end == -1 or end < start:
         raise ValueError(f"scriptwriter: no JSON object in LLM reply: {raw[:200]!r}")
-    return json.loads(raw[start : end + 1])
+    return json.loads(raw[start : end + 1], strict=False)  # tolerate raw control chars in strings
 
 
 def _ensure_sources(caption: str, sources: list[str]) -> str:

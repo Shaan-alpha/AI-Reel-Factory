@@ -117,6 +117,13 @@ def test_generate_ideas_raises_when_none_valid(monkeypatch):
         fb.generate_ideas(3)
 
 
+def test_parse_ideas_tolerates_raw_control_chars():
+    # grounded LLM JSON sometimes contains literal newlines inside string values
+    raw = '{"ideas": [{"title": "Line one\nline two", "hook": "h", "angle": "a", "sources": []}]}'
+    out = fb._parse_ideas(raw)
+    assert out[0]["title"] == "Line one\nline two"
+
+
 def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("grounding unavailable")

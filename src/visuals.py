@@ -67,7 +67,7 @@ def _keywords_via_llm(script_body: str, n: int) -> list[str]:
 
     raw = llm.generate(prompt, json=True, max_tokens=200)
     start, end = raw.find("{"), raw.rfind("}")
-    data = json.loads(raw[start : end + 1])
+    data = json.loads(raw[start : end + 1], strict=False)
     kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
     if not kws:
         raise ValueError("llm returned no keywords")

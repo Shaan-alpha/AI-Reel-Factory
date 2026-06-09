@@ -58,7 +58,8 @@ def _parse_ideas(raw: str) -> list[dict]:
     start, end = raw.find("{"), raw.rfind("}")
     if start == -1 or end == -1 or end < start:
         raise ValueError(f"ideation_fallback: no JSON object in reply: {raw[:200]!r}")
-    data = json.loads(raw[start : end + 1])
+    # strict=False: grounded LLM JSON often has raw newlines/tabs inside string values.
+    data = json.loads(raw[start : end + 1], strict=False)
     ideas = data.get("ideas", data if isinstance(data, list) else [])
     if not isinstance(ideas, list):
         raise ValueError("ideation_fallback: 'ideas' is not a list.")
