@@ -38,6 +38,10 @@ each enabling ORIGINAL "why it matters" analysis (not a bare summary).
 TODAY'S TRENDING IN INDIA (prefer ideas tied to these where a solid, factual explainer fits):
 {trending}
 
+WHAT'S WORKED ON THIS CHANNEL (make FRESH variants/angles of these winning topics — never repeat
+a title verbatim; if empty, ignore):
+{winners}
+
 Cover what people are searching for NOW across: current affairs, government & policy, major \
 court/legal rulings, economy & business, science & space (ISRO), technology & AI, health, \
 climate & energy, India infrastructure, sports, and notable world events. Be CURRENT, not generic.
@@ -135,7 +139,14 @@ def _produce_ideas(target: int) -> list[dict]:
     topics = trends.fetch_trending(15)
     trending_block = "\n".join(f"- {t}" for t in topics) or \
         "- (live trends unavailable — use your own knowledge of today's biggest stories)"
-    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"), trending=trending_block)
+    try:
+        winners = db.top_performing_titles(6)
+    except Exception as e:  # noqa: BLE001 — analytics feedback is best-effort
+        log.warning("ideation: could not load past winners (%s)", e)
+        winners = []
+    winners_block = "\n".join(f"- {w}" for w in winners) or "- (no performance data yet)"
+    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
+                            trending=trending_block, winners=winners_block)
     # Try web-grounded research first, INCLUDING the parse — grounded JSON is sometimes
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     try:

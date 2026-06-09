@@ -1,11 +1,11 @@
-# Analytics + learning — pull next-day metrics, score hooks (Phase 4).
-# SKELETON: manual-trigger only. Not part of the Phase-1 MVP (rule 9: stay in-phase).
+# Analytics — pull public stats for published Shorts so ideation learns what works.
+# Run manually, or enable the daily schedule below.
 name: analytics
 
 on:
   workflow_dispatch: {}
   # schedule:
-  #   - cron: "0 6 * * *"   # UTC, next-day metrics pull — enable in Phase 4
+  #   - cron: "0 6 * * *"   # 06:00 UTC daily — uncomment to auto-collect stats
 
 jobs:
   analytics:
@@ -16,5 +16,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Pull metrics (Phase 4)
-        run: echo "Phase 4 — analytics not implemented yet (see docs/06-roadmap.md)."
+      - name: Collect YouTube stats → Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python -m src.analytics

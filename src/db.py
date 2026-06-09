@@ -86,6 +86,47 @@ def insert_post(script_id: int, platform: str, external_id: str, url: str,
     return get_client().table("posts").insert(row).execute().data[0]["id"]
 
 
+def get_published_posts(platform: str = "youtube") -> list[dict]:
+    """Posts that actually shipped (have an external_id) — the analytics targets."""
+    return (
+        get_client().table("posts").select("*")
+        .eq("platform", platform).not_.is_("external_id", "null").execute().data
+    )
+
+
+def insert_analytics(post_id: int, views: int, likes: int | None = None,
+                     comments: int | None = None) -> None:
+    """Record a metrics snapshot for a post (analytics table; pulled_at defaults to now())."""
+    get_client().table("analytics").insert(
+        {"post_id": post_id, "views": views, "likes": likes, "comments": comments}
+    ).execute()
+
+
+def top_performing_titles(limit: int = 8) -> list[str]:
+    """Idea titles of the best-viewed Shorts (analytics → posts → scripts → ideas).
+
+    Feeds the ideation prompt so it makes fresh variants of what's working. [] if no data.
+    """
+    rows = (
+        get_client().table("analytics")
+        .select("views, posts(scripts(ideas(title)))")
+        .order("views", desc=True).limit(limit * 4).execute().data
+    )
+    titles: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        try:
+            title = r["posts"]["scripts"]["ideas"]["title"]
+        except (TypeError, KeyError):
+            continue
+        if title and title not in seen:
+            seen.add(title)
+            titles.append(title)
+        if len(titles) >= limit:
+            break
+    return titles
+
+
 def find_post(script_id: int, platform: str) -> dict | None:
     """Return an existing post for (script_id, platform), or None.
 
