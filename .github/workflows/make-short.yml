@@ -46,6 +46,7 @@ jobs:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || 'public' }}   # set var to 'unlisted' for safe first runs
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
         run: python -m src.production make
