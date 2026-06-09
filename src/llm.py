@@ -45,9 +45,16 @@ def _groq_client():
 
 
 def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
-    cfg: dict = {"max_output_tokens": max_tokens}
+    from google.genai import types
+
+    # Disable "thinking" — on gemini-2.5-flash it's on by default and eats max_output_tokens,
+    # which truncated JSON replies. We want the whole budget for the actual output.
+    cfg = types.GenerateContentConfig(
+        max_output_tokens=max_tokens,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
     if json:
-        cfg["response_mime_type"] = "application/json"
+        cfg.response_mime_type = "application/json"
     resp = _gemini_client().models.generate_content(
         model=_GEMINI_MODEL, contents=prompt, config=cfg
     )

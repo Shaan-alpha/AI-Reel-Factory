@@ -115,7 +115,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
     if idea_id is None:
         raise ValueError("scriptwriter: idea has no 'id' (must be a persisted ideas row).")
 
-    raw = llm.generate(_build_prompt(idea, template), json=True, max_tokens=1024)
+    raw = llm.generate(_build_prompt(idea, template), json=True, max_tokens=2048)
     data = _parse_llm_json(raw)
 
     body = (data.get("script_body") or "").strip()
