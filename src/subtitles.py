@@ -66,13 +66,27 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "").replace("{", "").replace("}", "").replace("\n", " ").strip()
 
 
+def _clean_caption_word(word: str) -> str:
+    """Trim stray leading/trailing punctuation so fragments like '-level' read cleanly."""
+    return word.strip().strip("-—–.,;:!?\"'").strip()
+
+
 def _build_events(words: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
-    """Hold each word until the next starts (no blank frames); last keeps its own end."""
+    """Group ~CAPTION_WORDS words per caption (default 2) for readability, cleaned of stray
+    punctuation, each held until the next group starts (no blank frames)."""
+    size = max(1, int(config.get("CAPTION_WORDS", "2")))
+    groups = []
+    for i in range(0, len(words), size):
+        chunk = words[i : i + size]
+        text = " ".join(_clean_caption_word(w[2]) for w in chunk).strip()
+        if text:
+            groups.append([chunk[0][0], chunk[-1][1], text])
+
     events = []
-    for i, (start, end, word) in enumerate(words):
-        nxt = words[i + 1][0] if i + 1 < len(words) else end
+    for i, (start, end, text) in enumerate(groups):
+        nxt = groups[i + 1][0] if i + 1 < len(groups) else end
         end = nxt if nxt > start else start + 0.10
-        events.append((start, end, word))
+        events.append((start, end, text))
     return events
 
 

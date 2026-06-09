@@ -50,6 +50,10 @@ jobs:
           VISUAL_SOURCE: ${{ vars.VISUAL_SOURCE || 'photos' }}        # photos | ai | video
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}                   # optional: Cloudflare Workers AI (VISUAL_SOURCE=ai)
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}                        # optional: AI-image style override
+          CAPTION_WORDS: ${{ vars.CAPTION_WORDS || '2' }}            # words per caption
+          KOKORO_SPEED: ${{ vars.KOKORO_SPEED || '1.0' }}           # voice speed
+          MUSIC_VOLUME: ${{ vars.MUSIC_VOLUME || '0.10' }}          # bgm loudness under narration
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
         run: python -m src.production make

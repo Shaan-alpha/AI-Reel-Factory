@@ -41,4 +41,8 @@ jobs:
           VISUAL_SOURCE: ${{ vars.VISUAL_SOURCE || 'photos' }}        # photos | ai | video
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
+          CAPTION_WORDS: ${{ vars.CAPTION_WORDS || '2' }}
+          KOKORO_SPEED: ${{ vars.KOKORO_SPEED || '1.0' }}
+          MUSIC_VOLUME: ${{ vars.MUSIC_VOLUME || '0.10' }}
         run: python -m src.production

@@ -22,7 +22,8 @@ def test_format_ts():
     assert subtitles._format_ts(3661.23) == "1:01:01.23"
 
 
-def test_build_events_holds_until_next_word():
+def test_build_events_holds_until_next_word(monkeypatch):
+    monkeypatch.setenv("CAPTION_WORDS", "1")  # per-word for this timing check
     words = [(0.0, 0.3, "a"), (0.5, 0.9, "b"), (1.0, 1.4, "c")]
     events = subtitles._build_events(words)
     assert events[0] == (0.0, 0.5, "a")   # held until 'b' starts
@@ -30,13 +31,24 @@ def test_build_events_holds_until_next_word():
     assert events[2] == (1.0, 1.4, "c")   # last keeps its own end
 
 
-def test_build_events_min_duration_when_overlap():
+def test_build_events_min_duration_when_overlap(monkeypatch):
+    monkeypatch.setenv("CAPTION_WORDS", "1")
     words = [(1.0, 1.0, "x")]
     (start, end, _), = subtitles._build_events(words)
     assert end > start  # never zero-length
 
 
-def test_build_ass_has_style_and_one_dialogue_per_word():
+def test_build_events_groups_and_cleans(monkeypatch):
+    monkeypatch.setenv("CAPTION_WORDS", "2")
+    # whisper split "mythos-level" → "mythos", "-level"; grouped + cleaned
+    words = [(0.0, 0.3, "mythos"), (0.3, 0.6, "-level"), (0.7, 1.0, "AI")]
+    events = subtitles._build_events(words)
+    assert events[0][2] == "mythos level"   # 2-word group, '-' cleaned off
+    assert events[1][2] == "AI"
+
+
+def test_build_ass_has_style(monkeypatch):
+    monkeypatch.setenv("CAPTION_WORDS", "1")
     ass = subtitles._build_ass([(0.0, 0.3, "Hello"), (0.4, 0.8, "world")])
     assert "[V4+ Styles]" in ass and "Style: Pop" in ass
     assert "PlayResX: 1080" in ass and "PlayResY: 1920" in ass

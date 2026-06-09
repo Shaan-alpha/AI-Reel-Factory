@@ -210,8 +210,13 @@ def _download(url: str, dest: str) -> None:
 # --- image-based visuals (photos / AI) → Ken Burns clips -------------------------------
 
 def _img_prompt(keyword: str) -> str:
-    return (f"{keyword}, cinematic news b-roll, photorealistic, dramatic lighting, "
-            f"high detail, vertical 9:16")
+    """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look."""
+    style = config.get(
+        "IMAGE_STYLE",
+        "cinematic, photorealistic, dramatic lighting, shallow depth of field, "
+        "high detail, professional documentary news b-roll, no text, no watermark",
+    )
+    return f"{keyword}, {style}, vertical 9:16 composition"
 
 
 @lru_cache(maxsize=64)
