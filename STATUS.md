@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.0.14 (**MVP code-complete** — full pipeline wired + tested; 85 pass / 3 gated live)
+**Version:** 0.1.0 (**Phase-1 MVP LIVE** — first Shorts published cloud, machine-off; 101 pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -93,6 +93,21 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-09 — 🎉 FIRST CLOUD SHORTS PUBLISHED — Phase-1 MVP live (v0.1.0)
+- Ran the **entire system in the cloud, PC off**: make-short workflow → grounded/fallback
+  ideation → Telegram digest → user approved 2 / passed 1 → script → voice → visuals → assemble
+  → subtitles → upload. Two unlisted Shorts published, `2 published, 0 failed`:
+  - idea 22 (Gaganyaan): https://www.youtube.com/shorts/ACXOPuT1Lac
+  - idea 23 (AI drug discovery): https://www.youtube.com/shorts/zJv9-rvNw20
+- **Hardened against three real LLM-output failures found in cloud runs** (local tests missed them):
+  1. raw control chars in grounded JSON → `json.loads(strict=False)`;
+  2. malformed/truncated grounded JSON → grounded parse now falls back to ungrounded JSON-mode;
+  3. **gemini-2.5-flash thinking** consuming `max_output_tokens` → truncated scriptwriter JSON →
+     disabled thinking (`thinking_budget=0`) + raised scriptwriter budget to 2048.
+- **`production.yml` retry pattern proven:** with ideas already `approved`, `run()` skips seeding/
+  digest and just produces them — used to retry ideas 22/23 after the scriptwriter fix.
+- **Tagged v0.1.0** — Phase-1 MVP complete and operating in production.
 
 ### 2026-06-09 — Web-researched ideas IN-CLOUD via Gemini grounding (routine retired)
 - **Resolved the routine-delivery dead end.** The cloud Anthropic Routine can't feed the

@@ -5,7 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
-## [Unreleased]
+## [0.1.0] — 2026-06-09 — Phase-1 MVP live 🎉
+
+First Shorts published fully in the cloud (machine-off): idea → Telegram approval → script →
+voice → visuals → assemble → subtitles → YouTube. The pipeline (10 modules + orchestrator) is
+built, tested (101 pass), deployed (GitHub Actions secrets, on-demand `make-short` workflow),
+and proven in production.
+
+### Fixed (real LLM-output failures surfaced by cloud runs)
+- Parse LLM JSON with `strict=False` (raw control chars in grounded responses).
+- Grounded ideation falls back to ungrounded JSON-mode on malformed/truncated grounded JSON.
+- Disabled `gemini-2.5-flash` thinking (`thinking_budget=0`) so JSON replies aren't truncated;
+  raised scriptwriter token budget.
 
 ### Added
 - Foundation: imported the 8-doc design package into [docs/](docs/).
