@@ -94,6 +94,20 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-10 — Analytics learning loop + polish/tuning knobs
+- **Analytics (`src/analytics.py`):** `collect_stats()` pulls each published Short's public
+  views/likes/comments (YouTube `videos.list`, readonly) into the `analytics` table;
+  `db.top_performing_titles()` joins analytics→posts→scripts→ideas to rank winners, which
+  **ideation now injects into its prompt** to make fresh variants of what works. `analytics.yml`
+  wired to run it (manual; daily cron ready to uncomment). Verified live (9 snapshots, join works).
+- **Polish:** AI-image prompt has a stronger cinematic default, tunable via `IMAGE_STYLE`;
+  captions now **group ~`CAPTION_WORDS` words (default 2)** and strip stray punctuation (fixes
+  fragments like "-level"). Exposed `IMAGE_STYLE`/`CAPTION_WORDS`/`KOKORO_SPEED`/`MUSIC_VOLUME`
+  as repo-variable knobs in the workflows — look/feel tunable with zero code. **115 tests pass.**
+- ⚙️ **Tuning knobs (repo Variables):** `IMAGE_STYLE` (AI look), `CAPTION_WORDS` (1=karaoke,
+  2-3=readable), `KOKORO_SPEED` (e.g. 0.95 slower/natural), `MUSIC_VOLUME` (0.10 default),
+  `KOKORO_VOICE`, `VISUAL_SOURCE`, `YOUTUBE_PRIVACY`.
+
 ### 2026-06-10 — Channel went PUBLIC + SEO (titles + tags) + Cloudflare AI visuals live
 - **`YOUTUBE_PRIVACY=public`** — Shorts now publish publicly.
 - **Cloudflare AI images working in CI** (after removing the token's IP filter; verified 200).
