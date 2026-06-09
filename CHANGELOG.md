@@ -58,6 +58,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   **Phase-1 pipeline is code-complete; only go-live steps remain.**
 - **Telegram digest: third "⏭️ Pass" button** → new `passed` idea status (a soft skip, distinct
   from a hard reject; not posted). Wired through `db.IDEA_STATUSES` + `approval`.
+- **On-demand "Make a Short":** `make-short.yml` (`workflow_dispatch`) + `production.make_on_demand`
+  + `ideation_fallback.generate_ideas(n)` — click *Run workflow* → propose ideas to Telegram →
+  tap Make-it → produce + reply with the link. Machine-off, frequency under operator control.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;

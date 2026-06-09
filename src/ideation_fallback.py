@@ -107,6 +107,13 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
     return clean
 
 
+def _produce_ideas(target: int) -> list[dict]:
+    """Ask the LLM for ~target ideas and return the validated/cleaned subset."""
+    raw = llm.generate(_PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2")),
+                       json=True, max_tokens=4096)
+    return _validate_and_clean(_parse_ideas(raw))
+
+
 def run_fallback_ideation() -> int:
     """Generate 15-20 ideas and insert them as 'pending'. Return the count inserted.
 
@@ -117,9 +124,7 @@ def run_fallback_ideation() -> int:
         log.info("ideation_fallback: pending ideas already exist; skipping (idempotent).")
         return 0
 
-    raw = llm.generate(_PROMPT.format(n=18, min_src=config.get("MIN_SOURCES", "2")),
-                       json=True, max_tokens=4096)
-    clean = _validate_and_clean(_parse_ideas(raw))
+    clean = _produce_ideas(18)
     if len(clean) < _MIN_IDEAS:
         raise RuntimeError(
             f"ideation_fallback: only {len(clean)} valid ideas (need >= {_MIN_IDEAS}); "
@@ -128,4 +133,19 @@ def run_fallback_ideation() -> int:
 
     inserted = db.insert_ideas(clean)
     log.info("ideation_fallback: inserted %d pending ideas.", len(inserted))
+    return len(inserted)
+
+
+def generate_ideas(n: int = 3) -> int:
+    """On-demand: generate the best ~n fresh ideas and insert as 'pending'. Return the count.
+
+    Unlike run_fallback_ideation, this has NO pending-queue guard — an explicit on-demand
+    request always produces fresh options (the operator picks via the digest buttons).
+    """
+    n = max(1, n)
+    clean = sorted(_produce_ideas(max(n * 2, 4)), key=lambda d: -d["est_score"])[:n]
+    if not clean:
+        raise RuntimeError("ideation: could not generate any valid idea.")
+    inserted = db.insert_ideas(clean)
+    log.info("ideation: generated %d on-demand idea(s).", len(inserted))
     return len(inserted)

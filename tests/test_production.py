@@ -103,3 +103,36 @@ def test_run_smoke(monkeypatch):
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
     monkeypatch.setattr(production, "run_production", lambda: {"published": [1], "failed": []})
     production.run()  # should not raise
+
+
+def test_make_on_demand_flow(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    calls = []
+    monkeypatch.setattr(production.ideation_fallback, "generate_ideas",
+                        lambda n: calls.append(("gen", n)) or 3)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: calls.append(("digest",)))
+    monkeypatch.setattr(production.approval, "process_responses",
+                        lambda **k: calls.append(("drain", k)) or 1)
+    monkeypatch.setattr(production, "run_production",
+                        lambda: {"published": [{"idea_id": 1, "url": "https://yt/x"}], "failed": []})
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+
+    summary = production.make_on_demand(num_ideas=3, wait_minutes=15)
+    assert summary["published"][0]["url"] == "https://yt/x"
+    # ordered: generate -> digest -> drain(900s) -> (then notify links)
+    assert calls[0] == ("gen", 3) and calls[1] == ("digest",)
+    assert calls[2][0] == "drain" and calls[2][1]["max_seconds"] == 900
+    assert any("https://yt/x" in n for n in notes)  # link sent to Telegram
+
+
+def test_make_on_demand_nothing_approved(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.ideation_fallback, "generate_ideas", lambda n: 3)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: None)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+    monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+    production.make_on_demand()
+    assert any("Nothing approved" in n for n in notes)

@@ -96,6 +96,26 @@ def test_caps_at_max(monkeypatch):
     assert n == fb._MAX_IDEAS == len(captured["rows"])
 
 
+def test_generate_ideas_on_demand_no_pending_guard(monkeypatch):
+    # generate_ideas must NOT skip just because pending ideas already exist
+    monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [{"id": 1}])
+    ideas = [_idea(f"od{i}", est_score=0.1 * i) for i in range(8)]
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": ideas}))
+    captured = {}
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
+    n = fb.generate_ideas(3)
+    assert n == 3 and len(captured["rows"]) == 3
+    # keeps the highest-scored 3
+    assert [r["est_score"] for r in captured["rows"]] == pytest.approx([0.7, 0.6, 0.5])
+
+
+def test_generate_ideas_raises_when_none_valid(monkeypatch):
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
+    with pytest.raises(RuntimeError, match="could not generate"):
+        fb.generate_ideas(3)
+
+
 def test_live_real_llm_ideation(monkeypatch):
     """Real Gemini/Groq generates parseable, well-sourced ideas (DB mocked). Skips offline."""
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])

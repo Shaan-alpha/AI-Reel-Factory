@@ -51,6 +51,14 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 - ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (85 pass).
 
+### Operating model: ON-DEMAND (chosen 2026-06-09)
+Instead of (or before) scheduled crons, the primary trigger is the **`make-short` workflow**
+(`.github/workflows/make-short.yml`, `workflow_dispatch`). Click **Run workflow** (GitHub web/
+mobile) → it generates `ideas` fresh ideas → Telegram digest with Make-it/Pass/Reject → waits
+`wait_min` for your taps → produces the approved → replies with the YouTube link. PC can be off.
+Entry: `python -m src.production make` (`make_on_demand`). You control frequency by how often
+you click. The scheduled cron path (`production.yml`) remains available but optional.
+
 ### Go-live checklist (Phase-1 DoD — these are deploy steps, no new modules)
 1. ✅ **End-to-end dry run done (2026-06-09):** seeded one approved idea → `run_production`
    produced + uploaded a real **unlisted** Short → https://www.youtube.com/shorts/mT4k_iuAZ5s
@@ -85,6 +93,20 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — On-demand "Make a Short" (cloud button + Telegram confirm)
+- New operating model per user choice: trigger Shorts on demand, machine-off, with a Telegram
+  confirm step. Added `.github/workflows/make-short.yml` (`workflow_dispatch`, inputs `ideas` /
+  `wait_min`) → `python -m src.production make`.
+- `production.make_on_demand(num_ideas, wait_minutes)`: generates fresh ideas → `_notify` →
+  `send_digest` → `process_responses` (waits for taps) → `run_production` → Telegram-replies each
+  published link. Added `ideation_fallback.generate_ideas(n)` (on-demand, no pending-guard, keeps
+  the highest-scored n) + a `_notify` helper + `python -m src.production make` CLI mode.
+- Tests: +2 ideation (`generate_ideas` no-guard / none-valid) +2 production (make flow / nothing
+  approved). **Suite: 90 passed, 3 skipped.** ⚠️ Minor: `send_digest` resends all pending, so
+  repeated triggers before deciding can re-show old ideas (decide or they pile up) — fine for v1.
+- **Not yet pushed** — `make-short.yml` must reach the default branch for the Run-workflow button
+  to appear in GitHub Actions.
 
 ### 2026-06-09 — GitHub Actions secrets mirrored (go-live step 2 ✅)
 - Set 10 Actions secrets on `Shaan-alpha/AI-Reel-Factory` (GEMINI/GROQ/SUPABASE_URL+KEY/

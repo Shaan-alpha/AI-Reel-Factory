@@ -128,6 +128,14 @@ def ensure_ideas_and_digest() -> int:
     return n
 
 
+def _notify(text: str) -> None:
+    """Best-effort Telegram message (links, status). Never raises."""
+    try:
+        approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"), text=text)
+    except Exception:  # noqa: BLE001
+        log.warning("production: notify failed: %s", text)
+
+
 def run() -> None:
     """Run one production cycle. See module docstring for the step order."""
     config.validate()  # fail loud on misconfig (rule 14)
@@ -144,5 +152,31 @@ def run() -> None:
              len(summary["published"]), len(summary["failed"]))
 
 
+def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
+    """On-demand 'make a Short': propose fresh ideas to Telegram, wait for taps, produce the
+    approved ones, and reply with the links. Triggered by the make-short workflow button."""
+    config.validate()
+    n = ideation_fallback.generate_ideas(num_ideas)
+    _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
+            f"(waiting up to {wait_minutes} min).")
+    approval.send_digest()
+    approval.process_responses(max_seconds=wait_minutes * 60)
+
+    summary = run_production()
+    if summary["published"]:
+        for p in summary["published"]:
+            _notify(f"✅ Published: {p['url']}")
+    else:
+        _notify("Nothing approved — no Short produced this time.")
+    log.info("make_on_demand: %d published, %d failed.",
+             len(summary["published"]), len(summary["failed"]))
+    return summary
+
+
 if __name__ == "__main__":
-    run()
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "make":
+        make_on_demand(int(os.environ.get("IDEAS", "3")), int(os.environ.get("WAIT_MIN", "20")))
+    else:
+        run()
