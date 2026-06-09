@@ -12,7 +12,8 @@ groq                     # Groq failover
 supabase                 # Supabase Postgres client
 
 # Approval UI
-python-telegram-bot      # Telegram bot + inline buttons
+# NOTE: approval.py talks to the Telegram Bot HTTP API directly via `requests` (below) —
+# no async framework. (python-telegram-bot intentionally not used: simpler for a polling script.)
 
 # Voice (Module 4)
 edge-tts                 # narration (default; Kokoro is the Phase-2 fallback)

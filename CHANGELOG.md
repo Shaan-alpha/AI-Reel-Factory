@@ -49,6 +49,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **Module: `ideation_fallback.py`** — free-API (Gemini→Groq) ideation mirroring the Routine's
   JSON contract, with source/field validation, dedup, score clamping, idempotency, and a
   thin-digest guard. Tests (`tests/test_ideation_fallback.py`, 9 cases) mock llm/db + one live run.
+- **Module: `approval.py`** — Telegram Morning Digest over the Bot HTTP API (requests): per-idea
+  messages with Approve/Reject buttons, long-poll callback handling, soft approval cap, and a
+  chat-id security check. Tests (`tests/test_approval.py`, 11 cases) mock the API + one gated live send.
 
 ### Changed
 - Rebranded **Newsence → But It Matters** (handle `@butitmatters`) across all files;
@@ -57,3 +60,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   deprecated/EOL in late 2025; `llm.py` uses the current `from google import genai` SDK).
 - **`requirements.txt`:** dropped `ffmpeg-python` — `assembly.py` calls the FFmpeg binary
   directly via subprocess (FFmpeg is a documented system dependency).
+- **`requirements.txt`:** dropped `python-telegram-bot` — `approval.py` uses the Telegram Bot
+  HTTP API directly via `requests` (simpler for a polling script).
