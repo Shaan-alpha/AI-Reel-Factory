@@ -52,9 +52,16 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (85 pass).
 
 ### Go-live checklist (Phase-1 DoD — these are deploy steps, no new modules)
-1. **End-to-end dry run locally:** `python -m src.production` against the live DB after
-   approving 1-2 ideas — confirm a real captioned Short uploads (set `YOUTUBE_PRIVACY=unlisted`
-   for the first run). *(The one step not yet exercised live: a real `videos.insert`.)*
+1. ✅ **End-to-end dry run done (2026-06-09):** seeded one approved idea → `run_production`
+   produced + uploaded a real **unlisted** Short → https://www.youtube.com/shorts/mT4k_iuAZ5s
+   (41s, captioned; description carries the analysis, both source links, the AI-disclosure
+   line, `#Shorts`; DB `posts` recorded; idea→`produced`; local files cleaned). **The full
+   real chain incl. `videos.insert` now works.**
+   ⚠️ **Verify in YouTube Studio:** the "Altered content" disclosure on that video. We send
+   `status.containsSyntheticMedia=true` on insert, but the readonly API returns it as `None`
+   and our token lacks the `youtube` (write) scope to re-confirm — so confirm it shows "Yes"
+   in Studio. (The description disclosure line is present regardless.) Test artifacts to clean:
+   delete that unlisted video in Studio; DB has test idea 13 / post 12.
 2. **Mirror `.env` → GitHub Actions secrets** (`gh secret set …`) before any cron run (rule 5).
 3. **Create the ideation runner:** an **Anthropic Routine** from `routines/ideation.md`
    (recommended) so ideas land in `ideas` each morning; the `ideation_fallback` covers misses.
@@ -75,6 +82,18 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ---
 
 ## Log
+
+### 2026-06-09 — First real end-to-end run (unlisted upload) ✅
+- Seeded one approved idea (id 13) and ran `production.run_production(limit=1)` with
+  `YOUTUBE_PRIVACY=unlisted`. Full real chain executed: script (Gemini/Groq) → 40.6s narration
+  (edge-tts) → Pexels B-roll → FFmpeg render → faster-whisper(base) 91 word-events burned →
+  `videos.insert`. **Live:** https://www.youtube.com/shorts/mT4k_iuAZ5s — verified unlisted,
+  `uploadStatus=processed`, 41s, description has analysis + both sources + disclosure line +
+  `#Shorts`, tags set. `posts` row 12 recorded; idea 13 → `produced`; work dir cleaned (rule 15).
+- **Open item:** `containsSyntheticMedia` was sent on insert but reads back `None` via the
+  readonly API; token lacks the `youtube` write scope to re-confirm. → verify the "Altered
+  content" flag in YouTube Studio (description disclosure line is present regardless).
+- This exercises the one path not previously run live (a real upload). MVP is functionally proven.
 
 ### 2026-06-09 — Orchestrator: production.py wired — MVP CODE-COMPLETE
 - Implemented [src/production.py](src/production.py): `run()` validates config →
