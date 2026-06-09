@@ -120,11 +120,18 @@ def _produce_ideas(target: int) -> list[dict]:
     ideas; falls back to ungrounded generation (Gemini→Groq) if grounding is unavailable.
     """
     prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"))
+    # Try web-grounded research first, INCLUDING the parse — grounded JSON is sometimes
+    # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     try:
-        raw = llm.generate_grounded(prompt, max_tokens=4096)
+        raw = llm.generate_grounded(prompt, max_tokens=8192)
+        ideas = _validate_and_clean(_parse_ideas(raw))
+        if ideas:
+            return ideas
+        raise ValueError("grounded response yielded no valid ideas")
     except Exception as e:  # noqa: BLE001 — grounding is best-effort; never block ideation
-        log.warning("ideation: web-grounded research unavailable (%s); using ungrounded llm", e)
-        raw = llm.generate(prompt, json=True, max_tokens=4096)
+        log.warning("ideation: grounded research unusable (%s); using ungrounded JSON mode", e)
+
+    raw = llm.generate(prompt, json=True, max_tokens=4096)
     return _validate_and_clean(_parse_ideas(raw))
 
 

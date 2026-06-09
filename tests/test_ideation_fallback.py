@@ -111,7 +111,9 @@ def test_generate_ideas_on_demand_no_pending_guard(monkeypatch):
 
 
 def test_generate_ideas_raises_when_none_valid(monkeypatch):
-    monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": []}))
+    empty = lambda *a, **k: json.dumps({"ideas": []})
+    monkeypatch.setattr(fb.llm, "generate_grounded", empty)  # grounded empty → falls back...
+    monkeypatch.setattr(fb.llm, "generate", empty)            # ...ungrounded also empty
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     with pytest.raises(RuntimeError, match="could not generate"):
         fb.generate_ideas(3)
@@ -131,6 +133,15 @@ def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
     monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": [_idea("Fallback")]}))
     out = fb._produce_ideas(3)
     assert out and out[0]["title"] == "Fallback"
+
+
+def test_produce_ideas_falls_back_on_malformed_grounded_json(monkeypatch):
+    # grounded returns broken JSON (missing comma / truncated) → must fall back, not crash
+    monkeypatch.setattr(fb.llm, "generate_grounded",
+                        lambda *a, **k: '{"ideas": [{"title": "Broken" "hook": "x"}]')
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": [_idea("Clean")]}))
+    out = fb._produce_ideas(3)
+    assert out and out[0]["title"] == "Clean"
 
 
 def test_load_routine_ideas_reads_file(monkeypatch, tmp_path):
