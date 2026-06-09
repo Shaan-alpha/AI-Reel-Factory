@@ -42,6 +42,13 @@ Cover what people are searching for NOW across: current affairs, government & po
 court/legal rulings, economy & business, science & space (ISRO), technology & AI, health, \
 climate & energy, India infrastructure, sports, and notable world events. Be CURRENT, not generic.
 
+ACCURACY (CRITICAL — this is the #1 rule): propose only REAL, verifiable developments that \
+ACTUALLY happened recently. NEVER invent product names, version numbers, launches, statistics, \
+quotes, or events, and never attribute a claim to a company/person unless it's real. If you are \
+not certain a specific thing genuinely happened, DO NOT make it up — choose a different, real, \
+verifiable story. Fabricated news = instant demonetization and strikes. When unsure, generalize \
+truthfully rather than invent specifics.
+
 FRAMING RULES (monetization safety): strictly NEUTRAL and factual — explain what happened and \
 why it matters; never take political sides or editorialize. Politics, government actions, and \
 court rulings ARE allowed when covered neutrally and well-sourced. EXCLUDE only: communal/ \

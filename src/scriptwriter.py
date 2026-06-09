@@ -58,6 +58,11 @@ WRITE FOR THE EAR: short punchy sentences, contractions, natural rhythm, a touch
 sound like a real person talking, not an essay. No hateful or personal attacks; punch at ideas \
 and irony, not people.
 
+ACCURACY (NON-NEGOTIABLE): state ONLY facts directly supported by the SOURCES above. NEVER invent \
+product names, version numbers, figures, dates, or quotes, and never say "according to <company>" \
+unless the sources actually say it. If a specific detail isn't in the sources, keep it general and \
+true rather than fabricating — a fabricated claim gets the channel demonetized.
+
 Return ONLY a JSON object, no markdown fences:
 {{"script_body": "the spoken narration", "caption": "keyword-rich SEO description \
 including the source link(s)", "hashtags": ["#keyword", "#Shorts"]}}
