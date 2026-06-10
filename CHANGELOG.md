@@ -18,6 +18,9 @@ closed the learning loop so winning *titles* — not just topics — feed back i
 - **`llm.generate(prefer_groq=True)`**: tries Groq first to reserve Gemini's scarce free RPD
   (rule 13) for grounded web research. The no-web tasks — hook punch-up + B-roll keyword extraction
   — now route to Groq; grounded research stays on Gemini. Failover chain intact.
+- **Telegram control bot** (`telegram-bot/`, Vercel webhook, stdlib-only): instant commands —
+  `/makeshort [n]` (starts the GitHub Action), `/today`, `/stats`, `/pending`, `/latest`, `/help`.
+  Operator-only (chat-id + secret-token gated). Helper `tools/set_telegram_webhook.py` + setup guide.
 
 ### Changed
 - **Scriptwriter** (`template-N`): viral title formulas (power-words, curiosity gap, conflict,
