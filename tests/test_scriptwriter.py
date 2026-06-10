@@ -23,9 +23,10 @@ IDEA = {
 
 
 def _patch(monkeypatch, reply: str):
-    """Make llm.generate return `reply` and capture the db.insert_script call."""
+    """Make both LLM paths return `reply` and capture the db.insert_script call."""
     captured = {}
-    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: reply)
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded", lambda *a, **k: reply)  # primary
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: reply)            # fallback
 
     def fake_insert(idea_id, template, body, caption, hashtags):
         captured.update(idea_id=idea_id, template=template, body=body,
@@ -34,6 +35,19 @@ def _patch(monkeypatch, reply: str):
 
     monkeypatch.setattr(scriptwriter.db, "insert_script", fake_insert)
     return captured
+
+
+def test_grounded_failure_falls_back_to_ungrounded(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("no grounding")
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded", _boom)
+    reply = json.dumps({"script_body": "ok body " * 20,
+                        "caption": "cap https://example.com/isro https://example.org/space",
+                        "hashtags": ["#Shorts"]})
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: reply)
+    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a: 7)
+    out = scriptwriter.write_script(IDEA)
+    assert out["script_id"] == 7 and out["script_body"].strip()
 
 
 def test_happy_path_persists_and_returns(monkeypatch):

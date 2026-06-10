@@ -58,10 +58,11 @@ WRITE FOR THE EAR: short punchy sentences, contractions, natural rhythm, a touch
 sound like a real person talking, not an essay. No hateful or personal attacks; punch at ideas \
 and irony, not people.
 
-ACCURACY (NON-NEGOTIABLE): state ONLY facts directly supported by the SOURCES above. NEVER invent \
-product names, version numbers, figures, dates, or quotes, and never say "according to <company>" \
-unless the sources actually say it. If a specific detail isn't in the sources, keep it general and \
-true rather than fabricating — a fabricated claim gets the channel demonetized.
+ACCURACY (NON-NEGOTIABLE): VERIFY the development actually happened (use the sources + web search). \
+If it doesn't check out, do NOT repeat the false premise — write the most accurate version you can. \
+State ONLY facts you can support. NEVER invent product names, version numbers, figures, dates, or \
+quotes, and never say "according to <company>" unless it's real. A fabricated claim gets the \
+channel demonetized.
 
 ALSO produce, for YouTube discoverability:
 - "title": a punchy, click-worthy, SEO-optimized title (<=80 chars) that front-loads the topic \
@@ -100,6 +101,19 @@ def _parse_llm_json(raw: str) -> dict:
     return json.loads(raw[start : end + 1], strict=False)  # tolerate raw control chars in strings
 
 
+def _generate_script_json(prompt: str) -> dict:
+    """Write the script with live web-grounding (verifies facts), falling back to ungrounded
+    JSON mode if grounding is unavailable or returns unusable JSON. Accuracy guard for a public
+    channel — grounding lets the model catch a fabricated premise instead of repeating it."""
+    try:
+        data = _parse_llm_json(llm.generate_grounded(prompt, max_tokens=2048))
+        if (data.get("script_body") or "").strip():
+            return data
+    except Exception as e:  # noqa: BLE001 — grounded write is best-effort; fall back
+        log.warning("scriptwriter: grounded write unusable (%s); using ungrounded JSON mode", e)
+    return _parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048))
+
+
 def _ensure_sources(caption: str, sources: list[str]) -> str:
     """Guarantee every source URL is present in the caption (copyright/sourcing gate)."""
     missing = [s for s in sources if s and s not in caption]
@@ -135,8 +149,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
     if idea_id is None:
         raise ValueError("scriptwriter: idea has no 'id' (must be a persisted ideas row).")
 
-    raw = llm.generate(_build_prompt(idea, template), json=True, max_tokens=2048)
-    data = _parse_llm_json(raw)
+    data = _generate_script_json(_build_prompt(idea, template))
 
     body = (data.get("script_body") or "").strip()
     if not body:

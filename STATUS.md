@@ -94,6 +94,20 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-10 — Deep audit: fixes + grounded scriptwriter + clean-slate data
+- **Audited the whole system.** Fixed: (1) duplicate-publish gap → idea-level idempotency before
+  scripting (`db.get_published_post_for_idea`); (2) pinned `requirements.txt` (rule 10);
+  (3) `config.get_bool` so `AI_DISCLOSURE=1` can't silently disable disclosure; (4) CHANGELOG/
+  version → **v0.2.0** (tagged); (5) CI caches Kokoro+whisper+pip (~260 MB/run saved).
+- **Accuracy hardened (public-channel risk):** scriptwriter is now **web-grounded** — it verifies
+  the premise via search and won't repeat a fabricated one, falling back to ungrounded JSON mode.
+  Verified live (142-word script, web-verified title).
+- **Wiped all test data** from Supabase (analytics/posts/scripts/ideas → 0) so the analytics
+  learning loop starts clean from real PUBLIC videos only. **Operator: delete the unlisted test
+  Shorts in YouTube Studio** (esp. the fabricated "Claude Fable 5" one).
+- **116 tests pass.** Open (low/optional): `make_on_demand` re-sends undecided pending on repeat
+  triggers; image clips are encoded twice (visuals→assembly).
+
 ### 2026-06-10 — Analytics learning loop + polish/tuning knobs
 - **Analytics (`src/analytics.py`):** `collect_stats()` pulls each published Short's public
   views/likes/comments (YouTube `videos.list`, readonly) into the `analytics` table;
