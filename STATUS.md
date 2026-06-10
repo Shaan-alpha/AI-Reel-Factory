@@ -94,6 +94,22 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-10 — Gemini RPD blown → route no-web tasks to Groq (reserve Gemini for grounding)
+- **Quota finding:** Gemini 2.5 Flash free **RPD hit 30/20 (over limit)** — text calls now 429.
+  The Gemini→Groq failover (rule 11) keeps the pipeline alive, but grounded web research is
+  Gemini-only, so accuracy degrades to ungrounded while exhausted. The new hook judge added load.
+- **Fix (operator: don't make output worse):** added `llm.generate(prefer_groq=True)` — tries
+  **Groq first**, Gemini second. Routed the two **no-web** tasks there: **hook punch-up**
+  (`scriptwriter`) and **B-roll keyword extraction** (`visuals`). The accuracy-critical **grounded
+  research stays on Gemini**, so quality where it matters is unchanged; Gemini's scarce RPD is now
+  reserved for it (rule 13). Failover still intact (Groq→Gemini if Groq fails).
+- **Upgraded the Groq-routed prompts** for llama-3.3-70b: stronger hook-doctor instructions
+  (explicit score→rewrite steps, strict no-fact-change rule, JSON-only) and richer keyword
+  translation (added oil/energy + sport stand-ins, story-beat ordering, strike abstract words).
+  **Verified live on Groq** (valid JSON, scored a strong hook 9 and correctly left it). **139 pass.**
+- ⚙️ Optional extra relief (no code): set repo var `GEMINI_MODEL` to a higher-free-RPD model
+  (e.g. `gemini-2.0-flash`) — verify current limits first.
+
 ### 2026-06-10 — Learning loop LIT with real analytics
 - Ran `analytics.collect_stats()` against the live channel → **6 real snapshots** recorded
   (views/likes/comments) for the published Shorts. `db.top_performing_titles()` now returns real
