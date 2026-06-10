@@ -94,6 +94,17 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-11 — Telegram control bot LIVE on Vercel ✅
+- Deployed `telegram-bot/` to Vercel (project **telegram-bot**, team shaan-alphas-projects) via the
+  CLI from the isolated dir (stdlib-only, no heavy deps). Webhook registered + the operator's 7 env
+  vars set; secret-token gate verified (a POST without `WEBHOOK_SECRET` → 401). **Confirmed working
+  end-to-end** — `/help`, `/stats`, `/today` reply in Telegram.
+  - Webhook: `https://telegram-bot-gilt-omega.vercel.app/api/telegram`
+  - Redeploy after code/env change: `vercel deploy --prod --yes --cwd telegram-bot`
+  - Re-register webhook: `python tools/set_telegram_webhook.py <url>/api/telegram`
+- Fixed a Windows-console crash in `set_telegram_webhook.py` (non-ASCII `→`/emoji in print → cp1252
+  UnicodeEncodeError) — the webhook had already registered; output is now ASCII-safe.
+
 ### 2026-06-10 — Telegram control bot (Vercel webhook) — code done, deploy pending
 - **New instant command surface** (operator chose webhook over polling): `telegram-bot/api/telegram.py`,
   a **stdlib-only Vercel serverless function** (zero deps; isolated in its own dir so Vercel doesn't
