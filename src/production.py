@@ -38,6 +38,32 @@ log = logging.getLogger("production")
 
 _PLATFORM = "youtube"
 
+# Brand footer appended to every Short's description (branding + CTA + 3 brand hashtags).
+# Complements — never duplicates — the scriptwriter's caption (hook, sources, AI disclosure) and
+# publish's #Shorts. Kept to 3 hashtags so the total stays under YouTube's 15-hashtag cap.
+# Override the whole block via the DESCRIPTION_FOOTER env var; disable via ENABLE_DESC_FOOTER=false.
+_DEFAULT_FOOTER = (
+    "—\n"
+    "📌 But It Matters — the news that actually matters, in 60 seconds.\n"
+    "🔔 New explainer Shorts every day → Subscribe @butitmatters\n\n"
+    "#ButItMatters #NewsShorts #WhyItMatters"
+)
+_YT_DESCRIPTION_MAX = 4900  # YouTube hard cap is 5000; leave headroom for publish's #Shorts
+
+
+def _with_footer(description: str) -> str:
+    """Append the brand footer to a description (toggle ENABLE_DESC_FOOTER; override DESCRIPTION_FOOTER).
+
+    Idempotent (won't double-append) and length-capped so it never blows YouTube's 5000-char limit.
+    """
+    if not config.get_bool("ENABLE_DESC_FOOTER", True):
+        return description
+    footer = (config.get("DESCRIPTION_FOOTER") or _DEFAULT_FOOTER).strip()
+    if not footer or footer in description:
+        return description
+    combined = f"{description.rstrip()}\n\n{footer}" if description.strip() else footer
+    return combined[:_YT_DESCRIPTION_MAX].rstrip()
+
 
 def _work_root() -> str:
     root = config.get("WORK_DIR") or os.path.join(tempfile.gettempdir(), "ai-reel-factory")
@@ -57,7 +83,7 @@ def _build_metadata(idea: dict, script: dict) -> dict:
         if t and t.lower() not in seen:
             seen.add(t.lower())
             tags.append(t)
-    return {"title": title, "description": script.get("caption", ""), "tags": tags}
+    return {"title": title, "description": _with_footer(script.get("caption", "")), "tags": tags}
 
 
 def produce_one(idea: dict, work_root: str) -> tuple[str, str]:

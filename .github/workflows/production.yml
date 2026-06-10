@@ -57,6 +57,8 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
           CAPTION_WORDS: ${{ vars.CAPTION_WORDS || '2' }}
+          ENABLE_DESC_FOOTER: ${{ vars.ENABLE_DESC_FOOTER || 'true' }}  # append brand footer to descriptions
+          DESCRIPTION_FOOTER: ${{ vars.DESCRIPTION_FOOTER }}         # optional: override the default footer
           ENABLE_HOOK_CAPTION: ${{ vars.ENABLE_HOOK_CAPTION || 'true' }}  # frame-1 title hook banner (CTR)
           HOOK_SECONDS: ${{ vars.HOOK_SECONDS || '1.8' }}            # how long the hook banner shows
           CLIP_SECONDS: ${{ vars.CLIP_SECONDS || '3.5' }}           # B-roll cut length (fast = more retention)

@@ -94,6 +94,16 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-11 — Channel branding: description footer + (manual) channel About/keywords
+- **Description footer** (`production._with_footer`): every Short's description now ends with a
+  brand + subscribe-CTA + 3 brand hashtags block (`#ButItMatters #NewsShorts #WhyItMatters`).
+  Complements — never duplicates — the scriptwriter caption (hook/sources/AI-disclosure) and
+  publish's `#Shorts`; total stays under YouTube's 15-hashtag cap. Idempotent + length-capped
+  (≤4900 chars). Toggle `ENABLE_DESC_FOOTER`; override copy via `DESCRIPTION_FOOTER` (both wired
+  into the workflows). **17 production tests pass.**
+- **Operator (manual, no code):** set the channel **About** description + hidden **keywords**
+  (drafted in chat) in YouTube Studio — copy lives in the conversation, not a repo file.
+
 ### 2026-06-11 — Telegram control bot LIVE on Vercel ✅
 - Deployed `telegram-bot/` to Vercel (project **telegram-bot**, team shaan-alphas-projects) via the
   CLI from the isolated dir (stdlib-only, no heavy deps). Webhook registered + the operator's 7 env

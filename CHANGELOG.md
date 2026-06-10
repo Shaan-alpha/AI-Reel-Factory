@@ -21,6 +21,9 @@ closed the learning loop so winning *titles* — not just topics — feed back i
 - **Telegram control bot** (`telegram-bot/`, Vercel webhook, stdlib-only): instant commands —
   `/makeshort [n]` (starts the GitHub Action), `/today`, `/stats`, `/pending`, `/latest`, `/help`.
   Operator-only (chat-id + secret-token gated). Helper `tools/set_telegram_webhook.py` + setup guide.
+- **Brand description footer**: every Short's description gets a branding + subscribe-CTA + 3 brand
+  hashtags footer (`production._with_footer`), idempotent + length-capped, complementing (not
+  duplicating) the caption/sources/disclosure. Toggle `ENABLE_DESC_FOOTER`; override `DESCRIPTION_FOOTER`.
 
 ### Changed
 - **Scriptwriter** (`template-N`): viral title formulas (power-words, curiosity gap, conflict,

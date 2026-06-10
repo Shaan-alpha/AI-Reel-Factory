@@ -51,6 +51,35 @@ def test_produce_one_idempotent_skips_before_scripting(monkeypatch, tmp_path):
     assert vid == "OLD" and (7, "produced") in produced
 
 
+def test_build_metadata_appends_footer(monkeypatch):
+    monkeypatch.delenv("ENABLE_DESC_FOOTER", raising=False)  # default on
+    monkeypatch.delenv("DESCRIPTION_FOOTER", raising=False)
+    meta = production._build_metadata(
+        {"id": 1, "title": "T"},
+        {"title": "Viral T", "caption": "the analysis. https://src", "hashtags": [], "tags": []})
+    assert "But It Matters" in meta["description"]
+    assert meta["description"].startswith("the analysis.")        # caption preserved, footer after
+    assert meta["description"].count("#ButItMatters") == 1
+
+
+def test_footer_toggle_off(monkeypatch):
+    monkeypatch.setenv("ENABLE_DESC_FOOTER", "0")
+    assert production._with_footer("just the caption") == "just the caption"
+
+
+def test_footer_is_idempotent(monkeypatch):
+    monkeypatch.delenv("ENABLE_DESC_FOOTER", raising=False)
+    once = production._with_footer("body text")
+    twice = production._with_footer(once)            # re-applying must not double the footer
+    assert once == twice and twice.count("#ButItMatters") == 1
+
+
+def test_footer_env_override(monkeypatch):
+    monkeypatch.setenv("DESCRIPTION_FOOTER", "Follow @x")
+    out = production._with_footer("caption")
+    assert out == "caption\n\nFollow @x"
+
+
 def test_run_production_is_fail_soft(monkeypatch):
     ideas = [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}, {"id": 3, "title": "c"}]
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
