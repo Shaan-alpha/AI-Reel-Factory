@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.1.0 (**Phase-1 MVP LIVE** — first Shorts published cloud, machine-off; 101 pass)
+**Version:** 0.2.0 (**PUBLIC** — AI visuals + analytics + SEO; 115 tests pass)
 **Last updated:** 2026-06-09
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 

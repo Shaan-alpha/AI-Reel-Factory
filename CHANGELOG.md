@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.2.0] — 2026-06-10 — Public channel + quality/discoverability/learning
+
+Post-MVP enhancements; channel went **public** and the pipeline got materially better.
+
+### Added
+- **Trending ideation** (`trends.py`): live Google-Trends-India seeds + topic filter that allows
+  neutral politics/government/court coverage (operator choice) with hard guards.
+- **Web-grounded ideation**: Gemini Google Search grounding → real, current, sourced ideas;
+  falls back to ungrounded JSON mode.
+- **Kokoro humanized TTS** (primary) with edge-tts fallback.
+- **AI / photo visuals**: `VISUAL_SOURCE` = `ai` (Cloudflare Flux) / `photos` (Pexels + Ken Burns)
+  / `video`; image sources fall back to stock video.
+- **Background music** bed (`assets/music/`, FFmpeg mix under narration).
+- **SEO**: scriptwriter-generated optimized titles + 10–15 tags; tag budget cap.
+- **Analytics** (`analytics.py`): pull view/like/comment stats → rank winners → feed back into
+  ideation. `analytics.yml` wired.
+- **Tuning knobs** as repo variables: `IMAGE_STYLE`, `CAPTION_WORDS`, `KOKORO_SPEED/VOICE`,
+  `MUSIC_VOLUME`, `VISUAL_SOURCE`, `YOUTUBE_PRIVACY`.
+
+### Changed
+- Script tone → natural, thrilling, scroll-stopping (shorter ~110–130 words).
+- B-roll keywords translate proper nouns → filmable stand-ins (courtroom, parliament, rocket).
+- Captions group ~2 words + clean stray punctuation; minimal AI-disclosure line.
+- CI caches Kokoro/whisper models + pip; `requirements.txt` pinned.
+
+### Fixed
+- **Anti-hallucination guardrails** (ideation + scriptwriter) after a fabricated "Claude Fable 5"
+  reel — only real, source-supported facts.
+- **Duplicate-publish gap**: idea-level idempotency before scripting.
+- LLM-JSON robustness (`strict=False`, grounded→ungrounded fallback); disabled gemini-2.5-flash
+  thinking so JSON replies aren't truncated. Robust boolean config parsing.
+
 ## [0.1.0] — 2026-06-09 — Phase-1 MVP live 🎉
 
 First Shorts published fully in the cloud (machine-off): idea → Telegram approval → script →
