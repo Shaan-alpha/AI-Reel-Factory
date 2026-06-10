@@ -53,6 +53,20 @@ def test_generate_grounded_raises_on_empty(monkeypatch):
         llm.generate_grounded("x")
 
 
+def test_prefer_groq_tries_groq_first(monkeypatch):
+    # prefer_groq=True must use Groq even when Gemini would also succeed (reserve Gemini RPD)
+    monkeypatch.setattr(llm, "_gen_gemini", lambda *a, **k: "gemini-text")
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+    assert llm.generate("hi", prefer_groq=True) == "groq-text"
+
+
+def test_prefer_groq_still_falls_back_to_gemini(monkeypatch):
+    # if Groq fails, prefer_groq must still fail over to Gemini (chain stays intact, rule 11)
+    monkeypatch.setattr(llm, "_gen_groq", _raise("groq down"))
+    monkeypatch.setattr(llm, "_gen_gemini", lambda *a, **k: "gemini-text")
+    assert llm.generate("hi", prefer_groq=True) == "gemini-text"
+
+
 def test_json_flag_threads_through(monkeypatch):
     captured = {}
 

@@ -103,16 +103,24 @@ def _gen_groq(prompt: str, *, json: bool, max_tokens: int) -> str:
     return resp.choices[0].message.content or ""
 
 
-def generate(prompt: str, *, json: bool = False, max_tokens: int = 1024) -> str:
+def generate(prompt: str, *, json: bool = False, max_tokens: int = 1024,
+             prefer_groq: bool = False) -> str:
     """Generate text via Gemini; on error/quota/empty, fail over to Groq. Return raw text.
 
     Set json=True when the prompt asks for a JSON object (callers parse the result); both
     providers are put into JSON mode. Raises RuntimeError only if *every* provider fails —
     a single upstream failure never propagates (rule 11). This is the runtime-soft path
     (rule 14): providers are tried in order and failures are logged, not fatal.
+
+    prefer_groq=True tries Groq FIRST (Gemini second). Use it for no-web text tasks (hook
+    punch-up, keyword extraction) so Gemini's scarce free RPD (rule 13) is reserved for the
+    grounded web research that only Gemini can do — quality on the accuracy-critical path stays.
     """
+    gemini = ("gemini", _gen_gemini)
+    groq = ("groq", _gen_groq)
+    order = (groq, gemini) if prefer_groq else (gemini, groq)
     errors: list[str] = []
-    for name, fn in (("gemini", _gen_gemini), ("groq", _gen_groq)):
+    for name, fn in order:
         try:
             text = fn(prompt, json=json, max_tokens=max_tokens)
         except Exception as e:  # noqa: BLE001 — failover must catch anything upstream throws

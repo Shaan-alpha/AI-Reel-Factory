@@ -67,24 +67,30 @@ def _keywords_heuristic(script_body: str, n: int) -> list[str]:
 
 def _keywords_via_llm(script_body: str, n: int) -> list[str]:
     prompt = (
-        f"You pick stock-VIDEO search queries for a news Short. Give {n} CONCRETE, literal, "
-        f"FILMABLE queries (1-3 words each) that stock sites (Pexels/Pixabay) actually have "
-        f"footage for, matching this narration.\n"
+        f"You are a stock-footage researcher picking B-roll search queries for a news Short. "
+        f"Give exactly {n} CONCRETE, literal, FILMABLE queries (1-3 words each) that stock sites "
+        f"(Pexels/Pixabay) actually have footage for, matching this narration. Order them to follow "
+        f"the story beats so the visuals track what's being said.\n"
         f"KEY RULE: stock sites do NOT have clips of specific people, brands, or named events — "
-        f"so TRANSLATE those into filmable stand-ins:\n"
+        f"so TRANSLATE every proper noun into a filmable stand-in:\n"
         f"  politician/government -> 'parliament building', 'indian flag', 'government office'\n"
         f"  court case/legal -> 'courtroom', 'judge gavel', 'law books'\n"
         f"  ISRO/space mission -> 'rocket launch', 'satellite orbit', 'mission control'\n"
         f"  economy/stocks -> 'stock market screen', 'indian currency', 'city skyline'\n"
         f"  AI/tech -> 'data center', 'circuit board', 'person using laptop'\n"
-        f"Use tangible subjects: places, objects, people doing things, nature, city, crowds, maps. "
-        f"AVOID proper nouns and abstract words entirely.\n\n"
+        f"  oil/energy -> 'oil refinery', 'oil pump jack', 'cargo ship'\n"
+        f"  sport -> 'football stadium', 'soccer match', 'cheering crowd'\n"
+        f"Prefer visually striking, high-motion subjects (they hold attention): places, objects, "
+        f"people doing things, nature, cities, crowds, maps. AVOID proper nouns, logos, and abstract "
+        f"words (policy, economy, impact) entirely — only things a camera can film.\n\n"
         f"NARRATION:\n{script_body}\n\n"
-        f'Return ONLY JSON: {{"keywords": ["...", "..."]}}'
+        f'Output ONE valid JSON object and nothing else, no markdown or fences: '
+        f'{{"keywords": ["query one", "query two"]}}'
     )
     import json
 
-    raw = llm.generate(prompt, json=True, max_tokens=200)
+    # prefer_groq: no web needed → reserve Gemini's free RPD for grounded research (rule 13).
+    raw = llm.generate(prompt, json=True, max_tokens=200, prefer_groq=True)
     start, end = raw.find("{"), raw.rfind("}")
     data = json.loads(raw[start : end + 1], strict=False)
     kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]

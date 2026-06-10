@@ -135,22 +135,30 @@ def _generate_script_json(prompt: str) -> dict:
 # A cheap free-API pass that scores the opening hook and, only if it's weak, sharpens the title +
 # opening for more scroll-stop — WITHOUT touching any fact (accuracy is the hard line). Fail-soft:
 # any error or a bad rewrite keeps the original. Toggle ENABLE_HOOK_JUDGE; threshold HOOK_MIN_SCORE.
-_PUNCHUP_PROMPT = """You are a viral YouTube Shorts hook doctor. Below is a Short's title and narration.
+_PUNCHUP_PROMPT = """You are a world-class viral YouTube Shorts hook doctor. You make the first \
+3 seconds impossible to scroll past. Below is a Short's title and narration.
 
 TITLE: {title}
 NARRATION:
 {body}
 
-Rate how hard the FIRST 3 SECONDS (the opening line) stop a scroll, 1-10. Then, ONLY IF it can be \
-stronger, rewrite the TITLE and the OPENING so they are more shocking / curiosity-driving and make \
-the viewer NEED to keep watching.
+STEP 1 — Score the CURRENT opening line (the first ~3 seconds) from 1 to 10 on raw scroll-stopping \
+power: 10 = a shocking, curiosity-exploding hook nobody could scroll past; 1 = a flat, slow, \
+"explainer" intro.
 
-HARD RULE — DO NOT add, remove, or change any FACT, name, number, date, quote, or claim. Every \
-factual statement must stay exactly as true as the original; you may ONLY re-word and re-order for \
-punch. Keep the narration about the same length (~110-130 words) and keep the closing CTA/loop line.
+STEP 2 — Rewrite for maximum pull (do this whenever the score is below 9):
+- TITLE: short, punchy, curiosity-gap or conflict, a power-word (Shock, Nightmare, Wars, Secret, \
+Insane), ALL-CAPS on ONE key word. It may over-promise drama, but must sit on the real story.
+- OPENING: replace the first 1-2 sentences with an explosive hook — a shocking fact already in the \
+script, a bold claim, or an open question the viewer NEEDS answered. Keep the rest of the narration.
 
-Return ONLY JSON, no fences: \
-{{"hook_score": 7, "title": "punchier title", "script_body": "the full narration with a punchier opening"}}
+HARD RULE — DO NOT add, remove, or change any FACT, name, number, date, quote, statistic, or claim. \
+Every factual statement must stay exactly as true as the original. You may ONLY re-word, re-order, \
+and intensify the DELIVERY. Keep the narration roughly the same length (~110-130 words) and keep \
+the closing CTA / loop-back line.
+
+OUTPUT — return ONE valid JSON object and NOTHING else. No markdown, no code fences, no commentary:
+{{"hook_score": 7, "title": "the punchier title", "script_body": "the full narration with a punchier opening"}}
 """
 
 
@@ -163,8 +171,11 @@ def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
     if not body.strip():
         return title, body
     try:
+        # prefer_groq: this is a no-web creative task → keep Gemini's scarce RPD for grounded
+        # research (rule 13). Groq's llama-3.3-70b handles punch-up copy at least as well.
         data = _parse_llm_json(
-            llm.generate(_PUNCHUP_PROMPT.format(title=title, body=body), json=True, max_tokens=2048)
+            llm.generate(_PUNCHUP_PROMPT.format(title=title, body=body),
+                         json=True, max_tokens=2048, prefer_groq=True)
         )
     except Exception as e:  # noqa: BLE001 — punch-up is optional; keep the original on any error
         log.warning("scriptwriter: hook punch-up failed (%s); keeping original.", e)

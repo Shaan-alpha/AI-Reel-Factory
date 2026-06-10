@@ -15,6 +15,9 @@ closed the learning loop so winning *titles* — not just topics — feed back i
 - **`scripts.title`** column + persistence: the punchy PUBLISHED title is now stored, so
   `db.top_performing_titles()` learns which title STYLE wins (returns `"title" — N views`), not the
   dry idea topic.
+- **`llm.generate(prefer_groq=True)`**: tries Groq first to reserve Gemini's scarce free RPD
+  (rule 13) for grounded web research. The no-web tasks — hook punch-up + B-roll keyword extraction
+  — now route to Groq; grounded research stays on Gemini. Failover chain intact.
 
 ### Changed
 - **Scriptwriter** (`template-N`): viral title formulas (power-words, curiosity gap, conflict,
