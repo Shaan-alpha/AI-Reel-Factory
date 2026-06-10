@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 
-from src import db, llm
+from src import config, db, llm
 
 log = logging.getLogger(__name__)
 
@@ -33,10 +33,11 @@ DISCLOSURE_LINE = "AI-generated narration; stock visuals."
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)
 
-_PROMPT_N = """You are the scriptwriter for "But It Matters" — punchy, fast-paced YouTube Shorts \
-that make people STOP scrolling. Your voice is NATURAL and conversational with a bit of edge — \
-like a sharp friend who tells you something wild and makes it click. Energetic and gripping, \
-never a stiff news-anchor, never forced or corny. Every FACT stays 100% accurate.
+_PROMPT_N = """You are the scriptwriter for "But It Matters" — viral, fast-paced YouTube Shorts \
+engineered to make people STOP scrolling and WATCH TILL THE END. Your voice is NATURAL and \
+conversational with real edge — like a sharp friend dropping something wild that makes you go \
+"wait, WHAT?". Energetic, gripping, a little dramatic. Never a stiff news-anchor. Every FACT \
+stays real (see ACCURACY) — but the FRAMING, the title, and the hook are maximum-intensity.
 
 IDEA: {title}
 HOOK: {hook}
@@ -44,35 +45,52 @@ ANGLE (the take to develop): {angle}
 SOURCES:
 {sources}
 
+WHAT WINS ON THIS CHANNEL (proven by analytics): short, dramatic, curiosity-gap titles built on \
+CONFLICT and EMOTION crush dry "explainer" titles. "Oil Export Wars" and "Messi's Nightmare \
+Debut" got 1000+ views; "Delhi Air Pollution Explained" and "Kerala's New CM" flopped. So: drama \
+and curiosity over clarity. Make every viewer feel they'll MISS something if they scroll past.
+
 Write a ~110-130 word (<=45s) narration that FLOWS naturally when spoken out loud:
-1. HOOK (first 3s): a scroll-stopping opener — a surprising fact, bold claim, or curiosity gap \
-that makes the viewer go "wait, what?". Make it THRILLING and specific. No "in this video", no \
-throat-clearing.
+1. HOOK (first 3s — THE most important line): an explosive, scroll-stopping opener — a shocking \
+fact, a bold claim, or an open curiosity LOOP ("Nobody saw this coming...", "This changes \
+everything, and here's why..."). Make them NEED the answer. Plant a question you only resolve at \
+the END so they watch through. No "in this video", no throat-clearing.
 2. WHAT HAPPENED: 1-2 real facts in your own words, citing the source out loud ("according to ..."). \
-Keep it true — the energy is in the delivery, never in exaggeration.
-3. WHY IT MATTERS: the real stakes, with a little bite — why anyone should actually care.
-4. PAYOFF: what it means for you / India / the world.
-5. CTA: one natural, snappy line to follow or comment.
+Deliver them with stakes and tension — the drama is in HOW you say a true thing.
+3. WHY IT MATTERS: the real stakes, with bite — why this is a bigger deal than it looks.
+4. PAYOFF: pay off the loop you opened — the twist / what it really means for you / India / the world.
+5. CTA + SEAMLESS LOOP: one punchy line that also loops back into the hook, so when the Short \
+auto-replays the last words flow naturally into your first line (Shorts replay = more watch-time = \
+more reach). End on a phrase that re-sets the opening question. ("comment if this shocked you", \
+"follow before the next one").
 
-WRITE FOR THE EAR: short punchy sentences, contractions, natural rhythm, a touch of wit. It must \
-sound like a real person talking, not an essay. No hateful or personal attacks; punch at ideas \
-and irony, not people.
+WRITE FOR THE EAR: short punchy sentences, contractions, natural rhythm, building tension. Sound \
+like a real person who's genuinely amped, not an essay. No hateful or personal attacks; punch at \
+situations and irony, not people (harassment = demonetization).
 
-ACCURACY (NON-NEGOTIABLE): VERIFY the development actually happened (use the sources + web search). \
-If it doesn't check out, do NOT repeat the false premise — write the most accurate version you can. \
-State ONLY facts you can support. NEVER invent product names, version numbers, figures, dates, or \
-quotes, and never say "according to <company>" unless it's real. A fabricated claim gets the \
-channel demonetized.
+ACCURACY (THE ONE HARD LINE — everything else is hype, this is not): VERIFY the development actually \
+happened (use the sources + web search). State ONLY facts you can support. NEVER invent product \
+names, version numbers, figures, dates, quotes, or events, and never say "according to <company>" \
+unless it's real. Hype the FRAMING, never fabricate the STORY — a made-up fact gets the channel \
+struck and demonetized, which kills the views. If the premise doesn't check out, write the most \
+dramatic ACCURATE version instead.
 
-ALSO produce, for YouTube discoverability:
-- "title": a punchy, click-worthy, SEO-optimized title (<=80 chars) that front-loads the topic \
-and makes people want to tap — not clickbait-lie, just compelling and accurate.
+ALSO produce, for the feed + discoverability:
+- "title": a VIRAL, curiosity-driven YouTube title (<=70 chars, shorter hits harder). Use the \
+proven formulas: shock/emotion power-words (Nightmare, Shock, Disaster, Wars, Insane, Secret), a \
+curiosity gap, conflict ("X vs Y"), a number, ALL-CAPS on ONE key word, and/or a "watch till the \
+end" pull. It can over-promise drama — but it must sit on top of the REAL story (no invented \
+facts in the title). Front-load the punchiest word. Examples of the target energy: \
+"Oil Export Wars", "Messi's WORST Debut Ever — 6-0", "Delhi's Air Just Broke a Terrifying Record", \
+"India's New Gas Rule Quietly Changes Your Kitchen".
+- "caption": the YouTube description. FIRST LINE is a second curiosity hook (YouTube shows ~2 lines \
+in-feed) — make them tap "more". Then a keyword-rich line for SEO, then the source link(s).
 - "tags": 10-15 specific search keywords/phrases people would actually type (the topic, the \
 people/orgs involved, the category, and close synonyms). No '#'.
 
 Return ONLY a JSON object, no markdown fences:
-{{"title": "the SEO title", "script_body": "the spoken narration", "caption": "keyword-rich \
-SEO description including the source link(s)", "hashtags": ["#keyword", "#Shorts"], \
+{{"title": "the VIRAL title", "script_body": "the spoken narration", "caption": "hook line first, \
+then keyword-rich SEO description including the source link(s)", "hashtags": ["#keyword", "#Shorts"], \
 "tags": ["search keyword", "another phrase"]}}
 """
 
@@ -112,6 +130,61 @@ def _generate_script_json(prompt: str) -> dict:
     except Exception as e:  # noqa: BLE001 — grounded write is best-effort; fall back
         log.warning("scriptwriter: grounded write unusable (%s); using ungrounded JSON mode", e)
     return _parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048))
+
+
+# A cheap free-API pass that scores the opening hook and, only if it's weak, sharpens the title +
+# opening for more scroll-stop — WITHOUT touching any fact (accuracy is the hard line). Fail-soft:
+# any error or a bad rewrite keeps the original. Toggle ENABLE_HOOK_JUDGE; threshold HOOK_MIN_SCORE.
+_PUNCHUP_PROMPT = """You are a viral YouTube Shorts hook doctor. Below is a Short's title and narration.
+
+TITLE: {title}
+NARRATION:
+{body}
+
+Rate how hard the FIRST 3 SECONDS (the opening line) stop a scroll, 1-10. Then, ONLY IF it can be \
+stronger, rewrite the TITLE and the OPENING so they are more shocking / curiosity-driving and make \
+the viewer NEED to keep watching.
+
+HARD RULE — DO NOT add, remove, or change any FACT, name, number, date, quote, or claim. Every \
+factual statement must stay exactly as true as the original; you may ONLY re-word and re-order for \
+punch. Keep the narration about the same length (~110-130 words) and keep the closing CTA/loop line.
+
+Return ONLY JSON, no fences: \
+{{"hook_score": 7, "title": "punchier title", "script_body": "the full narration with a punchier opening"}}
+"""
+
+
+def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
+    """Optionally sharpen a weak hook+title via a cheap LLM pass. Returns (title, body).
+
+    Best-effort (rule 11/14): on any failure, a high score, or an invalid rewrite, returns the
+    originals unchanged. Never adds facts — the prompt forbids it and the sources/caption are
+    untouched, so monetization compliance is unaffected."""
+    if not body.strip():
+        return title, body
+    try:
+        data = _parse_llm_json(
+            llm.generate(_PUNCHUP_PROMPT.format(title=title, body=body), json=True, max_tokens=2048)
+        )
+    except Exception as e:  # noqa: BLE001 — punch-up is optional; keep the original on any error
+        log.warning("scriptwriter: hook punch-up failed (%s); keeping original.", e)
+        return title, body
+
+    try:
+        score = int(float(data.get("hook_score", 0)))
+    except (TypeError, ValueError):
+        score = 0
+    if score >= int(config.get("HOOK_MIN_SCORE", "8")):
+        log.info("scriptwriter: hook already strong (score %d); not rewriting.", score)
+        return title, body
+
+    new_body = (data.get("script_body") or "").strip()
+    new_title = (data.get("title") or "").strip()
+    if new_body and 80 <= len(new_body.split()) <= 220:  # sane rewrite only
+        log.info("scriptwriter: punched up a weak hook (score %d).", score)
+        return (new_title or title), new_body
+    log.info("scriptwriter: punch-up rewrite unusable (score %d); keeping original.", score)
+    return title, body
 
 
 def _ensure_sources(caption: str, sources: list[str]) -> str:
@@ -155,6 +228,13 @@ def write_script(idea: dict, template: str = "N") -> dict:
     if not body:
         raise ValueError(f"scriptwriter: empty script_body for idea {idea_id}.")
 
+    # SEO extras (used by publish for title + tags; fall back to the idea title downstream).
+    title = (data.get("title") or "").strip()
+
+    # Scroll-stop judge: punch up a weak hook+title before we spend a render (fail-soft, no new facts).
+    if config.get_bool("ENABLE_HOOK_JUDGE", True):
+        title, body = _punch_up_hook(title, body)
+
     hashtags = data.get("hashtags")
     if not isinstance(hashtags, list):
         hashtags = []
@@ -162,8 +242,6 @@ def write_script(idea: dict, template: str = "N") -> dict:
 
     caption = _ensure_disclosure(_ensure_sources(data.get("caption") or "", idea.get("sources") or []))
 
-    # SEO extras (used by publish for title + tags; fall back to the idea title downstream).
-    title = (data.get("title") or "").strip()
     tags = data.get("tags")
     tags = [str(t).lstrip("#").strip() for t in tags if str(t).strip()] if isinstance(tags, list) else []
 
@@ -171,6 +249,8 @@ def write_script(idea: dict, template: str = "N") -> dict:
     if not 90 <= words <= 200:  # ~130-150 target; warn on a wild miss, don't block (rule 14)
         log.warning("scriptwriter: idea %s script is %d words (target ~130-150)", idea_id, words)
 
-    script_id = db.insert_script(idea_id, template, body, caption, hashtags)
+    # Persist the published title too, so the analytics loop can learn which title STYLE wins
+    # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.
+    script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None)
     return {"script_id": script_id, "script_body": body, "caption": caption,
             "hashtags": hashtags, "title": title, "tags": tags}

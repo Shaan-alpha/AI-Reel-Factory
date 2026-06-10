@@ -19,12 +19,16 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 
 from functools import lru_cache
 
 from src import config
 
 log = logging.getLogger(__name__)
+
+# Split on sentence enders (incl. ellipsis) so dramatic pacing can put a beat between sentences.
+_SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 
 # edge-tts (fallback engine)
 _VOICE = config.get("VOICE", "en-IN-NeerjaNeural")
@@ -77,20 +81,53 @@ def _kokoro():
     return Kokoro(model, voices)
 
 
+def _split_sentences(text: str) -> list[str]:
+    """Split narration into sentences for dramatic pacing. Always ≥1 item for non-empty input."""
+    return [s.strip() for s in _SENTENCE_RE.split(text.strip()) if s.strip()]
+
+
 def _synthesize_kokoro(text: str, out_path: str) -> float:
-    """Write a WAV via Kokoro; return measured duration (s). Raises if no audio."""
+    """Write a WAV via Kokoro; return measured duration (s). Raises if no audio.
+
+    With dramatic pacing on (ENABLE_DRAMATIC_PACING, default), each sentence is synthesized
+    separately and joined with a short silence — a LONGER beat before the final payoff line — so
+    the delivery breathes and lands the punchline instead of running on. Kokoro returns raw
+    samples, so this is exact, in-memory, and needs no ffmpeg. Single-sentence scripts (and any
+    paced-synth error) use one shot; the outer fallback still covers a total Kokoro failure (rule 11)."""
     import wave
 
     import numpy as np
 
-    samples, sr = _kokoro().create(
-        text,
-        voice=config.get("KOKORO_VOICE", "af_heart"),
-        speed=float(config.get("KOKORO_SPEED", "1.0")),
-        lang=config.get("KOKORO_LANG", "en-us"),
-    )
-    if samples is None or len(samples) == 0:
-        raise RuntimeError("kokoro produced no audio")
+    k = _kokoro()
+    voice_name = config.get("KOKORO_VOICE", "af_heart")
+    speed = float(config.get("KOKORO_SPEED", "1.0"))
+    lang = config.get("KOKORO_LANG", "en-us")
+
+    def _create(piece: str):
+        samples, sr = k.create(piece, voice=voice_name, speed=speed, lang=lang)
+        if samples is None or len(samples) == 0:
+            raise RuntimeError("kokoro produced no audio")
+        return np.asarray(samples, dtype=np.float32), int(sr)
+
+    sentences = _split_sentences(text) if config.get_bool("ENABLE_DRAMATIC_PACING", True) else [text]
+    try:
+        if len(sentences) <= 1:
+            samples, sr = _create(text)
+        else:
+            gap = float(config.get("PAUSE_BETWEEN", "0.18"))
+            payoff_gap = float(config.get("PAUSE_BEFORE_PAYOFF", "0.5"))
+            pieces, sr = [], 0
+            for i, sentence in enumerate(sentences):
+                chunk, sr = _create(sentence)
+                pieces.append(chunk)
+                if i < len(sentences) - 1:  # silence after every sentence except the last
+                    secs = payoff_gap if i == len(sentences) - 2 else gap  # longer before payoff
+                    pieces.append(np.zeros(int(sr * secs), dtype=np.float32))
+            samples = np.concatenate(pieces)
+    except Exception as e:  # noqa: BLE001 — paced synth is best-effort; retry one-shot before edge
+        log.warning("voice: paced kokoro synth failed (%s); using one-shot.", e)
+        samples, sr = _create(text)
+
     pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2")
     with wave.open(out_path, "wb") as w:
         w.setnchannels(1)

@@ -57,6 +57,13 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
           CAPTION_WORDS: ${{ vars.CAPTION_WORDS || '2' }}
+          ENABLE_HOOK_CAPTION: ${{ vars.ENABLE_HOOK_CAPTION || 'true' }}  # frame-1 title hook banner (CTR)
+          HOOK_SECONDS: ${{ vars.HOOK_SECONDS || '1.8' }}            # how long the hook banner shows
+          CLIP_SECONDS: ${{ vars.CLIP_SECONDS || '3.5' }}           # B-roll cut length (fast = more retention)
+          ENABLE_HOOK_JUDGE: ${{ vars.ENABLE_HOOK_JUDGE || 'true' }} # LLM punches up weak hooks/titles pre-render
           KOKORO_SPEED: ${{ vars.KOKORO_SPEED || '1.0' }}
+          ENABLE_DRAMATIC_PACING: ${{ vars.ENABLE_DRAMATIC_PACING || 'true' }}  # snappier mid-script + beat before payoff
+          PAUSE_BETWEEN: ${{ vars.PAUSE_BETWEEN || '0.18' }}        # inter-sentence silence (s)
+          PAUSE_BEFORE_PAYOFF: ${{ vars.PAUSE_BEFORE_PAYOFF || '0.5' }}  # dramatic beat before the last line (s)
           MUSIC_VOLUME: ${{ vars.MUSIC_VOLUME || '0.10' }}
         run: python -m src.production

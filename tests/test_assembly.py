@@ -16,19 +16,37 @@ from src import assembly
 
 # --- argv / planning (no ffmpeg) -------------------------------------------------------
 
-def test_ordered_clips_cycles_to_cover_duration():
+def test_ordered_clips_cycles_to_cover_duration(monkeypatch):
+    monkeypatch.setenv("CLIP_SECONDS", "6")  # pin the cut length for a deterministic slice count
     clips = ["a.mp4", "b.mp4"]
-    # ceil(18/6)+1 = 4 slices, cycled across the 2 clips
-    assert assembly._ordered_clips(clips, 18.0) == ["a.mp4", "b.mp4", "a.mp4", "b.mp4"]
+    # ceil(18/6)+1 = 4 slices, cycled; unprobeable paths → start offset 0.0
+    assert assembly._ordered_clips(clips, 18.0) == [
+        ("a.mp4", 0.0), ("b.mp4", 0.0), ("a.mp4", 0.0), ("b.mp4", 0.0)]
 
 
-def test_ordered_clips_min_one_slice():
-    assert assembly._ordered_clips(["a.mp4"], 1.0) == ["a.mp4", "a.mp4"]  # ceil(1/6)+1 = 2
+def test_ordered_clips_min_one_slice(monkeypatch):
+    monkeypatch.setenv("CLIP_SECONDS", "6")
+    assert assembly._ordered_clips(["a.mp4"], 1.0) == [("a.mp4", 0.0), ("a.mp4", 0.0)]  # ceil(1/6)+1
+
+
+def test_ordered_clips_staggers_repeated_clip(monkeypatch):
+    monkeypatch.setenv("CLIP_SECONDS", "3")
+    monkeypatch.setattr(assembly, "_safe_probe", lambda p: 12.0)  # span = 12-3 = 9
+    # one clip, 12s reel → ceil(12/3)+1 = 5 slices; starts advance 0,3,6 then wrap (9%9=0, 12%9=3)
+    out = assembly._ordered_clips(["a.mp4"], 12.0)
+    assert [s for _p, s in out] == [0.0, 3.0, 6.0, 0.0, 3.0]
+
+
+def test_clip_seconds_clamped(monkeypatch):
+    monkeypatch.setenv("CLIP_SECONDS", "0.2")   # too fast → clamped up
+    assert assembly._clip_seconds() == assembly._MIN_CLIP_SECONDS
+    monkeypatch.setenv("CLIP_SECONDS", "999")   # too slow → clamped down
+    assert assembly._clip_seconds() == assembly._MAX_CLIP_SECONDS
 
 
 def test_build_cmd_structure(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
-    cmd = assembly._build_cmd(["c0.mp4", "c1.mp4"], "narr.mp3", 9.0, "out.mp4")
+    cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
     # two video inputs + one audio input
     assert cmd.count("-i") == 3
     assert "2:a" in cmd  # narration mapped directly when no music
@@ -46,7 +64,7 @@ def test_build_cmd_structure(monkeypatch):
 
 def test_build_cmd_mixes_music_when_present(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
-    cmd = assembly._build_cmd(["c0.mp4"], "narr.mp3", 9.0, "out.mp4", music_path="bed.mp3")
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4", music_path="bed.mp3")
     assert "-stream_loop" in cmd and "bed.mp3" in cmd
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "amix=inputs=2:duration=first" in fc

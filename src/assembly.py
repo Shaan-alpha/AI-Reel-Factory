@@ -7,9 +7,11 @@ Contract:
     depends on   : the FFmpeg binary (system dep; install: `winget install Gyan.FFmpeg`).
 
 Pipeline: probe narration length → normalize each clip (scale-to-fill + center-crop to
-1080x1920, ~6s slice) → concat → trim to narration length → mux narration → H.264 mp4.
-Cuts land every ~6s (retention + copyright safety, docs/08 §3). The reel is a render
-artifact: assembly writes it, publish uploads it, then it's deleted (rule 15).
+1080x1920, ~CLIP_SECONDS slice) → concat → trim to narration length → mux narration → H.264 mp4.
+Cuts land every ~CLIP_SECONDS (default 3.5s — fast pattern-interrupts drive Shorts retention,
+and shorter single-clip use is *more* copyright-safe, docs/08 §3). When a clip repeats, its
+start offset advances so the repeat shows a different segment (variety on fast cuts). The reel
+is a render artifact: assembly writes it, publish uploads it, then it's deleted (rule 15).
 
 MVP scope (rule 16: reliable + watchable beats cinematic): no Ken Burns / music bed yet —
 those are easy follow-ups once the core renders consistently.
@@ -33,9 +35,20 @@ log = logging.getLogger(__name__)
 
 _W, _H = 1080, 1920     # 9:16 Short
 _FPS = 30
-_SLICE = 6.0            # seconds per clip cut (within the 5-8s target)
-_MAX_SLICES = 40        # safety cap on filter-graph size
+_DEFAULT_CLIP_SECONDS = 3.5   # default cut length — fast pattern-interrupts for Shorts retention
+_MIN_CLIP_SECONDS = 1.5       # below this it gets seizure-fast / under-covers long reels
+_MAX_CLIP_SECONDS = 8.0       # docs/08 §3 copyright ceiling for one continuous clip
+_MAX_SLICES = 60        # filter-graph safety cap (covers a 60s reel down to ~1.5s cuts)
 _MUSIC_EXTS = (".mp3", ".m4a", ".wav", ".ogg", ".aac")
+
+
+def _clip_seconds() -> float:
+    """Seconds per clip cut, env-tunable via CLIP_SECONDS, clamped to a sane range."""
+    try:
+        v = float(config.get("CLIP_SECONDS", str(_DEFAULT_CLIP_SECONDS)))
+    except (TypeError, ValueError):
+        v = _DEFAULT_CLIP_SECONDS
+    return max(_MIN_CLIP_SECONDS, min(_MAX_CLIP_SECONDS, v))
 
 
 def _pick_music(audio_path: str) -> str | None:
@@ -90,20 +103,47 @@ def probe_duration(path: str) -> float:
     return float(out)
 
 
-def _ordered_clips(clip_paths: list[str], duration: float) -> list[str]:
-    """Cycle the available clips into enough ~6s slices to over-cover the narration."""
-    n = min(_MAX_SLICES, math.ceil(duration / _SLICE) + 1)  # +1 slice of safety margin
-    return [clip_paths[i % len(clip_paths)] for i in range(n)]
+def _safe_probe(path: str) -> float:
+    """Clip duration in seconds, or 0.0 if it can't be probed (→ no stagger for that clip)."""
+    try:
+        return probe_duration(path)
+    except Exception:  # noqa: BLE001 — a missing/odd clip just gets a zero start offset
+        return 0.0
 
 
-def _build_cmd(ordered: list[str], audio_path: str, duration: float, out_path: str,
+def _ordered_clips(clip_paths: list[str], duration: float) -> list[tuple[str, float]]:
+    """Cycle clips into enough slices to over-cover the narration. Returns [(path, start_offset)].
+
+    When a clip repeats (few clips, many fast cuts), its start advances by one slice each time
+    and wraps within the clip's length — so a repeat shows a DIFFERENT segment, not the same
+    opening frames twice. Clips that can't be probed get start 0.0 (safe fallback)."""
+    slice_s = _clip_seconds()
+    n = min(_MAX_SLICES, math.ceil(duration / slice_s) + 1)  # +1 slice of safety margin
+    durs = [_safe_probe(c) for c in clip_paths]
+    used: dict[int, int] = {}
+    ordered: list[tuple[str, float]] = []
+    for i in range(n):
+        idx = i % len(clip_paths)
+        repeat = used.get(idx, 0)
+        used[idx] = repeat + 1
+        span = durs[idx] - slice_s
+        start = round((repeat * slice_s) % span, 3) if span > 0.05 else 0.0
+        ordered.append((clip_paths[idx], start))
+    return ordered
+
+
+def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: float, out_path: str,
                music_path: str | None = None) -> list[str]:
-    """Construct the ffmpeg argv: normalize → concat → trim → mux narration (+ optional music bed)."""
+    """Construct the ffmpeg argv: normalize → concat → trim → mux narration (+ optional music bed).
+
+    `ordered` is [(clip_path, start_offset)] from _ordered_clips; each slice is trimmed at its
+    own start so repeated clips show different segments."""
+    slice_s = _clip_seconds()
     n = len(ordered)
     parts = []
-    for k in range(n):
+    for k, (_clip, start) in enumerate(ordered):
         parts.append(
-            f"[{k}:v]trim=0:{_SLICE},setpts=PTS-STARTPTS,"
+            f"[{k}:v]trim={start:.3f}:{start + slice_s:.3f},setpts=PTS-STARTPTS,"
             f"scale={_W}:{_H}:force_original_aspect_ratio=increase,"
             f"crop={_W}:{_H},setsar=1,fps={_FPS}[v{k}]"
         )
@@ -112,7 +152,7 @@ def _build_cmd(ordered: list[str], audio_path: str, duration: float, out_path: s
     parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS[v]")
 
     cmd = [_ffmpeg(), "-y"]
-    for clip in ordered:
+    for clip, _start in ordered:
         cmd += ["-i", clip]
     cmd += ["-i", audio_path]  # narration = input n
 

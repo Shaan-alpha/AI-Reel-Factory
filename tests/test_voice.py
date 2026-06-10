@@ -77,6 +77,42 @@ def test_kokoro_falls_back_to_edge(monkeypatch, tmp_path):
     assert path.endswith(".mp3") and dur > 0  # edge-tts caught it
 
 
+# --- dramatic pacing (mocked Kokoro samples) -------------------------------------------
+
+class _FakeKokoro:
+    """Returns 0.1s of audio (2400 samples @ 24kHz) per create() call."""
+    sr = 24000
+
+    def create(self, text, voice, speed, lang):
+        import numpy as np
+        return np.ones(2400, dtype="float32"), self.sr
+
+
+def test_split_sentences():
+    assert voice._split_sentences("One. Two! Three?") == ["One.", "Two!", "Three?"]
+    assert voice._split_sentences("Just one") == ["Just one"]
+    assert voice._split_sentences("  ") == []
+
+
+def test_kokoro_pacing_inserts_silence_gaps(monkeypatch, tmp_path):
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)            # kokoro default
+    monkeypatch.delenv("ENABLE_DRAMATIC_PACING", raising=False)  # default on
+    monkeypatch.setattr(voice, "_kokoro", lambda: _FakeKokoro())
+    # 3 sentences → 0.3s speech + one 0.18s gap + one 0.5s payoff beat = 0.98s
+    path, dur = voice.synthesize("A cat. A dog. A bird.", str(tmp_path))
+    assert path.endswith(".wav")
+    assert dur == pytest.approx(0.98, abs=0.01)
+
+
+def test_kokoro_pacing_disabled_is_one_shot(monkeypatch, tmp_path):
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+    monkeypatch.setenv("ENABLE_DRAMATIC_PACING", "0")
+    monkeypatch.setattr(voice, "_kokoro", lambda: _FakeKokoro())
+    # pacing off → single create() on the whole text → just 0.1s, no gaps
+    _path, dur = voice.synthesize("A cat. A dog. A bird.", str(tmp_path))
+    assert dur == pytest.approx(0.1, abs=0.01)
+
+
 # --- live ------------------------------------------------------------------------------
 
 def test_live_kokoro(tmp_path):
