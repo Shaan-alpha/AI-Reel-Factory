@@ -7,12 +7,15 @@ This is the **monetization-safe** structure: the *analysis* is the original valu
 facts (YouTube 2026 Inauthentic Content policy — see playbook §1).
 
 ## Constraints
-- ≤ 60 seconds → ~130–150 spoken words.
-- **First 3 seconds = the hook.** No throat-clearing.
+- ≤ 60 seconds → ~110–130 spoken words.
+- **First 3 seconds = the hook** — open a curiosity LOOP paid off only at the end. No throat-clearing.
 - **Rewrite facts in your own words + cite** ("according to …"). Never copy phrasing.
 - The core of the script is **original "why it matters" analysis**, not a summary.
-- Neutral, factual framing. One development per reel.
-- End with a CTA (follow / comment).
+- **Framing is max-hype** (curiosity/conflict/emotion — operator choice, proven by analytics); the
+  **one hard line is accuracy** — never fabricate a fact/quote/number/event. Hype the story, don't invent it.
+- **Title = viral, not search-SEO**: short, power-words, curiosity gap, conflict, ALL-CAPS on one word.
+  Proven winners: "Oil Export Wars", "Messi's Nightmare Debut" (1000+ views) ≫ "X Explained" (flopped).
+- One development per reel. End with a CTA (follow / comment).
 
 ## Prompt skeleton (filled by scriptwriter)
 ```

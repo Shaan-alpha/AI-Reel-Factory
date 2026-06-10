@@ -70,7 +70,8 @@ create table scripts (
   template text,
   body text,
   caption text,
-  hashtags text[]
+  hashtags text[],
+  title text          -- the punchy PUBLISHED title; lets analytics learn winning title styles
 );
 
 create table posts (
