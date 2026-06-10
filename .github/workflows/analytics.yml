@@ -4,8 +4,8 @@ name: analytics
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   - cron: "0 6 * * *"   # 06:00 UTC daily — uncomment to auto-collect stats
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily — auto-collect stats into the learning loop
 
 jobs:
   analytics:
