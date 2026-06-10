@@ -5,6 +5,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Virality tuning from first real analytics
+
+First real-traffic learning: one Short ("Oil Export Wars", 1,032 views) hugely outperformed dry
+explainers. Retuned the generators toward conflict/curiosity framing (operator chose max hype) and
+closed the learning loop so winning *titles* — not just topics — feed back into ideation.
+
+### Added
+- **`scripts.title`** column + persistence: the punchy PUBLISHED title is now stored, so
+  `db.top_performing_titles()` learns which title STYLE wins (returns `"title" — N views`), not the
+  dry idea topic.
+
+### Changed
+- **Scriptwriter** (`template-N`): viral title formulas (power-words, curiosity gap, conflict,
+  ALL-CAPS, "watch till the end"); first caption line is now a curiosity hook; spoken hook opens a
+  loop paid off at the end. Hype the framing — accuracy stays the one hard line (no fabricated facts).
+- **Ideation**: selects topics by **scroll appeal** (conflict/drama/sports/global stakes) over dry
+  local policy; seeds punchy hook titles instead of "X explained"; ingests winning title styles.
+- **Frame-1 hook banner** (`subtitles.py`): the punchy title is burned as a bold yellow top-of-frame
+  banner for the first `HOOK_SECONDS` (1.8s) — that frame is the in-feed thumbnail, the biggest free
+  CTR lever. Emoji-stripped/uppercased/wrapped; toggle `ENABLE_HOOK_CAPTION`.
+- **Faster, staggered B-roll cuts** (`assembly.py`): cut length is now `CLIP_SECONDS` (default 3.5s,
+  was fixed 6s) for Shorts-style pattern-interrupts; repeated clips advance their start offset so a
+  repeat shows a *different* segment, not the same opening twice.
+- **Seamless loop ending** (`template-N`): the closing CTA now loops back into the hook so an
+  auto-replay flows from the last line into the first (replay = more watch-time = more reach).
+- **Scroll-stop hook judge** (`scriptwriter._punch_up_hook`): a cheap free-API pass scores the
+  opening hook 1-10 and, only if weak (< `HOOK_MIN_SCORE`, default 8), rewrites the title + opening
+  for more punch — forbidden from adding/altering any fact, fail-soft (keeps the original on any
+  error/bad rewrite). Toggle `ENABLE_HOOK_JUDGE`.
+- **Dramatic voice pacing** (`voice.py`, Kokoro): narration is synthesized sentence-by-sentence and
+  rejoined with controlled silence — tighter `PAUSE_BETWEEN` (0.18s) mid-script, a longer
+  `PAUSE_BEFORE_PAYOFF` (0.5s) beat before the final line. Redistributes pauses (snappier + one
+  dramatic beat), doesn't lengthen the reel. Toggle `ENABLE_DRAMATIC_PACING`; edge-tts stays one-shot.
+
+### Knobs (repo Variables)
+- `ENABLE_HOOK_CAPTION`, `HOOK_SECONDS`, `CLIP_SECONDS`, `ENABLE_HOOK_JUDGE`,
+  `ENABLE_DRAMATIC_PACING`, `PAUSE_BETWEEN`, `PAUSE_BEFORE_PAYOFF` added to both workflows.
+
 ## [0.2.0] — 2026-06-10 — Public channel + quality/discoverability/learning
 
 Post-MVP enhancements; channel went **public** and the pipeline got materially better.

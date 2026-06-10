@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.2.0 (**PUBLIC** — AI visuals + analytics + SEO; 115 tests pass)
-**Last updated:** 2026-06-09
+**Version:** 0.2.0 (**PUBLIC** — AI visuals + analytics + SEO; viral-title + frame-1 hook + fast cuts + hook judge + paced VO; 137 tests pass)
+**Last updated:** 2026-06-10
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -93,6 +93,74 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-10 — Learning loop LIT with real analytics
+- Ran `analytics.collect_stats()` against the live channel → **6 real snapshots** recorded
+  (views/likes/comments) for the published Shorts. `db.top_performing_titles()` now returns real
+  winners ranked by views: "Venezuela vs Iraq Oil Export…" 994, "Argentina FC vs Iceland…" 956,
+  "Delhi Air…" 24, "Kerala's New CM…" 7, gas/monsoon 3 each → **ideation now biases toward the
+  oil/sports/conflict winners**. Old posts feed back the *idea* title (predate `scripts.title`);
+  new reels will feed back the punchy *published* title (winning STYLE). ⚙️ Enable `analytics.yml`
+  daily cron (uncomment `schedule:`) to keep this fresh automatically.
+
+### 2026-06-10 — Dramatic voice pacing (Kokoro sentence-wise + payoff beat)
+- **`voice.py`:** Kokoro narration is now synthesized **sentence-by-sentence** and rejoined with
+  controlled silence — **tighter `PAUSE_BETWEEN` (0.18s)** mid-script and a **longer
+  `PAUSE_BEFORE_PAYOFF` (0.5s)** beat before the final line. Exact + in-memory (Kokoro returns
+  raw samples; no ffmpeg). Single-sentence scripts and any paced-synth error fall back to one-shot;
+  edge-tts fallback stays one-shot. Toggle `ENABLE_DRAMATIC_PACING`.
+- **Measured live:** per-sentence speech = 7.45s; one-shot Kokoro already adds ~0.87s of uniform
+  pauses (8.32s total). Our version **redistributes** that (snappier mid-script + a clear beat
+  before the payoff) for ~the same length — drama without burning the <60s budget. Knobs wired
+  into both workflows. **137 pass, 2 skipped.**
+
+### 2026-06-10 — Hook quality: seamless loop ending + LLM scroll-stop judge
+- **Seamless loop ending (`template-N`):** the CTA now loops back into the hook so an auto-replay
+  flows from the last line into the first — Shorts replays inflate watch-time/views for free.
+- **Scroll-stop hook judge (`scriptwriter._punch_up_hook`):** before spending a render, a cheap
+  Gemini/Groq pass rates the opening hook 1-10 and, only if weak (< `HOOK_MIN_SCORE`, default 8),
+  rewrites the **title + opening** for more punch. **Hard accuracy guard:** the prompt forbids
+  adding/changing any fact, the sources/caption are untouched, and it's **fail-soft** (any error,
+  a strong score, or an out-of-range rewrite keeps the original). Toggle `ENABLE_HOOK_JUDGE`.
+  **Verified live:** "India New Natural Gas Policy Explained" → "Your Cooking Fuel is About to
+  Change Forever (and Save You Money!)" with all facts preserved (score 7 → rewritten).
+- Knobs wired into both workflows: `ENABLE_HOOK_JUDGE`. **133 pass, 3 skipped.**
+
+### 2026-06-10 — Free visual upgrades: frame-1 hook banner + faster staggered cuts
+- **Frame-1 hook banner (`subtitles.py`):** the punchy title is now burned as a bold YELLOW
+  top-of-frame banner for the first `HOOK_SECONDS` (1.8s). The first frame IS the in-feed
+  thumbnail, so this is the biggest free CTR lever. Banner text is emoji-stripped (so libass
+  never shows tofu), UPPERCASED, and word-wrapped (≤16 chars/line, ≤3 lines); word captions
+  stay at the bottom (no overlap). `production` passes `script.title` as the hook; toggle via
+  `ENABLE_HOOK_CAPTION`. **Verified with a real render** — extracted frame 1 showed
+  "OIL EXPORT WARS" over on-topic refinery B-roll.
+- **Faster, staggered cuts (`assembly.py`):** cut length is now `CLIP_SECONDS` (default **3.5s**,
+  was a fixed 6s) — fast pattern-interrupts lift Shorts retention, and shorter single-clip use is
+  *more* copyright-safe (docs/08 §3). When a clip repeats (few clips, many cuts), its start offset
+  advances one slice and wraps, so the repeat shows a DIFFERENT segment, not the same opening
+  twice. Clamped to [1.5, 8.0]s; filtergraph cap raised to 60 slices. Live full-reel render passes.
+- New repo-variable knobs wired into both workflows: `ENABLE_HOOK_CAPTION`, `HOOK_SECONDS`,
+  `CLIP_SECONDS`. **129 pass, 2 skipped.** (Suggested next free wins, not yet built: LLM
+  "scroll-stop" hook judge before render; 2-3 hook variants; loop-back ending; dramatic voice pacing.)
+
+### 2026-06-10 — Virality retune from first real analytics (operator: max hype)
+- **Analyzed first real traffic.** Matched the YouTube dashboard to the DB: the published title is
+  the scriptwriter's, not the idea title. Winners were **conflict/curiosity** framed — "Oil Export
+  Wars" (1,032 views, from idea "Venezuela vs Iraq Oil Export Differences Explained") and "Messi's
+  Nightmare Debut" (961) — vs dry explainers that flopped ("Kerala's New CM" 8, PNG gas rule 3).
+  Two signals: **title framing** (drama > explainer) and **topic pull** (global/emotional > local/wonky).
+- **Closed a real learning-loop gap:** `scripts` had no `title` column, so the winning *published*
+  titles were never stored — the loop could only learn dry idea topics. Added `scripts.title`
+  (migration `add_title_to_scripts`), persist it in `scriptwriter`/`db.insert_script`, and
+  `db.top_performing_titles()` now returns the published title + views (`"title" — N views`).
+- **Retuned generators (operator chose MAX HYPE):** scriptwriter title formulas (power-words,
+  curiosity gap, conflict, ALL-CAPS, "watch till the end"); caption first line = curiosity hook;
+  spoken hook opens a loop paid off at the end. Ideation now picks topics by **scroll appeal** and
+  seeds punchy titles, not "X explained". **The one hard line kept: accuracy** — hype the framing,
+  never fabricate a fact (a strike kills reach). **123 pass, 2 skipped** (incl. live DB cycle).
+- ⚠️ **Operator-owned risk:** max-hype/mismatch framing raises clickbait-suppression risk; accuracy
+  guard is the demonetization backstop. **Action to light up the loop:** run `analytics.yml`
+  (currently 0 snapshots) so winning titles actually feed back into ideation.
 
 ### 2026-06-10 — Deep audit: fixes + grounded scriptwriter + clean-slate data
 - **Audited the whole system.** Fixed: (1) duplicate-publish gap → idea-level idempotency before
