@@ -63,10 +63,10 @@ def main(argv: list[str]) -> None:
     if SECRET:
         params["secret_token"] = SECRET
     else:
-        print("⚠️  WEBHOOK_SECRET is empty — set one in .env AND Vercel for security.")
+        print("WARNING: WEBHOOK_SECRET is empty - set one in .env AND Vercel for security.")
     resp = _api("setWebhook", **params)
     print(json.dumps(resp, indent=2))
-    print("→ verify with: python tools/set_telegram_webhook.py --info")
+    print("-> verify with: python tools/set_telegram_webhook.py --info")
 
 
 if __name__ == "__main__":
