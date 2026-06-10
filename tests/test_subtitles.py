@@ -60,6 +60,39 @@ def test_ass_escape_strips_braces():
     assert subtitles._ass_escape("  {evil}\\path\n ") == "evilpath"
 
 
+# --- frame-1 hook banner ---------------------------------------------------------------
+
+def test_hook_banner_uppercases_strips_emoji_and_wraps():
+    # emoji + variation selector stripped; UPPERCASE; wrapped to <=16 chars/line with \N
+    out = subtitles._hook_banner_text("Oil Export Wars \U0001f6e2️")
+    assert "\U0001f6e2" not in out and "OIL EXPORT" in out
+    for line in out.split("\\N"):
+        assert len(line) <= 16
+    assert out == out.upper()
+
+
+def test_hook_banner_empty_when_nothing_renderable():
+    assert subtitles._hook_banner_text("\U0001f600\U0001f525") == ""  # all emoji → nothing
+    assert subtitles._hook_banner_text("") == ""
+
+
+def test_build_ass_includes_hook_banner_when_given(monkeypatch):
+    monkeypatch.setenv("CAPTION_WORDS", "1")
+    monkeypatch.delenv("ENABLE_HOOK_CAPTION", raising=False)  # default on
+    ass = subtitles._build_ass([(0.0, 0.3, "Hello")], hook_text="Oil Export Wars")
+    assert "Style: Hook" in ass
+    assert ",Hook,," in ass                       # the hook Dialogue line
+    assert "OIL EXPORT" in ass                     # banner text present, uppercased
+    assert ass.count("Dialogue:") == 2             # 1 hook + 1 word
+
+
+def test_build_ass_omits_hook_when_disabled(monkeypatch):
+    monkeypatch.setenv("CAPTION_WORDS", "1")
+    monkeypatch.setenv("ENABLE_HOOK_CAPTION", "0")
+    ass = subtitles._build_ass([(0.0, 0.3, "Hello")], hook_text="Oil Export Wars")
+    assert ",Hook,," not in ass and ass.count("Dialogue:") == 1
+
+
 # --- burn_captions orchestration (mocked transcription + ffmpeg) -----------------------
 
 def test_burn_captions_writes_ass_and_calls_burn(monkeypatch, tmp_path):
@@ -115,7 +148,9 @@ def test_live_caption_burn(monkeypatch, tmp_path):
         clips = visuals.fetch_broll(["rocket", "city skyline"], target_seconds=dur,
                                     out_dir=str(tmp_path))
         reel = assembly.assemble(audio, clips, str(tmp_path / "reel.mp4"))
-        out = subtitles.burn_captions(reel, audio, str(tmp_path / "captioned.mp4"))
+        # pass a hook so libass really renders the frame-1 Hook style + Layer-1 dialogue
+        out = subtitles.burn_captions(reel, audio, str(tmp_path / "captioned.mp4"),
+                                      hook_text="Reusable Rocket SHOCK")
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"live caption render unavailable (offline / no FFmpeg / model): {e}")
 

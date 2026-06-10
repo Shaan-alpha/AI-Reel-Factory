@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import subprocess
 
 from functools import lru_cache
@@ -27,6 +28,15 @@ from src import config
 from src.assembly import _ffmpeg
 
 log = logging.getLogger(__name__)
+
+# Symbols/emoji libass' default font can't render → tofu boxes. Strip them from the burned
+# banner only (the YouTube *title* keeps its emoji). Non-BMP chars + common symbol/emoji blocks.
+_NON_RENDERABLE = re.compile(
+    "[^\u0020-\uffff]"   # astral plane (most emoji)
+    "|[\u2190-\u27bf]"   # arrows, technical, dingbats, misc emoji
+    "|[\u2b00-\u2bff]"   # misc symbols & arrows
+    "|[\ufe00-\ufe0f\u20e3]"  # variation selectors + keycap
+)
 
 
 @lru_cache(maxsize=2)
@@ -71,6 +81,31 @@ def _clean_caption_word(word: str) -> str:
     return word.strip().strip("-—–.,;:!?\"'").strip()
 
 
+def _hook_banner_text(title: str, max_chars: int = 16, max_lines: int = 3) -> str:
+    """Turn the punchy title into an UPPERCASE, emoji-free, word-wrapped banner for frame 1.
+
+    Returns the ASS-ready string (lines joined with '\\N'), or '' if nothing renderable
+    remains. Strips characters the burn font can't draw so the banner never shows tofu boxes.
+    """
+    cleaned = _NON_RENDERABLE.sub("", title or "")
+    cleaned = _ass_escape(re.sub(r"\s+", " ", cleaned)).upper()
+    if not cleaned:
+        return ""
+    lines: list[str] = []
+    cur = ""
+    for word in cleaned.split():
+        if cur and len(cur) + 1 + len(word) > max_chars:
+            lines.append(cur)
+            cur = word
+            if len(lines) >= max_lines:
+                break
+        else:
+            cur = f"{cur} {word}".strip()
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    return "\\N".join(lines)
+
+
 def _build_events(words: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
     """Group ~CAPTION_WORDS words per caption (default 2) for readability, cleaned of stray
     punctuation, each held until the next group starts (no blank frames)."""
@@ -100,15 +135,28 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Pop,Arial,112,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,640,1
+Style: Hook,Arial,94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
-def _build_ass(words: list[tuple[float, float, str]]) -> str:
-    """Render the full .ass subtitle file (one Dialogue per word)."""
+def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None) -> str:
+    """Render the full .ass subtitle file (word captions + an optional frame-1 hook banner)."""
     lines = [_ASS_HEADER]
+
+    # Frame-1 hook banner: the first frame IS the in-feed thumbnail, so a bold top-of-screen
+    # hook is the single biggest free CTR lever. Drawn on Layer 1 (top), the word captions sit
+    # at the bottom — they don't overlap. Toggle via ENABLE_HOOK_CAPTION; duration HOOK_SECONDS.
+    if hook_text and config.get_bool("ENABLE_HOOK_CAPTION", True):
+        banner = _hook_banner_text(hook_text)
+        if banner:
+            secs = float(config.get("HOOK_SECONDS", "1.8"))
+            lines.append(
+                f"Dialogue: 1,{_format_ts(0)},{_format_ts(secs)},Hook,,0,0,0,,{banner}"
+            )
+
     for start, end, word in _build_events(words):
         lines.append(
             f"Dialogue: 0,{_format_ts(start)},{_format_ts(end)},Pop,,0,0,0,,{_ass_escape(word)}"
@@ -134,8 +182,13 @@ def _burn(video_path: str, ass_path: str, out_path: str) -> None:
         raise RuntimeError(f"subtitles: ffmpeg burn failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
 
 
-def burn_captions(video_path: str, audio_path: str, out_path: str) -> str:
-    """Transcribe → word-by-word events → burn into video. Return final reel path."""
+def burn_captions(video_path: str, audio_path: str, out_path: str,
+                  hook_text: str | None = None) -> str:
+    """Transcribe → word-by-word events → burn into video. Return final reel path.
+
+    `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
+    is the in-feed thumbnail, so this is the biggest free CTR lever. Optional/back-compatible.
+    """
     if not os.path.exists(video_path):
         raise ValueError(f"subtitles: video not found: {video_path}")
     if not os.path.exists(audio_path):
@@ -150,7 +203,7 @@ def burn_captions(video_path: str, audio_path: str, out_path: str) -> str:
     digest = hashlib.sha1(os.path.abspath(audio_path).encode("utf-8")).hexdigest()[:12]
     ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_build_ass(words))
+        f.write(_build_ass(words, hook_text))
 
     log.info("subtitles: burning %d word events into %s", len(words), out_path)
     _burn(video_path, ass_path, out_path)

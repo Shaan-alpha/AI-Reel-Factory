@@ -82,7 +82,11 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         keywords = visuals.extract_keywords(script["script_body"])
         clips = visuals.fetch_broll(keywords, duration, work)
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
-        final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"))
+        # Pass the punchy title so subtitles burn it as a frame-1 hook banner (the first frame
+        # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
+        hook = script.get("title") or idea.get("title")
+        final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
+                                        hook_text=hook)
         video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url

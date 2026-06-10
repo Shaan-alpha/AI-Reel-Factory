@@ -25,7 +25,7 @@ def _wire_happy(monkeypatch, existing_post=None):
     monkeypatch.setattr(production.visuals, "extract_keywords", lambda body: ["rocket"])
     monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d: ["c1.mp4"])
     monkeypatch.setattr(production.assembly, "assemble", lambda a, c, o: o)
-    monkeypatch.setattr(production.subtitles, "burn_captions", lambda v, a, o: o)
+    monkeypatch.setattr(production.subtitles, "burn_captions", lambda v, a, o, **k: o)
     monkeypatch.setattr(production.publish_youtube, "publish",
                         lambda v, m, sid: ("VID1", "https://www.youtube.com/shorts/VID1"))
     produced = []
