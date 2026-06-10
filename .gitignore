@@ -28,6 +28,11 @@ broll/
 !assets/music/*.m4a
 !assets/music/*.ogg
 
+# Vercel (telegram-bot deploy) — link metadata + local build, never commit
+.vercel/
+**/.vercel/
+node_modules/
+
 # OS / editor
 .DS_Store
 Thumbs.db

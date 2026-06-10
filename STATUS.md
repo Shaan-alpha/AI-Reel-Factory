@@ -94,6 +94,21 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-10 — Telegram control bot (Vercel webhook) — code done, deploy pending
+- **New instant command surface** (operator chose webhook over polling): `telegram-bot/api/telegram.py`,
+  a **stdlib-only Vercel serverless function** (zero deps; isolated in its own dir so Vercel doesn't
+  install the pipeline's heavy `requirements.txt`). Commands: **`/makeshort [n]`** (dispatches the
+  make-short Action via the GitHub API), **`/today`** (Shorts published today, IST), **`/stats`**
+  (totals + today + top performer), **`/pending`** (ideas awaiting approval), **`/latest`**, **`/help`**.
+- **Security:** rejects requests without the `X-Telegram-Bot-Api-Secret-Token` (WEBHOOK_SECRET) and
+  ignores any chat ≠ `TELEGRAM_CHAT_ID`; always 200s so Telegram never retry-storms.
+- Helper `tools/set_telegram_webhook.py` registers the webhook + secret. Setup guide in
+  `telegram-bot/README.md`; new env documented in `.env.example` (`WEBHOOK_SECRET`/`GH_PAT`/`GH_REPO`).
+  **8 bot tests pass** (parse/dispatch/clamp/IST-date/auth gate); suite green.
+- ⏳ **Operator to finish deploy:** (1) create a GitHub fine-grained PAT (Actions: read+write);
+  (2) deploy `telegram-bot/` to Vercel (Root Directory = `telegram-bot`); (3) set the 7 Vercel env
+  vars; (4) run `set_telegram_webhook.py <vercel-url>/api/telegram`. Then `/help` the bot.
+
 ### 2026-06-10 — Gemini RPD blown → route no-web tasks to Groq (reserve Gemini for grounding)
 - **Quota finding:** Gemini 2.5 Flash free **RPD hit 30/20 (over limit)** — text calls now 429.
   The Gemini→Groq failover (rule 11) keeps the pipeline alive, but grounded web research is
