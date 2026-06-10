@@ -16,10 +16,11 @@ SCRIPT = {"script_id": 70, "script_body": "body words " * 20,
           "caption": "cap https://x.example\n#Shorts", "hashtags": ["#ISRO", "#Shorts"]}
 
 
-def _wire_happy(monkeypatch, find_post=None):
+def _wire_happy(monkeypatch, existing_post=None):
     """Mock the whole chain so produce_one runs without side effects."""
     monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: SCRIPT)
-    monkeypatch.setattr(production.db, "find_post", lambda sid, plat: find_post)
+    monkeypatch.setattr(production.db, "get_published_post_for_idea",
+                        lambda idea_id, plat="youtube": existing_post)
     monkeypatch.setattr(production.voice, "synthesize", lambda body, d: ("a.mp3", 30.0))
     monkeypatch.setattr(production.visuals, "extract_keywords", lambda body: ["rocket"])
     monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d: ["c1.mp4"])
@@ -39,9 +40,11 @@ def test_produce_one_full_chain(monkeypatch, tmp_path):
     assert (7, "produced") in produced  # idea marked produced
 
 
-def test_produce_one_idempotent_skips_render(monkeypatch, tmp_path):
-    produced = _wire_happy(monkeypatch, find_post={"external_id": "OLD", "url": "u"})
-    # voice must NOT be called when already published
+def test_produce_one_idempotent_skips_before_scripting(monkeypatch, tmp_path):
+    produced = _wire_happy(monkeypatch, existing_post={"external_id": "OLD", "url": "u"})
+    # neither scripting nor rendering should happen when the idea already shipped
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda *a, **k: pytest.fail("should not write a script when already published"))
     monkeypatch.setattr(production.voice, "synthesize",
                         lambda *a, **k: pytest.fail("should not render when already published"))
     vid, url = production.produce_one(IDEA, str(tmp_path))

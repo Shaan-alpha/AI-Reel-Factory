@@ -43,7 +43,7 @@ def _pick_music(audio_path: str) -> str | None:
 
     Returns None if the dir is missing/empty (BGM is optional). Deterministic per reel (hashes
     the narration path) so reruns reuse the same track, but different reels vary."""
-    if str(config.get("ENABLE_MUSIC", "true")).lower() != "true":
+    if not config.get_bool("ENABLE_MUSIC", True):
         return None
     music_dir = config.get("MUSIC_DIR", "assets/music")
     if not os.path.isdir(music_dir):

@@ -69,7 +69,7 @@ def _build_body(metadata: dict) -> dict:
     tags = _cap_tags(tags)  # YouTube allows ~500 chars of tags total
     category = str(metadata.get("category_id") or config.get("YOUTUBE_CATEGORY_ID", "25"))
     privacy = metadata.get("privacy") or config.get("YOUTUBE_PRIVACY", "public")
-    disclose = str(config.get("AI_DISCLOSURE", "true")).lower() == "true"
+    disclose = config.get_bool("AI_DISCLOSURE", True)
 
     return {
         "snippet": {"title": title, "description": desc, "tags": tags, "categoryId": category},

@@ -21,6 +21,20 @@ jobs:
       - name: Install FFmpeg + espeak-ng (Kokoro TTS phonemizer)
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
 
+      - name: Cache TTS/ASR models (Kokoro + faster-whisper)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/kokoro
+            ~/.cache/huggingface
+          key: models-kokoro1.0-whisper-base-v1
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 

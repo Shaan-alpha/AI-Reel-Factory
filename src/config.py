@@ -70,6 +70,14 @@ def get(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, DEFAULTS.get(key, default))
 
 
+def get_bool(key: str, default: bool = True) -> bool:
+    """Parse a boolean setting robustly (true/1/yes/on → True; false/0/no/off → False)."""
+    val = os.environ.get(key, DEFAULTS.get(key))
+    if val is None or str(val).strip() == "":
+        return default
+    return str(val).strip().lower() in ("1", "true", "yes", "on", "y")
+
+
 def validate(required: tuple[str, ...] = REQUIRED) -> None:
     """Validate all required settings at once. Call at pipeline start to fail loudly."""
     missing = [k for k in required if not os.environ.get(k)]

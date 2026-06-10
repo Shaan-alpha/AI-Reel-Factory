@@ -1,36 +1,32 @@
-# Phase-1 dependencies. See docs/02-implementation-plan.md §0.
-# NOTE (rule 18 / reproducible env): pin exact versions after the first successful
-# install — run `pip freeze > requirements.lock.txt` and commit that lock file.
-# Left unpinned here until verified on the target Python so we don't guess versions.
+# Phase-1 dependencies — PINNED to versions verified working in CI (rule 10: reproducible env).
+# Bump deliberately + re-test; don't let a transitive update silently break the daily pipeline.
 
-# LLM (scriptwriter + ideation fallback)
-google-genai             # Gemini API — current SDK (`from google import genai`).
-                         # NOTE: replaces google-generativeai, which was deprecated/EOL late 2025.
-groq                     # Groq failover
+# LLM (scriptwriter + ideation, grounded + fallback)
+google-genai==2.8.0             # Gemini — current SDK (`from google import genai`)
+groq==1.4.0                     # Groq failover
 
 # Database / state
-supabase                 # Supabase Postgres client
+supabase==2.31.0               # Supabase Postgres client
 
 # Approval UI
-# NOTE: approval.py talks to the Telegram Bot HTTP API directly via `requests` (below) —
-# no async framework. (python-telegram-bot intentionally not used: simpler for a polling script.)
+# NOTE: approval.py uses the Telegram Bot HTTP API directly via `requests` (below) — no async framework.
 
 # Voice (Module 4)
-kokoro-onnx              # primary humanized TTS (Apache-2.0, CPU/ONNX; int8 model auto-downloads)
-edge-tts                 # narration fallback (free, no key)
+kokoro-onnx==0.5.0             # primary humanized TTS (Apache-2.0, CPU/ONNX; int8 model auto-downloads)
+edge-tts==7.2.8               # narration fallback (free, no key)
 # NOTE: Kokoro needs espeak-ng on Linux for phonemization — install it in CI (apt-get).
 
-# Video (Modules 6, 7)
-# NOTE: assembly.py calls the FFmpeg *binary* directly via subprocess (no Python wrapper) —
-# install FFmpeg as a system dep: `winget install Gyan.FFmpeg` (Windows) / apt/brew elsewhere;
-# on GitHub Actions, install it onto PATH in the workflow. (ffprobe ships with it.)
-faster-whisper           # word-level timestamps for karaoke captions
+# Video (Modules 5, 6, 7)
+# NOTE: assembly/visuals call the FFmpeg *binary* directly via subprocess (no Python wrapper) —
+# install FFmpeg as a system dep (winget Gyan.FFmpeg / apt). On CI, install it onto PATH.
+faster-whisper==1.2.1         # word-level timestamps for karaoke captions
+numpy==2.4.6                  # Kokoro PCM handling (also a transitive dep)
 
-# Publishing (Module 9)
-google-api-python-client # YouTube Data API v3
-google-auth              # OAuth for headless upload
-google-auth-oauthlib     # one-time local OAuth flow
+# Publishing (Module 9) + analytics (Module 10)
+google-api-python-client==2.197.0  # YouTube Data API v3
+google-auth==2.53.0                # OAuth for headless upload
+google-auth-oauthlib==1.4.0        # one-time local OAuth flow
 
 # Misc
-requests                 # Pexels/Pixabay HTTP, Telegram polling
-python-dotenv            # load local .env in dev
+requests==2.34.2              # Pexels/Pixabay/Cloudflare/Telegram HTTP, trends RSS
+python-dotenv==1.2.2          # load local .env in dev

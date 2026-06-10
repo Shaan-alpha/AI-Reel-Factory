@@ -63,16 +63,17 @@ def _build_metadata(idea: dict, script: dict) -> dict:
 def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     """Run the full chain for one approved idea. Returns (video_id, url). Idempotent."""
     idea_id = idea["id"]
-    script = scriptwriter.write_script(idea)
-    script_id = script["script_id"]
 
-    # Idempotency (rule 12): if this script already published, mark produced and bail.
-    existing = db.find_post(script_id, _PLATFORM)
+    # Idea-level idempotency (rule 12): if this idea already shipped, don't re-render/re-upload.
+    # Checked BEFORE write_script so a retry can't create a new script and double-publish.
+    existing = db.get_published_post_for_idea(idea_id, _PLATFORM)
     if existing and existing.get("external_id"):
         db.set_idea_status(idea_id, "produced")
-        log.info("produce: idea %s already published (%s); skipping render.",
+        log.info("produce: idea %s already published (%s); skipping.",
                  idea_id, existing["external_id"])
         return existing["external_id"], existing.get("url") or ""
+
+    script = scriptwriter.write_script(idea)
 
     work = os.path.join(work_root, f"idea_{idea_id}")
     os.makedirs(work, exist_ok=True)
@@ -82,7 +83,7 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         clips = visuals.fetch_broll(keywords, duration, work)
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
         final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"))
-        video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script_id)
+        video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url
     finally:
@@ -125,7 +126,7 @@ def ensure_ideas_and_digest() -> int:
     """If the queue is dry, run fallback ideation and send the digest. Return #ideas created."""
     if db.get_pending_ideas() or db.get_approved_ideas():
         return 0
-    if str(config.get("ENABLE_FALLBACK_IDEATION", "true")).lower() != "true":
+    if not config.get_bool("ENABLE_FALLBACK_IDEATION", True):
         log.info("production: queue empty and fallback ideation disabled.")
         return 0
     n = ideation_fallback.run_fallback_ideation()

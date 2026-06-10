@@ -127,6 +127,24 @@ def top_performing_titles(limit: int = 8) -> list[str]:
     return titles
 
 
+def get_published_post_for_idea(idea_id: int, platform: str = "youtube") -> dict | None:
+    """Return an existing published post for this idea (via its scripts), or None.
+
+    Idea-level idempotency (rule 12): produce_one checks this BEFORE writing a new script, so a
+    retry after a post-publish hiccup can't double-upload (scripts get a fresh id each run, so a
+    script-id check alone would miss it)."""
+    scripts = get_client().table("scripts").select("id").eq("idea_id", idea_id).execute().data
+    sids = [s["id"] for s in scripts]
+    if not sids:
+        return None
+    rows = (
+        get_client().table("posts").select("*")
+        .in_("script_id", sids).eq("platform", platform)
+        .not_.is_("external_id", "null").limit(1).execute().data
+    )
+    return rows[0] if rows else None
+
+
 def find_post(script_id: int, platform: str) -> dict | None:
     """Return an existing post for (script_id, platform), or None.
 
