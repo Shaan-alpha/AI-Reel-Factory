@@ -77,6 +77,17 @@ def tg_send(chat_id, text: str) -> None:
         pass
 
 
+def tg_api(method: str, payload: dict) -> tuple[int, str] | None:
+    token = _env("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return None
+    try:
+        return _http("POST", f"https://api.telegram.org/bot{token}/{method}",
+                     {"Content-Type": "application/json"}, payload)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # --- GitHub (start the Action) ---------------------------------------------------------
 
 def gh_dispatch_make_short(ideas: int, wait_min: int = 30) -> bool:
@@ -115,6 +126,16 @@ def sb_get(path: str) -> list:
         return data if isinstance(data, list) else []
     except json.JSONDecodeError:
         return []
+
+
+def sb_patch(path: str, payload: dict) -> bool:
+    base, key = _env("SUPABASE_URL"), _env("SUPABASE_KEY")
+    if not (base and key):
+        return False
+    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json",
+               "Content-Type": "application/json", "Prefer": "return=minimal"}
+    status, _ = _http("PATCH", f"{base}/rest/v1/{path}", headers, payload)
+    return status < 300
 
 
 def _ist_today_start_utc_iso() -> str:
@@ -157,6 +178,68 @@ def top_performer() -> str | None:
 def pending_ideas() -> list:
     rows = sb_get("ideas?select=title&status=eq.pending&order=est_score.desc&limit=10")
     return [r.get("title", "") for r in rows if r.get("title")]
+
+
+# --- approval callbacks ---------------------------------------------------------------
+
+_DECISION_TEXT = {
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "passed": "Passed",
+    "capped": "Daily approval cap reached - not approved",
+    "unknown": "Could not process that.",
+}
+
+
+def approval_cap() -> int:
+    try:
+        return int(_env("APPROVAL_CAP", "5") or "5")
+    except ValueError:
+        return 5
+
+
+def approved_count() -> int:
+    return len(sb_get("ideas?select=id&status=eq.approved"))
+
+
+def set_idea_status(idea_id: int, status: str) -> bool:
+    return sb_patch(f"ideas?id=eq.{idea_id}", {"status": status})
+
+
+def apply_callback_action(action: str, idea_id: int) -> str:
+    if action == "a":
+        if approved_count() >= approval_cap():
+            return "capped"
+        return "approved" if set_idea_status(idea_id, "approved") else "unknown"
+    if action == "r":
+        return "rejected" if set_idea_status(idea_id, "rejected") else "unknown"
+    if action == "p":
+        return "passed" if set_idea_status(idea_id, "passed") else "unknown"
+    return "unknown"
+
+
+def handle_callback(cq: dict) -> None:
+    msg = cq.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    auth = _env("TELEGRAM_CHAT_ID")
+    if auth and str(chat_id) != str(auth):
+        return
+
+    action, _, sid = (cq.get("data") or "").partition(":")
+    try:
+        idea_id = int(sid)
+    except ValueError:
+        idea_id = 0
+    decision = apply_callback_action(action, idea_id) if idea_id else "unknown"
+    label = _DECISION_TEXT[decision]
+
+    if cq.get("id"):
+        tg_api("answerCallbackQuery", {"callback_query_id": cq["id"], "text": label})
+    if chat_id and msg.get("message_id"):
+        original = msg.get("text") or msg.get("caption") or ""
+        text = f"{label}\n\n{original}" if original else label
+        tg_api("editMessageText", {"chat_id": chat_id, "message_id": msg["message_id"],
+                                   "text": text, "parse_mode": "HTML"})
 
 
 # --- command parsing + dispatch (pure-ish; network fns above are monkeypatchable) ------
@@ -217,6 +300,10 @@ def dispatch(cmd: str, arg: str) -> str:
 
 def handle_update(update: dict) -> None:
     """Authorize the chat, parse a command, reply. Foreign chats are silently ignored."""
+    if update.get("callback_query"):
+        handle_callback(update["callback_query"])
+        return
+
     msg = update.get("message") or update.get("edited_message") or {}
     chat_id = (msg.get("chat") or {}).get("id")
     auth = _env("TELEGRAM_CHAT_ID")

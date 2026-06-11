@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.2.0 (**PUBLIC** — AI visuals + analytics + SEO; viral-title + frame-1 hook + fast cuts + hook judge + paced VO; 137 tests pass)
-**Last updated:** 2026-06-10
+**Version:** 0.2.1 (**PUBLIC** — Webhook callbacks + fix 409 conflict; AI visuals + analytics + SEO; 153 tests pass)
+**Last updated:** 2026-06-11
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -93,6 +93,12 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-11 — Webhook callback support + getUpdates 409 conflict fixes
+- **Webhook callback query handling**: processed inline button callback queries (`a:`, `r:`, `p:`) in Vercel Telegram bot with HTML parse_mode enabled, so Telegram handles bold/italic formatting of the edited messages correctly.
+- **Webhook mode in production**: added `TELEGRAM_APPROVAL_MODE` support to prevent the production orchestrator (`make_on_demand` and `run`) from calling `getUpdates` (which raises 409 Conflict if webhook is active) and instead poll Supabase for decisions.
+- **Allowed updates fix**: updated `tools/set_telegram_webhook.py` to register both `message` and `callback_query` updates with Telegram.
+- **CI / Workflows configuration**: forwarded `TELEGRAM_APPROVAL_MODE: ${{ vars.TELEGRAM_APPROVAL_MODE }}` in the production workflow and set it to `webhook` in the make-short workflow. All 153 tests passed locally.
 
 ### 2026-06-11 — Channel branding: description footer + (manual) channel About/keywords
 - **Description footer** (`production._with_footer`): every Short's description now ends with a

@@ -59,7 +59,7 @@ def main(argv: list[str]) -> None:
         return
 
     url = argv[0]
-    params = {"url": url, "allowed_updates": json.dumps(["message"])}
+    params = {"url": url, "allowed_updates": json.dumps(["message", "callback_query"])}
     if SECRET:
         params["secret_token"] = SECRET
     else:

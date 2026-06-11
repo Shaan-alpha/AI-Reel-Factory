@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 
 from src import (
     approval,
@@ -189,6 +190,28 @@ def run() -> None:
              len(summary["published"]), len(summary["failed"]))
 
 
+def _approval_mode() -> str:
+    return (config.get("TELEGRAM_APPROVAL_MODE") or "polling").strip().lower()
+
+
+def _wait_for_webhook_decisions(max_seconds: int, poll_seconds: int = 5) -> int:
+    """Wait while the Vercel Telegram webhook writes approval taps into Supabase."""
+    deadline = time.monotonic() + max_seconds
+    while True:
+        pending = db.get_pending_ideas()
+        if not pending:
+            log.info("approval: all ideas decided via webhook.")
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            log.info("approval: webhook wait expired with %d pending idea(s).", len(pending))
+            break
+        time.sleep(min(poll_seconds, remaining))
+    approved = len(db.get_approved_ideas())
+    log.info("approval: %d approved after webhook wait.", approved)
+    return approved
+
+
 def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     """On-demand 'make a Short': propose fresh ideas to Telegram, wait for taps, produce the
     approved ones, and reply with the links. Triggered by the make-short workflow button."""
@@ -204,7 +227,10 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
     approval.send_digest()
-    approval.process_responses(max_seconds=wait_minutes * 60)
+    if _approval_mode() == "webhook":
+        _wait_for_webhook_decisions(max_seconds=wait_minutes * 60)
+    else:
+        approval.process_responses(max_seconds=wait_minutes * 60)
 
     summary = run_production()
     if summary["published"]:

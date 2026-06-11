@@ -79,3 +79,35 @@ def test_handle_update_serves_authorized_chat(bot, monkeypatch):
     monkeypatch.setattr(bot, "tg_send", lambda cid, text: sent.append((cid, text)))
     bot.handle_update({"message": {"chat": {"id": 111}, "text": "/help"}})
     assert len(sent) == 1 and sent[0][0] == 111 and "control bot" in sent[0][1].lower()
+
+
+def test_handle_callback_approves_authorized_chat(bot, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
+    monkeypatch.setattr(bot, "approved_count", lambda: 0)
+    writes = []
+    monkeypatch.setattr(bot, "set_idea_status", lambda i, s: writes.append((i, s)) or True)
+    calls = []
+    monkeypatch.setattr(bot, "tg_api", lambda method, payload: calls.append((method, payload)))
+
+    bot.handle_update({"callback_query": {
+        "id": "cb1", "data": "a:7",
+        "message": {"message_id": 50, "text": "Idea text", "chat": {"id": 111}},
+    }})
+
+    assert writes == [(7, "approved")]
+    assert [method for method, _ in calls] == ["answerCallbackQuery", "editMessageText"]
+    assert calls[-1][1]["text"].startswith("Approved")
+    assert calls[-1][1]["parse_mode"] == "HTML"
+
+
+def test_handle_callback_ignores_foreign_chat(bot, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
+    monkeypatch.setattr(bot, "set_idea_status",
+                        lambda *a, **k: pytest.fail("must not act on foreign callback"))
+    monkeypatch.setattr(bot, "tg_api",
+                        lambda *a, **k: pytest.fail("must not answer foreign callback"))
+
+    bot.handle_update({"callback_query": {
+        "id": "cb1", "data": "a:7",
+        "message": {"message_id": 50, "text": "Idea text", "chat": {"id": 999}},
+    }})
