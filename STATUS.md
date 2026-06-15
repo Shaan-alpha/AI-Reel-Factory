@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.4.0 (**PUBLIC** — Phase B: on-screen key-point cards + curated news topics; Chirp 3 HD LIVE; 171 tests pass)
+**Version:** 0.4.1 (**PUBLIC** — Short-form 12-20s on-point news bites; cloud voice/news hotfix; 174 tests pass)
 **Last updated:** 2026-06-15
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -93,6 +93,24 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-15 — Short-form pivot (12-20s on-point bites) + cloud voice/news hotfix
+- **Format → 12-20 SECOND Shorts** (operator directive): `scriptwriter` now writes a tight ~30-45
+  word bite — HOOK → THE NEWS → one honest "why it matters" clause → 2-3 word CTA (was ~110-130
+  words / 45s). `ideation` proposes TRENDING, single-development stories sized to land in 12-20s.
+  The reel auto-shortens to the narration, so the whole Short follows. Kept ONE why-it-matters
+  clause so it stays original (monetization gate, rule 6) — not a bare summary. `key_points`
+  trimmed to 2-3; word guard now ~30-45.
+- **Cloud hotfix** (from inspecting the last live run, idea 85 → published but voice/news fell back):
+  Chirp 3 HD 400'd in CI and fell back to edge-tts. Diagnosed: NOT length (908 B), NOT content
+  (re-sends 200), NOT key whitespace — the cloud key differs; **prime suspect a key application/IP
+  restriction**. `_synthesize_google` now surfaces Google's real error body (was an opaque "400
+  Client Error") + strips/encodes the key. `news.fetch_headlines` no longer breaks when the
+  `NEWS_RSS_URL` repo var is empty (it became an invalid URL). Secret re-set cleanly.
+- ⚠️ **Operator action:** Google Cloud → Credentials → the API key → **Application restrictions =
+  None** (keep API restriction = Cloud Text-to-Speech only); GitHub Actions IPs are dynamic. Then
+  re-run a make-short — logs now print Google's exact reason if Chirp still fails.
+- **174 tests pass.**
 
 ### 2026-06-15 — Content-quality overhaul Phase B (story-specific visuals + curated topics) + Chirp 3 HD LIVE
 - **On-screen key-point cards** (`scriptwriter.py` → `subtitles.py` → `production.py`): the

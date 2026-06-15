@@ -31,9 +31,10 @@ _MIN_IDEAS = 5  # below this, treat the run as failed rather than ship a thin di
 # flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
 _ROUTINE_IDEAS_FILE = "data/daily-ideas.json"
 
-_PROMPT = """You are the ideation engine for "But It Matters", a channel of daily, VIRAL \
-news/info Shorts (India + world). Generate {n} TIMELY, TRENDING ideas a human will approve 4-5 of, \
-each enabling ORIGINAL "why it matters" analysis (not a bare summary) AND each with strong \
+_PROMPT = """You are the ideation engine for "But It Matters", a channel of daily, punchy \
+**12-20 second** news/info Shorts (India + world). Generate {n} TIMELY ideas a human will approve \
+4-5 of, each tied to what is TRENDING / in the news RIGHT NOW, each a single crisp on-point fact \
+that still carries one honest "why it matters" angle (not a bare summary), with strong \
 scroll-stopping potential.
 
 TODAY'S TRENDING IN INDIA (prefer ideas tied to these where a solid, factual explainer fits):
@@ -74,9 +75,10 @@ stated as fact.
 
 Each idea: a PUNCHY, curiosity-driven title (the scriptwriter will sharpen it further) that is \
 honest to the story — NOT a dry "X explained" search title, and NOT a bait title the facts can't \
-back; >= {min_src} \
+back; a story tight enough to land in 12-20 seconds (a single development, not a deep-dive); \
+>= {min_src} \
 reputable, independent source URLs from real outlets (never invent URLs); and a "hook" that is a \
-genuine first-3-seconds scroll-stopper (a shocking fact or an open curiosity loop).
+genuine first-2-seconds scroll-stopper (one surprising true fact).
 
 Return ONLY JSON:
 {{"ideas": [{{"niche": "impact-news", "title": "...", "hook": "the first 3 seconds", \

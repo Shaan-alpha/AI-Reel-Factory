@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.4.1] — 2026-06-15 — Short-form 12-20s bites + cloud voice/news hotfix
+
+### Changed
+- **Format → 12-20 second Shorts** (`scriptwriter.py`, `ideation_fallback.py`): scripts are now a
+  tight ~30-45 word bite (HOOK → THE NEWS → one honest "why it matters" clause → 2-3 word CTA),
+  down from ~110-130 words. Ideation proposes trending, single-development stories sized for
+  12-20s. One why-it-matters clause is kept so it stays original (monetization gate), not a bare
+  summary. `key_points` → 2-3; word guard → ~30-45. The reel auto-follows the narration length.
+
+### Fixed
+- **Google TTS error visibility** (`voice.py`): `_synthesize_google` strips/encodes the key and
+  raises with Google's actual response body on non-200 (cloud logs previously showed only an
+  opaque "400 Client Error", hiding the real cause).
+- **News empty-URL** (`news.py`): an empty `NEWS_RSS_URL` repo var (`""` in CI) now falls back to
+  the default feed instead of becoming an invalid request URL.
+
 ## [0.4.0] — 2026-06-15 — Content-quality overhaul Phase B: story-specific visuals + curated topics
 
 Phase B of the overhaul (same spec as 0.3.0). Layers story-specific on-screen text over the B-roll,
