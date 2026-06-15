@@ -192,3 +192,23 @@ def test_hook_judge_can_be_disabled(monkeypatch):
     monkeypatch.setattr(scriptwriter.llm, "generate", counting)
     scriptwriter.write_script(IDEA)
     assert called["n"] == 0  # judge disabled → no extra generate call (grounded path supplies JSON)
+
+
+# --- de-hyped framing (honest curiosity + human angle) ---------------------------------
+
+def test_prompt_is_dehyped_and_demands_human_angle():
+    prompt = scriptwriter._build_prompt(IDEA, "N").lower()
+    # the old max-hype directives are gone
+    for hype in ("maximum-intensity", "max hype", "max intensity", "over-promise"):
+        assert hype not in prompt
+    # honest curiosity + payoff alignment + required human analysis
+    assert "honest" in prompt
+    assert "why it matters" in prompt
+    assert "accuracy" in prompt or "accurate" in prompt
+    assert "payoff" in prompt or "deliver" in prompt
+
+
+def test_human_angle_emphasis_toggles_off(monkeypatch):
+    monkeypatch.setenv("ENABLE_HUMAN_ANGLE", "0")
+    prompt = scriptwriter._build_prompt(IDEA, "N").lower()
+    assert "emphasis:" not in prompt   # the extra nudge is omitted when disabled

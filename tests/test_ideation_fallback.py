@@ -209,3 +209,12 @@ def test_live_real_llm_ideation(monkeypatch):
     for r in captured["rows"]:
         assert r["title"] and r["hook"] and r["angle"]
         assert len(r["sources"]) >= int(fb.config.get("MIN_SOURCES", "2"))
+
+
+# --- de-hyped ideation framing ---------------------------------------------------------
+
+def test_ideation_prompt_dehyped():
+    prompt = fb._PROMPT.lower()
+    assert "honest" in prompt          # new: honest scroll appeal
+    assert "why it matters" in prompt  # kept: original analysis requirement
+    assert "scroll" in prompt          # kept: still wants a strong (honest) hook

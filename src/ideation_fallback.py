@@ -43,13 +43,12 @@ WINNING TITLE STYLES ON THIS CHANNEL (these actual published titles + their view
 the feed rewards — copy the ENERGY and framing, never the exact title; if empty, ignore):
 {winners}
 
-SCROLL APPEAL (this is what separated our 1000-view hits from our 3-view flops): the winners were \
-CONFLICT- and EMOTION-driven, globally interesting stories ("Oil Export Wars", "Messi's Nightmare \
-Debut"); the flops were dry, local, policy explainers ("Kerala's New CM", "PNG gas policy"). So \
-strongly PRIORITIZE ideas with: conflict/rivalry/"vs", drama, money & power, sports & big names, \
-geopolitics, shock or "wait-what" surprise, and universal/emotional stakes. A local or wonky \
-policy story only qualifies if you can frame a genuinely dramatic, surprising angle on it. \
-Set est_score by SCROLL APPEAL (how hard it stops a thumb), not just importance.
+HONEST SCROLL APPEAL: pick stories a smart person finds genuinely surprising or consequential — \
+real stakes, money & power, conflict with real consequences, science/space, big human impact. The \
+hook must be a TRUE curiosity gap the explainer can actually CLOSE (a bait topic the facts can't \
+support gets suppressed). A local or wonky policy story qualifies when there's a genuinely \
+surprising, well-sourced angle. Set est_score by how strong an HONEST hook plus a real \
+"why it matters" angle the story supports — not by how dramatic a title you could slap on it.
 
 Cover what people care about NOW across: current affairs, government & policy, major \
 court/legal rulings, economy & business, science & space (ISRO), technology & AI, health, \
@@ -69,8 +68,9 @@ religious incitement or hate; anything that could inflame violence; unverified r
 stated as fact; deepfakes/impersonation; graphic tragedy exploitation; medical/financial advice \
 stated as fact.
 
-Each idea: a PUNCHY, curiosity-driven title (the scriptwriter will sharpen it further) built on \
-drama/conflict/surprise — NOT a dry "X explained / why X matters" search title; >= {min_src} \
+Each idea: a PUNCHY, curiosity-driven title (the scriptwriter will sharpen it further) that is \
+honest to the story — NOT a dry "X explained" search title, and NOT a bait title the facts can't \
+back; >= {min_src} \
 reputable, independent source URLs from real outlets (never invent URLs); and a "hook" that is a \
 genuine first-3-seconds scroll-stopper (a shocking fact or an open curiosity loop).
 

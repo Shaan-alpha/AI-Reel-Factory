@@ -33,11 +33,12 @@ DISCLOSURE_LINE = "AI-generated narration; stock visuals."
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)
 
-_PROMPT_N = """You are the scriptwriter for "But It Matters" — viral, fast-paced YouTube Shorts \
-engineered to make people STOP scrolling and WATCH TILL THE END. Your voice is NATURAL and \
-conversational with real edge — like a sharp friend dropping something wild that makes you go \
-"wait, WHAT?". Energetic, gripping, a little dramatic. Never a stiff news-anchor. Every FACT \
-stays real (see ACCURACY) — but the FRAMING, the title, and the hook are maximum-intensity.
+_PROMPT_N = """You are the scriptwriter for "But It Matters" — fast, punchy YouTube Shorts that \
+make people stop scrolling with HONEST curiosity, then reward them with a genuinely useful \
+"why it matters" insight. Your voice is NATURAL and conversational with real edge — a sharp \
+friend explaining why something actually matters. Energetic and gripping, never a stiff \
+news-anchor. The hook is strong but TRUE: the title and opening must sit honestly on what the \
+video actually delivers — a click-then-bounce from an over-claim gets the channel suppressed.
 
 IDEA: {title}
 HOOK: {hook}
@@ -45,16 +46,16 @@ ANGLE (the take to develop): {angle}
 SOURCES:
 {sources}
 
-WHAT WINS ON THIS CHANNEL (proven by analytics): short, dramatic, curiosity-gap titles built on \
-CONFLICT and EMOTION crush dry "explainer" titles. "Oil Export Wars" and "Messi's Nightmare \
-Debut" got 1000+ views; "Delhi Air Pollution Explained" and "Kerala's New CM" flopped. So: drama \
-and curiosity over clarity. Make every viewer feel they'll MISS something if they scroll past.
+WHAT WINS ON THIS CHANNEL: a curiosity gap the video actually CLOSES. Lead with the single most \
+interesting TRUE fact or tension, then pay it off with real analysis. Stories with real stakes — \
+money & power, conflict with consequences, science, big human impact — travel, but the pull must \
+come from the REAL story framed honestly, never from a title the body can't cash. Promise == payoff.
 
 Write a ~110-130 word (<=45s) narration that FLOWS naturally when spoken out loud:
-1. HOOK (first 3s — THE most important line): an explosive, scroll-stopping opener — a shocking \
-fact, a bold claim, or an open curiosity LOOP ("Nobody saw this coming...", "This changes \
-everything, and here's why..."). Make them NEED the answer. Plant a question you only resolve at \
-the END so they watch through. No "in this video", no throat-clearing.
+1. HOOK (first 3s — THE most important line): an honest, scroll-stopping opener — the most \
+surprising TRUE fact, a real stakes question, or a genuine curiosity loop you WILL close at the \
+end. Make them want the answer, then deliver it. No "in this video", no throat-clearing, no \
+over-claim the body can't back up.
 2. WHAT HAPPENED: 1-2 real facts in your own words, citing the source out loud ("according to ..."). \
 Deliver them with stakes and tension — the drama is in HOW you say a true thing.
 3. WHY IT MATTERS: the real stakes, with bite — why this is a bigger deal than it looks.
@@ -76,13 +77,11 @@ struck and demonetized, which kills the views. If the premise doesn't check out,
 dramatic ACCURATE version instead.
 
 ALSO produce, for the feed + discoverability:
-- "title": a VIRAL, curiosity-driven YouTube title (<=70 chars, shorter hits harder). Use the \
-proven formulas: shock/emotion power-words (Nightmare, Shock, Disaster, Wars, Insane, Secret), a \
-curiosity gap, conflict ("X vs Y"), a number, ALL-CAPS on ONE key word, and/or a "watch till the \
-end" pull. It can over-promise drama — but it must sit on top of the REAL story (no invented \
-facts in the title). Front-load the punchiest word. Examples of the target energy: \
-"Oil Export Wars", "Messi's WORST Debut Ever — 6-0", "Delhi's Air Just Broke a Terrifying Record", \
-"India's New Gas Rule Quietly Changes Your Kitchen".
+- "title": a clear, curiosity-driven YouTube title (<=70 chars) that is TRUE to the video — a \
+real curiosity gap, an honest number, or genuine stakes. Front-load the most interesting REAL \
+word. It must NOT promise anything the narration doesn't deliver (mismatch gets suppressed). \
+Examples of the honest-but-gripping energy: "India's new gas rule quietly changes your kitchen \
+bill", "Why Venezuela just out-priced Iraq on oil", "ISRO's rocket landed itself — here's the catch".
 - "caption": the YouTube description. FIRST LINE is a second curiosity hook (YouTube shows ~2 lines \
 in-feed) — make them tap "more". Then a keyword-rich line for SEO, then the source link(s).
 - "tags": 10-15 specific search keywords/phrases people would actually type (the topic, the \
@@ -103,12 +102,17 @@ def _build_prompt(idea: dict, template: str) -> str:
         )
     sources = idea.get("sources") or []
     sources_block = "\n".join(f"- {s}" for s in sources) or "- (none provided)"
-    return _PROMPT_N.format(
+    prompt = _PROMPT_N.format(
         title=idea.get("title", ""),
         hook=idea.get("hook", ""),
         angle=idea.get("angle", ""),
         sources=sources_block,
     )
+    # The human "why it matters" take is the originality + anti-"AI-slop" signal (2026 policy).
+    if config.get_bool("ENABLE_HUMAN_ANGLE", True):
+        prompt += ("\n\nEMPHASIS: the \"why it matters\" analysis is the point of the video — make "
+                   "it a genuine, specific human take, not a generic restatement.")
+    return prompt
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -146,11 +150,11 @@ STEP 1 — Score the CURRENT opening line (the first ~3 seconds) from 1 to 10 on
 power: 10 = a shocking, curiosity-exploding hook nobody could scroll past; 1 = a flat, slow, \
 "explainer" intro.
 
-STEP 2 — Rewrite for maximum pull (do this whenever the score is below 9):
-- TITLE: short, punchy, curiosity-gap or conflict, a power-word (Shock, Nightmare, Wars, Secret, \
-Insane), ALL-CAPS on ONE key word. It may over-promise drama, but must sit on the real story.
-- OPENING: replace the first 1-2 sentences with an explosive hook — a shocking fact already in the \
-script, a bold claim, or an open question the viewer NEEDS answered. Keep the rest of the narration.
+STEP 2 — Rewrite for stronger HONEST pull (only when the score is below 7, i.e. genuinely flat):
+- TITLE: a clear curiosity gap or real stakes, front-loading the most interesting TRUE word. It \
+must stay honest to the narration — never promise something the body doesn't deliver.
+- OPENING: replace the first 1-2 sentences with a stronger TRUE hook — the most surprising fact \
+already in the script, or a real question the viewer needs answered. Keep the rest of the narration.
 
 HARD RULE — DO NOT add, remove, or change any FACT, name, number, date, quote, statistic, or claim. \
 Every factual statement must stay exactly as true as the original. You may ONLY re-word, re-order, \
@@ -185,7 +189,7 @@ def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
         score = int(float(data.get("hook_score", 0)))
     except (TypeError, ValueError):
         score = 0
-    if score >= int(config.get("HOOK_MIN_SCORE", "8")):
+    if score >= int(config.get("HOOK_MIN_SCORE", "7")):
         log.info("scriptwriter: hook already strong (score %d); not rewriting.", score)
         return title, body
 
