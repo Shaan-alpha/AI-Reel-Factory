@@ -113,7 +113,7 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
         hook = script.get("title") or idea.get("title")
         final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
-                                        hook_text=hook)
+                                        hook_text=hook, key_points=script.get("key_points"))
         video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url

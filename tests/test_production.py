@@ -40,6 +40,17 @@ def test_produce_one_full_chain(monkeypatch, tmp_path):
     assert (7, "produced") in produced  # idea marked produced
 
 
+def test_produce_one_passes_key_points_to_captions(monkeypatch, tmp_path):
+    captured = {}
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "key_points": ["First in Asia"]})
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: captured.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert captured.get("key_points") == ["First in Asia"]
+
+
 def test_produce_one_idempotent_skips_before_scripting(monkeypatch, tmp_path):
     produced = _wire_happy(monkeypatch, existing_post={"external_id": "OLD", "url": "u"})
     # neither scripting nor rendering should happen when the idea already shipped

@@ -73,6 +73,38 @@ def test_build_ass_uses_configured_font(monkeypatch):
     assert "{\\kf" in ass              # events use karaoke fill
 
 
+# --- on-screen key-point text cards ----------------------------------------------------
+
+def test_card_events_distributes_sparsely():
+    events = subtitles._card_events(["A", "B", "C"], total_dur=12.0, start_after=2.0, card_dur=1.8)
+    assert len(events) == 3
+    for (s, e, t), p in zip(events, ["A", "B", "C"]):
+        assert 2.0 <= s < e <= 12.0
+        assert e - s <= 1.81
+        assert t == p
+    assert events[0][0] < events[1][0] < events[2][0]   # ascending, non-overlapping order
+
+
+def test_card_events_empty_when_no_points_or_no_time():
+    assert subtitles._card_events([], 10.0, 2.0, 1.8) == []
+    assert subtitles._card_events(["A"], 2.0, 2.0, 1.8) == []   # no span after the hook window
+
+
+def test_build_ass_includes_text_cards(monkeypatch):
+    monkeypatch.delenv("ENABLE_TEXT_CARDS", raising=False)  # default on
+    words = [(0.0, 0.4, "Reusable"), (0.4, 0.9, "rockets"), (5.0, 5.4, "cut"), (5.4, 6.0, "costs")]
+    ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
+    assert "Style: Card" in ass
+    assert "FIRST IN ASIA" in ass            # card text uppercased
+    assert ass.count(",Card,,") == 2          # two card dialogues
+
+
+def test_build_ass_omits_cards_when_disabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "0")
+    ass = subtitles._build_ass([(0.0, 0.4, "Hi")], key_points=["First in Asia"], total_dur=5.0)
+    assert ",Card,," not in ass
+
+
 def test_ass_escape_strips_braces():
     assert subtitles._ass_escape("  {evil}\\path\n ") == "evilpath"
 
@@ -167,7 +199,8 @@ def test_live_caption_burn(monkeypatch, tmp_path):
         reel = assembly.assemble(audio, clips, str(tmp_path / "reel.mp4"))
         # pass a hook so libass really renders the frame-1 Hook style + Layer-1 dialogue
         out = subtitles.burn_captions(reel, audio, str(tmp_path / "captioned.mp4"),
-                                      hook_text="Reusable Rocket SHOCK")
+                                      hook_text="Reusable Rocket SHOCK",
+                                      key_points=["First in Asia", "Cheaper Launches"])
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"live caption render unavailable (offline / no FFmpeg / model): {e}")
 

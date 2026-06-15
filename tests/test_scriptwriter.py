@@ -212,3 +212,26 @@ def test_human_angle_emphasis_toggles_off(monkeypatch):
     monkeypatch.setenv("ENABLE_HUMAN_ANGLE", "0")
     prompt = scriptwriter._build_prompt(IDEA, "N").lower()
     assert "emphasis:" not in prompt   # the extra nudge is omitted when disabled
+
+
+def test_returns_key_points_for_text_cards(monkeypatch):
+    reply = json.dumps({
+        "title": "T",
+        "script_body": "A clear analysis of why this genuinely matters to people. " * 4,
+        "caption": "hook. https://example.com/isro https://example.org/space",
+        "hashtags": ["#Shorts"],
+        "key_points": ["Rs 2 lakh crore", "First in Asia", "  ", "30% cheaper", "a", "b", "c"],
+    })
+    _patch(monkeypatch, reply)
+    out = scriptwriter.write_script(IDEA)
+    # blanks dropped, capped at 5, order preserved
+    assert out["key_points"] == ["Rs 2 lakh crore", "First in Asia", "30% cheaper", "a", "b"]
+
+
+def test_key_points_default_empty_when_absent(monkeypatch):
+    reply = json.dumps({"title": "T", "script_body": "ok body " * 20,
+                        "caption": "cap https://example.com/isro https://example.org/space",
+                        "hashtags": ["#Shorts"]})
+    _patch(monkeypatch, reply)
+    out = scriptwriter.write_script(IDEA)
+    assert out["key_points"] == []

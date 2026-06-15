@@ -86,11 +86,15 @@ bill", "Why Venezuela just out-priced Iraq on oil", "ISRO's rocket landed itself
 in-feed) — make them tap "more". Then a keyword-rich line for SEO, then the source link(s).
 - "tags": 10-15 specific search keywords/phrases people would actually type (the topic, the \
 people/orgs involved, the category, and close synonyms). No '#'.
+- "key_points": 3-5 ULTRA-SHORT on-screen text cards (<=4 words each) — the punchiest facts, \
+numbers, or names from the narration, in spoken order. They burn over the video as bold cards, so \
+keep them concrete and scannable (e.g. "Rs 2 lakh crore", "First in Asia", "30% cheaper"). No \
+full sentences.
 
 Return ONLY a JSON object, no markdown fences:
-{{"title": "the VIRAL title", "script_body": "the spoken narration", "caption": "hook line first, \
-then keyword-rich SEO description including the source link(s)", "hashtags": ["#keyword", "#Shorts"], \
-"tags": ["search keyword", "another phrase"]}}
+{{"title": "the honest, gripping title", "script_body": "the spoken narration", "caption": "hook \
+line first, then keyword-rich SEO description including the source link(s)", "hashtags": \
+["#keyword", "#Shorts"], "tags": ["search keyword", "another phrase"], "key_points": ["short card", "another"]}}
 """
 
 
@@ -260,6 +264,11 @@ def write_script(idea: dict, template: str = "N") -> dict:
     tags = data.get("tags")
     tags = [str(t).lstrip("#").strip() for t in tags if str(t).strip()] if isinstance(tags, list) else []
 
+    # Short on-screen text cards (story-specific visuals, burned by subtitles over the B-roll).
+    kp = data.get("key_points")
+    key_points = ([str(p).strip() for p in kp if str(p).strip()][:5]
+                  if isinstance(kp, list) else [])
+
     words = len(body.split())
     if not 90 <= words <= 200:  # ~130-150 target; warn on a wild miss, don't block (rule 14)
         log.warning("scriptwriter: idea %s script is %d words (target ~130-150)", idea_id, words)
@@ -268,4 +277,4 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.
     script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None)
     return {"script_id": script_id, "script_body": body, "caption": caption,
-            "hashtags": hashtags, "title": title, "tags": tags}
+            "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points}

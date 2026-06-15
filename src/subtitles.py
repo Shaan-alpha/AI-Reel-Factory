@@ -168,15 +168,37 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,640,1
 Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
+Style: Card,{font},90,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,5,40,40,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
-def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None) -> str:
-    """Render the full .ass subtitle file: active-word karaoke captions + an optional
-    frame-1 hook banner."""
+def _card_events(key_points: list[str], total_dur: float, start_after: float,
+                 card_dur: float) -> list[tuple[float, float, str]]:
+    """Place each key-point card briefly at its beat across (start_after, total_dur].
+
+    Cards are SPARSE — one short flash per point with gaps between — because constant on-screen
+    text hurts retention. Returns [(start_s, end_s, text)]; [] if nothing fits."""
+    pts = [str(p).strip() for p in (key_points or []) if str(p).strip()]
+    span = total_dur - start_after
+    if not pts or span <= 0:
+        return []
+    slot = span / len(pts)
+    out: list[tuple[float, float, str]] = []
+    for i, p in enumerate(pts):
+        center = start_after + slot * (i + 0.5)
+        s = max(start_after, center - card_dur / 2)
+        e = min(total_dur, s + card_dur)
+        out.append((round(s, 3), round(e, 3), p))
+    return out
+
+
+def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None,
+               key_points: list[str] | None = None, total_dur: float | None = None) -> str:
+    """Render the full .ass subtitle file: active-word karaoke captions + an optional frame-1
+    hook banner + optional sparse on-screen key-point cards."""
     lines = [_ass_header()]
 
     # Frame-1 hook banner: the first frame IS the in-feed thumbnail, so a bold top-of-screen
@@ -189,6 +211,17 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
             lines.append(
                 f"Dialogue: 1,{_format_ts(0)},{_format_ts(secs)},Hook,,0,0,0,,{banner}"
             )
+
+    # Sparse on-screen key-point cards (middle of frame) — story-specific text that lifts the
+    # generic-stock B-roll. Shown after the hook window; toggle ENABLE_TEXT_CARDS.
+    if key_points and config.get_bool("ENABLE_TEXT_CARDS", True):
+        dur = total_dur if total_dur else (words[-1][1] if words else 0.0)
+        start_after = float(config.get("HOOK_SECONDS", "1.8"))
+        card_dur = float(config.get("CARD_SECONDS", "1.8"))
+        for cs, ce, text in _card_events(key_points, dur, start_after, card_dur):
+            banner = _hook_banner_text(text, max_chars=18, max_lines=2)
+            if banner:
+                lines.append(f"Dialogue: 2,{_format_ts(cs)},{_format_ts(ce)},Card,,0,0,0,,{banner}")
 
     # Group words into short phrases; each phrase is ONE karaoke line whose words fill to the
     # highlight colour exactly as spoken (active-word highlight — a retention driver).
@@ -237,11 +270,12 @@ def _burn(video_path: str, ass_path: str, out_path: str) -> None:
 
 
 def burn_captions(video_path: str, audio_path: str, out_path: str,
-                  hook_text: str | None = None) -> str:
+                  hook_text: str | None = None, key_points: list[str] | None = None) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
-    is the in-feed thumbnail, so this is the biggest free CTR lever. Optional/back-compatible.
+    is the in-feed thumbnail, so this is the biggest free CTR lever. `key_points` are short
+    phrases burned as sparse mid-frame cards (story-specific text). Both optional/back-compatible.
     """
     if not os.path.exists(video_path):
         raise ValueError(f"subtitles: video not found: {video_path}")
@@ -256,8 +290,9 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     os.makedirs(out_dir, exist_ok=True)
     digest = hashlib.sha1(os.path.abspath(audio_path).encode("utf-8")).hexdigest()[:12]
     ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
+    total_dur = words[-1][1] if words else None
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_build_ass(words, hook_text))
+        f.write(_build_ass(words, hook_text, key_points, total_dur))
 
     log.info("subtitles: burning %d word events into %s", len(words), out_path)
     _burn(video_path, ass_path, out_path)
