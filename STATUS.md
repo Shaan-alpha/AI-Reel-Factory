@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.2.1 (**PUBLIC** — Webhook callbacks + fix 409 conflict; AI visuals + analytics + SEO; 153 tests pass)
-**Last updated:** 2026-06-11
+**Version:** 0.3.0 (**PUBLIC** — Content-quality overhaul Phase A: Google Chirp 3 HD voice + de-hyped honest scripts + karaoke captions; 161 tests pass)
+**Last updated:** 2026-06-15
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -36,11 +36,11 @@
 |---|--------|--------|
 | 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
 | 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
-| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N via `llm.py`; compliance enforced; 8 unit tests |
-| 4 | Voice | ✅ Done — **Kokoro (humanized) → edge-tts fallback**; 8 tests (incl. live Kokoro) |
-| 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) |
+| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; **honest framing + why-it-matters**; compliance enforced; 13 tests |
+| 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain; 14 tests (incl. live) |
+| 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) · *Phase B: story-specific* |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
-| 7 | Subtitles (faster-whisper) | ✅ Done — word-by-word ASS burn; 9 tests (incl. live whisper+burn) |
+| 7 | Subtitles (faster-whisper) | ✅ Done — **active-word karaoke (ASS \k) + Montserrat**; 16 tests (incl. live burn) |
 | 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |
 | 10 | Orchestrator (`production.py`) | ✅ Done — wires the full chain, idempotent + fail-soft; 8 tests |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
@@ -93,6 +93,28 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-15 — Content-quality overhaul Phase A (voice + honest scripts + karaoke captions)
+- **Voice → Google Chirp 3 HD** (`voice.py`): near-human en-IN narration via Google Cloud TTS v1
+  REST + API key. `synthesize()` is now an ordered fallback **chain** google → edge-tts (en-IN
+  Neerja) → Kokoro, resolved at call time (rule 11). Helper `tools/list_google_voices.py`. Free
+  within 1M chars/mo (≈ our whole volume), so the $5/mo cap is headroom.
+- **De-hyped content** (`scriptwriter.py`, `ideation_fallback.py`): replaced the "max hype"
+  clickbait framing with honest curiosity + promise↔payoff alignment + a required "why it matters"
+  human take (`ENABLE_HUMAN_ANGLE`) — a quality fix AND the anti-"AI-slop" monetization signal
+  (2026 Inauthentic-Content policy). Accuracy hard-line unchanged; `HOOK_MIN_SCORE` default 8 → 7.
+- **Karaoke captions** (`subtitles.py`): active-word highlight (ASS `\kf`) in a bundled OFL
+  Montserrat font (`assets/fonts/`, libass `fontsdir`). Knobs `CAPTION_FONT`/`CAPTION_HIGHLIGHT_COLOR`;
+  `CAPTION_WORDS` default 2 → 3. Verified with a real karaoke burn (live test green).
+- **Budget $0 → ≤ $5/mo** (CLAUDE.md rule 2 + README + docs/01/04/07 synced). Both workflows wired
+  with the new env (`VOICE_ENGINE`, `GOOGLE_TTS_*`, `ENABLE_HUMAN_ANGLE`, `CAPTION_FONT`, …).
+  **161 pass, 2 skipped** (gated live upload/LLM). Branch `feat/phase-a-content-quality`.
+- **Operator follow-ups:** (1) create a Google Cloud project → enable Cloud TTS → make a
+  TTS-restricted API key → **set a $5 budget cap + alert**; (2) `python tools/list_google_voices.py`,
+  pick a voice; set repo secret `GOOGLE_TTS_API_KEY` + var `GOOGLE_TTS_VOICE`. Until then the chain
+  auto-uses edge-tts en-IN (already better than the old Kokoro int8 `af_heart`). Spec:
+  `docs/superpowers/specs/2026-06-15-content-quality-overhaul-design.md`. **Phase B/C remain**
+  (story-specific visuals, curated news-RSS topics, metadata trims, optional Telegram hot-take lever).
 
 ### 2026-06-11 — Webhook callback support + getUpdates 409 conflict fixes
 - **Webhook callback query handling**: processed inline button callback queries (`a:`, `r:`, `p:`) in Vercel Telegram bot with HTML parse_mode enabled, so Telegram handles bold/italic formatting of the edited messages correctly.

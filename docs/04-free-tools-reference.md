@@ -30,10 +30,14 @@ Every tool is free (beyond your existing Claude Pro sub). Limits and links refle
 
 ## Text-to-Speech (narration)
 
+Chain (rule 11): **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro**, set via `VOICE_ENGINE`.
+Google Cloud TTS gives **1M chars/month free** (≈ our entire volume), so the $5/mo cap is headroom.
+
 | Tool | Notes | Link |
 |------|-------|------|
-| **edge-tts** (default) | Free, natural voices, **unofficial** (can break) | `pip install edge-tts` |
-| **Kokoro TTS** (fallback, Phase 2) | Apache‑2.0, 82M params, CPU-capable, 54 voices, 2-voice "debate" | https://github.com/hexgrad/kokoro |
+| **Google Cloud TTS — Chirp 3 HD** ★ primary | Near-human `en-IN` voice via v1 REST + API key. **1M chars/mo free** (~117k used); $30/1M beyond. Needs a billing account + a hard **$5 budget cap**. List voices: `tools/list_google_voices.py`. | https://cloud.google.com/text-to-speech |
+| **edge-tts** (fallback) | Free, no key, Microsoft neural `en-IN-NeerjaNeural`; **unofficial** endpoint (can break) → fallback, not primary | `pip install edge-tts` |
+| **Kokoro TTS** (last resort) | Apache‑2.0, CPU, offline-safe; the int8 model is robotic next to Chirp 3 HD | https://github.com/hexgrad/kokoro |
 | Piper (alt) | Fully offline, lightweight | https://github.com/rhasspy/piper |
 
 ---

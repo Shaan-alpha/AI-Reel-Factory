@@ -11,7 +11,7 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 
 - **Channel:** *But It Matters* — daily impact news/info explainers (India + world), soft/positive lean.
 - **Primary goal:** Reliably ship 4–5 captioned Shorts/day. **Consistency beats sophistication.**
-- **Cost target:** **$0/month** beyond the existing Claude Pro subscription.
+- **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2).
 
 ## Onboarding (do this before working)
 
@@ -39,10 +39,13 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
    (what changed · what's next · blockers) and any doc your change affects. A cold agent —
    or future-you — must be able to resume from the markdown alone. If reality and the docs
    disagree, fix the docs.
-2. **Free-first, best-possible.** Default to free tools. You **may** lean on the existing
-   **Claude Pro** and **Google Gemini Pro** subscriptions when they meaningfully improve
-   quality — but **never introduce a new paid or billed service/API**. If a step appears to
-   need paid infrastructure, **stop and flag it** instead of signing anything up.
+2. **Free-first within a ≤ $5/month cap.** Default to free tools and the existing **Claude Pro**
+   / **Google Gemini Pro** subscriptions. A small metered budget — **≤ $5/month total** (raised
+   from $0 on 2026-06-15) — **may** be spent only where it meaningfully lifts quality. The one
+   sanctioned billed service is **Google Cloud Text-to-Speech** (Chirp 3 HD voice; free at our
+   volume — set a hard budget cap so it can never overrun). Any **new** billed service, or any
+   spend that could exceed $5/month, is **stop-and-flag** — never sign up silently. (Rule 4's
+   Claude-ToS boundary still holds absolutely.)
 3. **Never self-attribute.** No `Co-Authored-By`, no "Generated with Claude Code," no AI
    credit anywhere — commits, PRs, code comments, or docs. *(This overrides default git
    behavior. Applies to this repo.)*

@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.3.0] — 2026-06-15 — Content-quality overhaul: honest framing, near-human voice, karaoke captions
+
+Phase A of the content-quality overhaul (spec: `docs/superpowers/specs/2026-06-15-content-quality-overhaul-design.md`).
+**Reverses the earlier "max hype" tuning** — 2026's algorithm suppresses click→swipe title/content
+mismatch, and YouTube's Inauthentic-Content policy penalises low-effort automation. Budget raised
+**$0 → ≤ $5/month** (Google Cloud TTS; free at our volume).
+
+### Added
+- **Google Cloud TTS Chirp 3 HD voice** (`voice.py`): near-human `en-IN` narration via the v1 REST
+  endpoint + API key. New ordered fallback **chain** `google → edge-tts (en-IN Neerja) → Kokoro`,
+  resolved at call time so a missing key just advances. Helper `tools/list_google_voices.py` lists
+  en-IN Chirp3-HD voices. Knobs `VOICE_ENGINE`, `GOOGLE_TTS_API_KEY/VOICE/LANGUAGE`.
+- **Active-word karaoke captions** (`subtitles.py`): each word fills to a highlight colour as it's
+  spoken (ASS `\kf`), in a bundled OFL **Montserrat** font (`assets/fonts/`, staged so libass
+  resolves it via a relative `fontsdir`). Knobs `CAPTION_FONT`, `CAPTION_HIGHLIGHT_COLOR`.
+- **`ENABLE_HUMAN_ANGLE`**: the script must carry a genuine "why it matters" take — the originality /
+  anti-"AI-slop" signal under YouTube's 2026 policy.
+
+### Changed
+- **De-hyped script + ideation prompts** (`scriptwriter.py`, `ideation_fallback.py`): honest curiosity
+  with promise↔payoff alignment over clickbait/"max hype"; titles must stay true to the video. Hook
+  punch-up now rewrites only genuinely flat hooks (`HOOK_MIN_SCORE` 8 → 7). Accuracy hard-line intact.
+- **Default voice** is Google Chirp 3 HD (was Kokoro int8 `af_heart`, an American voice).
+- **Default `CAPTION_WORDS`** 2 → 3 (readable karaoke phrases).
+- **Cost target** $0 → ≤ $5/month (CLAUDE.md rule 2, README, docs/01, docs/04, docs/07 synced).
+- **161 tests pass** (was 153; +8).
+
 ## [Unreleased] — Virality tuning from first real analytics
 
 First real-traffic learning: one Short ("Oil Export Wars", 1,032 views) hugely outperformed dry

@@ -232,8 +232,8 @@ performers (Module 10 → Module 1 loop). See [08-news-niche-playbook.md](08-new
 
 ## 9. Cost & Risk
 
-**Cost:** **$0/month** beyond your existing Claude Pro subscription. No new paid services at
-4–5 reels/day.
+**Cost:** **≤ $5/month** beyond your existing Claude Pro subscription (raised from $0 on 2026-06-15
+to fund near-human voice). Google Cloud TTS is free at our 4–5 reels/day volume, so the $5 is headroom.
 
 **Risks & mitigations:**
 | Risk | Mitigation |

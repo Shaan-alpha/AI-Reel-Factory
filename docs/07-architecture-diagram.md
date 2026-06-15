@@ -4,7 +4,7 @@
 **Anthropic Routine** (Claude Code, your Pro sub) that web-researches trends. The
 deterministic production pipeline runs on scheduled **GitHub Actions**. State lives in
 Supabase. Telegram is the only human touchpoint.
-$0/month beyond Pro · no server to maintain · daily cron keeps Supabase awake.
+≤ $5/month beyond Pro (Google Cloud TTS; free at our volume) · no server to maintain · daily cron keeps Supabase awake.
 
 ---
 

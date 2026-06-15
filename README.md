@@ -46,7 +46,7 @@ day**: approving 4–5 ideas via a Telegram "Morning Digest."
 | Captions (MVP) | faster-whisper (word-by-word) | Free |
 | Publishing | YouTube Data API v3 | Free |
 
-**Cost target:** **$0/month** beyond the existing Claude Pro subscription.
+**Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (Google Cloud TTS voice; free at our volume).
 
 ---
 

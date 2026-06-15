@@ -52,12 +52,19 @@ jobs:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          VOICE_ENGINE: ${{ vars.VOICE_ENGINE || 'google' }}          # google | edge | kokoro (chain fallback)
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}       # Chirp 3 HD; empty -> falls back to edge-tts
+          GOOGLE_TTS_VOICE: ${{ vars.GOOGLE_TTS_VOICE }}              # an en-IN Chirp3-HD voice name
+          GOOGLE_TTS_LANGUAGE: ${{ vars.GOOGLE_TTS_LANGUAGE || 'en-IN' }}
+          ENABLE_HUMAN_ANGLE: ${{ vars.ENABLE_HUMAN_ANGLE || 'true' }}  # require a genuine why-it-matters take
+          CAPTION_FONT: ${{ vars.CAPTION_FONT || 'Montserrat' }}
+          CAPTION_HIGHLIGHT_COLOR: ${{ vars.CAPTION_HIGHLIGHT_COLOR || '&H0000FFFF' }}  # active-word fill colour
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || 'public' }}
           VISUAL_SOURCE: ${{ vars.VISUAL_SOURCE || 'photos' }}        # photos | ai | video
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
-          CAPTION_WORDS: ${{ vars.CAPTION_WORDS || '2' }}
+          CAPTION_WORDS: ${{ vars.CAPTION_WORDS || '3' }}            # words per karaoke phrase
           ENABLE_DESC_FOOTER: ${{ vars.ENABLE_DESC_FOOTER || 'true' }}  # append brand footer to descriptions
           DESCRIPTION_FOOTER: ${{ vars.DESCRIPTION_FOOTER }}         # optional: override the default footer
           ENABLE_HOOK_CAPTION: ${{ vars.ENABLE_HOOK_CAPTION || 'true' }}  # frame-1 title hook banner (CTR)
