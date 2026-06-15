@@ -20,6 +20,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import subprocess
 
 from functools import lru_cache
@@ -125,7 +126,38 @@ def _build_events(words: list[tuple[float, float, str]]) -> list[tuple[float, fl
     return events
 
 
-_ASS_HEADER = """[Script Info]
+def _cs(seconds: float) -> int:
+    """Seconds → centiseconds, clamped non-negative (the ASS \\kf karaoke-fill unit)."""
+    return max(0, int(round(seconds * 100)))
+
+
+def _karaoke_line(words: list[tuple[float, float, str]]) -> str:
+    """Build one phrase's ASS karaoke text: {\\kf<cs>}word per token.
+
+    Each word's fill runs from its start to the NEXT word's start (covers inter-word gaps) so
+    the highlight stays synced to speech; the last word uses its own spoken length. Words are
+    punctuation-cleaned and ASS-escaped so a stray brace can't break the override."""
+    parts = []
+    for i, (start, end, raw) in enumerate(words):
+        if i + 1 < len(words):
+            dur_cs = _cs(max(words[i + 1][0] - start, end - start))
+        else:
+            dur_cs = _cs(end - start)
+        word = _ass_escape(_clean_caption_word(raw))
+        if word:
+            parts.append(f"{{\\kf{dur_cs}}}{word}")
+    return " ".join(parts)
+
+
+def _ass_header() -> str:
+    """Build the ASS header, reading config at call time so env overrides apply.
+
+    The Karaoke style's PrimaryColour is the FILLED colour (highlight) and SecondaryColour the
+    pre-fill (white): ASS \\kf sweeps Secondary→Primary as each word is spoken, so the active
+    word lights up. Font is the bundled CAPTION_FONT, resolved by libass via fontsdir."""
+    font = config.get("CAPTION_FONT", "Montserrat")
+    hilite = config.get("CAPTION_HIGHLIGHT_COLOR", "&H0000FFFF")  # ASS &HBBGGRR: yellow
+    return f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -134,8 +166,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Pop,Arial,112,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,640,1
-Style: Hook,Arial,94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
+Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,640,1
+Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -143,8 +175,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None) -> str:
-    """Render the full .ass subtitle file (word captions + an optional frame-1 hook banner)."""
-    lines = [_ASS_HEADER]
+    """Render the full .ass subtitle file: active-word karaoke captions + an optional
+    frame-1 hook banner."""
+    lines = [_ass_header()]
 
     # Frame-1 hook banner: the first frame IS the in-feed thumbnail, so a bold top-of-screen
     # hook is the single biggest free CTR lever. Drawn on Layer 1 (top), the word captions sit
@@ -157,21 +190,42 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
                 f"Dialogue: 1,{_format_ts(0)},{_format_ts(secs)},Hook,,0,0,0,,{banner}"
             )
 
-    for start, end, word in _build_events(words):
+    # Group words into short phrases; each phrase is ONE karaoke line whose words fill to the
+    # highlight colour exactly as spoken (active-word highlight — a retention driver).
+    size = max(1, int(config.get("CAPTION_WORDS", "3")))
+    for i in range(0, len(words), size):
+        chunk = [w for w in words[i : i + size] if _clean_caption_word(w[2])]
+        if not chunk:
+            continue
+        start, end = chunk[0][0], chunk[-1][1]
+        end = end if end > start else start + 0.10
         lines.append(
-            f"Dialogue: 0,{_format_ts(start)},{_format_ts(end)},Pop,,0,0,0,,{_ass_escape(word)}"
+            f"Dialogue: 0,{_format_ts(start)},{_format_ts(end)},Karaoke,,0,0,0,,{_karaoke_line(chunk)}"
         )
     return "\n".join(lines) + "\n"
+
+
+def _stage_font(dest_dir: str) -> None:
+    """Copy the caption font into dest_dir so the burn (cwd=dest_dir) resolves it via a
+    relative `fontsdir=.` — sidesteps Windows drive-colon escaping in the ffmpeg filter.
+    Best-effort: libass falls back to a default font if the file is missing (rule 14)."""
+    src = config.get("CAPTION_FONT_FILE", os.path.join("assets", "fonts", "Montserrat-Bold.ttf"))
+    try:
+        if os.path.isfile(src):
+            shutil.copyfile(src, os.path.join(dest_dir, os.path.basename(src)))
+    except Exception as e:  # noqa: BLE001 — font staging is best-effort
+        log.warning("subtitles: could not stage caption font %s (%s)", src, e)
 
 
 def _burn(video_path: str, ass_path: str, out_path: str) -> None:
     """Burn the .ass onto the video with FFmpeg. Runs in the subtitle's dir so the filter
     arg is a bare filename — avoids Windows drive-colon/backslash escaping in libass."""
     work_dir = os.path.dirname(os.path.abspath(ass_path))
+    _stage_font(work_dir)  # so libass resolves CAPTION_FONT via a relative fontsdir
     cmd = [
         _ffmpeg(), "-y",
         "-i", os.path.abspath(video_path),
-        "-vf", f"ass={os.path.basename(ass_path)}",
+        "-vf", f"ass={os.path.basename(ass_path)}:fontsdir=.",
         "-c:a", "copy",
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",

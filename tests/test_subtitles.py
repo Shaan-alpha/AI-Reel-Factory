@@ -50,10 +50,27 @@ def test_build_events_groups_and_cleans(monkeypatch):
 def test_build_ass_has_style(monkeypatch):
     monkeypatch.setenv("CAPTION_WORDS", "1")
     ass = subtitles._build_ass([(0.0, 0.3, "Hello"), (0.4, 0.8, "world")])
-    assert "[V4+ Styles]" in ass and "Style: Pop" in ass
+    assert "[V4+ Styles]" in ass and "Style: Karaoke" in ass
     assert "PlayResX: 1080" in ass and "PlayResY: 1920" in ass
     assert ass.count("Dialogue:") == 2
     assert "Hello" in ass and "world" in ass
+
+
+def test_karaoke_line_has_kf_tags_and_words():
+    words = [(0.0, 0.40, "Oil"), (0.40, 0.90, "export"), (0.90, 1.50, "wars")]
+    line = subtitles._karaoke_line(words)
+    assert line.count("\\kf") == 3            # one fill tag per word
+    assert "Oil" in line and "export" in line and "wars" in line
+    assert "\\kf40" in line                   # first word fill ~ next_start - start = 40cs
+
+
+def test_build_ass_uses_configured_font(monkeypatch):
+    monkeypatch.setenv("CAPTION_FONT", "Montserrat")
+    words = [(0.0, 0.4, "Hi"), (0.4, 0.8, "there")]
+    ass = subtitles._build_ass(words)
+    assert "Montserrat" in ass
+    assert "Karaoke" in ass            # the karaoke style exists
+    assert "{\\kf" in ass              # events use karaoke fill
 
 
 def test_ass_escape_strips_braces():
