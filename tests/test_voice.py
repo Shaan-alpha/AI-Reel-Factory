@@ -1,19 +1,23 @@
 """Tests for the voice module (Module 4).
 
 Unit tests mock the synthesis backends, so they need no network/model — they verify the
-Kokoro→edge-tts engine selection + fallback, duration math, deterministic naming, and errors.
-Two live tests (Kokoro and edge-tts) run real synthesis and skip if unavailable (offline / no model).
+google → edge-tts → kokoro fallback chain, the Google Chirp 3 HD REST path, duration math,
+deterministic naming, and errors. Live tests run real synthesis and skip if unavailable.
 """
 from __future__ import annotations
 
+import base64
+import io
 import os
+import wave
+from unittest import mock
 
 import pytest
 
 from src import voice
 
 
-# --- edge-tts path (forced via VOICE_ENGINE) -------------------------------------------
+# --- helpers ---------------------------------------------------------------------------
 
 def _edge_chunks(audio=b"\x00\x01\x02", end_ticks=55_000_000):
     def _gen(text, v, rate):
@@ -22,6 +26,71 @@ def _edge_chunks(audio=b"\x00\x01\x02", end_ticks=55_000_000):
                "duration": 5_000_000, "text": "word"}
     return _gen
 
+
+def _fake_wav_b64(seconds: float = 0.5, rate: int = 24000) -> str:
+    """A tiny silent LINEAR16 WAV, base64-encoded — mimics Google's audioContent."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+# --- Google Chirp 3 HD path (mocked REST) ----------------------------------------------
+
+def test_synthesize_google_writes_wav_and_measures_duration(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "test-key")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Achernar")
+
+    resp = mock.Mock()
+    resp.raise_for_status = mock.Mock()
+    resp.json = mock.Mock(return_value={"audioContent": _fake_wav_b64(0.5)})
+    with mock.patch("src.voice.requests.post", return_value=resp) as post:
+        path, dur = voice._synthesize_google("Hello world.", str(tmp_path))
+
+    assert path.endswith(".wav")
+    assert os.path.exists(path)
+    assert 0.45 <= dur <= 0.55
+    sent = post.call_args.kwargs["json"]
+    assert sent["voice"]["name"] == "en-IN-Chirp3-HD-Achernar"
+    assert sent["voice"]["languageCode"] == "en-IN"
+    assert sent["audioConfig"]["audioEncoding"] == "LINEAR16"
+
+
+def test_synthesize_google_missing_key_raises(tmp_path, monkeypatch):
+    monkeypatch.delenv("GOOGLE_TTS_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Achernar")
+    with pytest.raises(RuntimeError):
+        voice._synthesize_google("hi", str(tmp_path))
+
+
+# --- fallback chain --------------------------------------------------------------------
+
+def test_synthesize_chain_prefers_google_then_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("VOICE_ENGINE", "google")
+    calls = []
+
+    def ok_edge(text, out_dir):
+        calls.append("edge")
+        p = os.path.join(out_dir, "n.mp3"); open(p, "wb").close()
+        return p, 1.0
+
+    def boom_google(text, out_dir):
+        calls.append("google"); raise RuntimeError("no key")
+
+    monkeypatch.setattr(voice, "_synthesize_google", boom_google)
+    monkeypatch.setattr(voice, "_engine_edge", ok_edge)
+    monkeypatch.setattr(voice, "_engine_kokoro",
+                        lambda t, d: (_ for _ in ()).throw(AssertionError("should not reach kokoro")))
+
+    path, dur = voice.synthesize("Hello.", str(tmp_path))
+    assert calls == ["google", "edge"]   # google tried first, edge second
+    assert dur == 1.0
+
+
+# --- edge-tts path (forced via VOICE_ENGINE) -------------------------------------------
 
 def test_edge_writes_file_and_measures_duration(monkeypatch, tmp_path):
     monkeypatch.setenv("VOICE_ENGINE", "edge-tts")
@@ -46,18 +115,23 @@ def test_empty_script_raises(tmp_path):
 
 def test_all_engines_fail_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("VOICE_ENGINE", "edge-tts")
+    monkeypatch.delenv("GOOGLE_TTS_API_KEY", raising=False)  # google fails fast (no key)
+
     def _boom(text, v, rate):
         raise ConnectionError("socket closed")
         yield  # pragma: no cover
     monkeypatch.setattr(voice, "_stream_chunks", _boom)
+    # kokoro is the last link in the chain now — make it fail too so ALL engines fail
+    monkeypatch.setattr(voice, "_synthesize_kokoro",
+                        lambda t, o: (_ for _ in ()).throw(RuntimeError("no model")))
     with pytest.raises(RuntimeError, match="all engines failed"):
         voice.synthesize("text", str(tmp_path))
 
 
 # --- Kokoro path (mocked) --------------------------------------------------------------
 
-def test_kokoro_is_default_and_writes_wav(monkeypatch, tmp_path):
-    monkeypatch.delenv("VOICE_ENGINE", raising=False)  # default = kokoro
+def test_kokoro_engine_writes_wav(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
 
     def fake_kokoro(text, out_path):
         with open(out_path, "wb") as f:
@@ -69,7 +143,8 @@ def test_kokoro_is_default_and_writes_wav(monkeypatch, tmp_path):
 
 
 def test_kokoro_falls_back_to_edge(monkeypatch, tmp_path):
-    monkeypatch.delenv("VOICE_ENGINE", raising=False)  # kokoro default
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
+    monkeypatch.delenv("GOOGLE_TTS_API_KEY", raising=False)
     monkeypatch.setattr(voice, "_synthesize_kokoro",
                         lambda t, o: (_ for _ in ()).throw(RuntimeError("no model")))
     monkeypatch.setattr(voice, "_stream_chunks", _edge_chunks())
@@ -95,7 +170,7 @@ def test_split_sentences():
 
 
 def test_kokoro_pacing_inserts_silence_gaps(monkeypatch, tmp_path):
-    monkeypatch.delenv("VOICE_ENGINE", raising=False)            # kokoro default
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
     monkeypatch.delenv("ENABLE_DRAMATIC_PACING", raising=False)  # default on
     monkeypatch.setattr(voice, "_kokoro", lambda: _FakeKokoro())
     # 3 sentences → 0.3s speech + one 0.18s gap + one 0.5s payoff beat = 0.98s
@@ -105,7 +180,7 @@ def test_kokoro_pacing_inserts_silence_gaps(monkeypatch, tmp_path):
 
 
 def test_kokoro_pacing_disabled_is_one_shot(monkeypatch, tmp_path):
-    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
     monkeypatch.setenv("ENABLE_DRAMATIC_PACING", "0")
     monkeypatch.setattr(voice, "_kokoro", lambda: _FakeKokoro())
     # pacing off → single create() on the whole text → just 0.1s, no gaps
@@ -115,8 +190,9 @@ def test_kokoro_pacing_disabled_is_one_shot(monkeypatch, tmp_path):
 
 # --- live ------------------------------------------------------------------------------
 
-def test_live_kokoro(tmp_path):
+def test_live_kokoro(monkeypatch, tmp_path):
     """Real Kokoro synthesis — skips if the model isn't available / can't download."""
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
     try:
         path, duration = voice._kokoro() and voice.synthesize(
             "This is a Kokoro narration test for But It Matters.", str(tmp_path))

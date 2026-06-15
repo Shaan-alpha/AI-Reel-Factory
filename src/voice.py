@@ -16,12 +16,15 @@ delete it (rule 15 — never store video/audio in Supabase).
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import os
 import re
 
 from functools import lru_cache
+
+import requests
 
 from src import config
 
@@ -39,6 +42,9 @@ _TICKS_PER_SECOND = 1e7  # edge-tts offsets/durations are in 100-nanosecond tick
 _KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 _KOKORO_MODEL = "kokoro-v1.0.int8.onnx"
 _KOKORO_VOICES = "voices-v1.0.bin"
+
+# Google Cloud TTS (primary engine) — Chirp 3 HD via the v1 REST endpoint + API key (headless).
+_GOOGLE_TTS_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 
 
 def _audio_filename(script_body: str, ext: str = ".mp3") -> str:
@@ -137,6 +143,39 @@ def _synthesize_kokoro(text: str, out_path: str) -> float:
     return len(samples) / float(sr)
 
 
+def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
+    """Synthesize via Google Cloud TTS Chirp 3 HD (REST + API key). Returns (wav_path, seconds).
+
+    Requests LINEAR16 so the response bytes are a real WAV we measure with the stdlib `wave`
+    module (exact, no ffprobe). Raises — so the chain falls back — if the key/voice is unset
+    or the API errors."""
+    import wave
+
+    api_key = config.get("GOOGLE_TTS_API_KEY", "")
+    voice_name = config.get("GOOGLE_TTS_VOICE", "")
+    if not api_key or not voice_name:
+        raise RuntimeError("google tts: GOOGLE_TTS_API_KEY / GOOGLE_TTS_VOICE not set")
+
+    lang = config.get("GOOGLE_TTS_LANGUAGE", "en-IN")
+    body = {
+        "input": {"text": text},
+        "voice": {"languageCode": lang, "name": voice_name},
+        "audioConfig": {"audioEncoding": "LINEAR16"},
+    }
+    r = requests.post(f"{_GOOGLE_TTS_URL}?key={api_key}", json=body, timeout=60)
+    r.raise_for_status()
+    b64 = (r.json() or {}).get("audioContent")
+    if not b64:
+        raise RuntimeError("google tts: empty audioContent")
+
+    out_path = os.path.join(out_dir, _audio_filename(text, ".wav"))
+    with open(out_path, "wb") as f:
+        f.write(base64.b64decode(b64))
+    with wave.open(out_path, "rb") as w:
+        duration = w.getnframes() / float(w.getframerate())
+    return out_path, duration
+
+
 def _stream_chunks(text: str, voice: str, rate: str):
     """Yield edge-tts stream chunks (audio + WordBoundary). Isolated for testability."""
     import edge_tts
@@ -162,37 +201,59 @@ def _synthesize_edge_tts(text: str, out_path: str, voice: str, rate: str) -> flo
     return last_end_ticks / _TICKS_PER_SECOND
 
 
-def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
-    """Return (audio_path, duration_seconds) via Kokoro (humanized) → edge-tts fallback (rule 11).
+_ENGINE_ORDER = ("google", "edge", "kokoro")
+# Accept friendly/legacy values for VOICE_ENGINE.
+_ENGINE_ALIASES = {"edge-tts": "edge", "chirp": "google", "google-tts": "google"}
 
-    Raises ValueError on empty input and RuntimeError only if EVERY engine fails — the
-    orchestrator skips that one reel and keeps the batch going (rule 14: soft on runtime).
+
+def _engine_google(text: str, out_dir: str) -> tuple[str, float]:
+    path, dur = _synthesize_google(text, out_dir)
+    _log_done(path, dur, "google:chirp3hd")
+    return path, dur
+
+
+def _engine_edge(text: str, out_dir: str) -> tuple[str, float]:
+    out_path = os.path.join(out_dir, _audio_filename(text, ".mp3"))
+    dur = _synthesize_edge_tts(text, out_path, _VOICE, _RATE)
+    _log_done(out_path, dur, f"edge-tts:{_VOICE}")
+    return out_path, dur
+
+
+def _engine_kokoro(text: str, out_dir: str) -> tuple[str, float]:
+    out_path = os.path.join(out_dir, _audio_filename(text, ".wav"))
+    dur = _synthesize_kokoro(text, out_path)
+    _log_done(out_path, dur, "kokoro")
+    return out_path, dur
+
+
+def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
+    """Return (audio_path, duration_seconds) via an ordered fallback chain (rule 11):
+    google (Chirp 3 HD) → edge-tts (en-IN) → kokoro. VOICE_ENGINE picks the primary engine;
+    the remaining engines follow as fallbacks. Engines are resolved by name at call time, so a
+    missing key/model just advances to the next link.
+
+    Raises ValueError on empty input, RuntimeError only if EVERY engine fails — the orchestrator
+    skips that one reel and keeps the batch going (rule 14: soft on runtime).
     """
     text = (script_body or "").strip()
     if not text:
         raise ValueError("voice.synthesize: empty script_body.")
     os.makedirs(out_dir, exist_ok=True)
 
-    engine = str(config.get("VOICE_ENGINE", "kokoro")).lower()
+    primary = str(config.get("VOICE_ENGINE", "google")).lower()
+    primary = _ENGINE_ALIASES.get(primary, primary)
+    order = [primary] + [e for e in _ENGINE_ORDER if e != primary]
+
     errors: list[str] = []
-
-    if engine == "kokoro":
-        out_path = os.path.join(out_dir, _audio_filename(text, ".wav"))
+    for name in order:
+        fn = globals().get(f"_engine_{name}")
+        if fn is None:
+            continue
         try:
-            duration = _synthesize_kokoro(text, out_path)
-            _log_done(out_path, duration, "kokoro")
-            return out_path, duration
-        except Exception as e:  # noqa: BLE001 — fall back to edge-tts (rule 11)
-            log.warning("voice: kokoro failed (%s); falling back to edge-tts", e)
-            errors.append(f"kokoro: {e}")
-
-    out_path = os.path.join(out_dir, _audio_filename(text, ".mp3"))
-    try:
-        duration = _synthesize_edge_tts(text, out_path, _VOICE, _RATE)
-        _log_done(out_path, duration, f"edge-tts:{_VOICE}")
-        return out_path, duration
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"edge-tts: {e}")
+            return fn(text, out_dir)
+        except Exception as e:  # noqa: BLE001 — try the next engine in the chain (rule 11)
+            log.warning("voice: engine %s failed (%s); trying next", name, e)
+            errors.append(f"{name}: {e}")
     raise RuntimeError("voice.synthesize: all engines failed — " + " | ".join(errors))
 
 
