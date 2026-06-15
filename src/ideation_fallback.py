@@ -20,7 +20,7 @@ import json
 import logging
 import os
 
-from src import config, db, llm, trends
+from src import config, db, llm, news, trends
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,10 @@ scroll-stopping potential.
 
 TODAY'S TRENDING IN INDIA (prefer ideas tied to these where a solid, factual explainer fits):
 {trending}
+
+TODAY'S NEWS HEADLINES (real, current stories — PREFER turning one of THESE into an honest \
+explainer over a generic evergreen topic; verify the facts before using):
+{headlines}
 
 WINNING TITLE STYLES ON THIS CHANNEL (these actual published titles + their view counts show what \
 the feed rewards — copy the ENERGY and framing, never the exact title; if empty, ignore):
@@ -149,6 +153,9 @@ def _produce_ideas(target: int) -> list[dict]:
     topics = trends.fetch_trending(15)
     trending_block = "\n".join(f"- {t}" for t in topics) or \
         "- (live trends unavailable — use your own knowledge of today's biggest stories)"
+    headlines = news.fetch_headlines(12)
+    headlines_block = "\n".join(f"- {h}" for h in headlines) or \
+        "- (no live headlines — use your knowledge of today's biggest REAL stories)"
     try:
         winners = db.top_performing_titles(6)
     except Exception as e:  # noqa: BLE001 — analytics feedback is best-effort
@@ -156,7 +163,8 @@ def _produce_ideas(target: int) -> list[dict]:
         winners = []
     winners_block = "\n".join(f"- {w}" for w in winners) or "- (no performance data yet)"
     prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
-                            trending=trending_block, winners=winners_block)
+                            trending=trending_block, headlines=headlines_block,
+                            winners=winners_block)
     # Try web-grounded research first, INCLUDING the parse — grounded JSON is sometimes
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     try:
