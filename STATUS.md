@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.3.0 (**PUBLIC** — Content-quality overhaul Phase A: Google Chirp 3 HD voice + de-hyped honest scripts + karaoke captions; 161 tests pass)
+**Version:** 0.4.0 (**PUBLIC** — Phase B: on-screen key-point cards + curated news topics; Chirp 3 HD LIVE; 171 tests pass)
 **Last updated:** 2026-06-15
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -36,11 +36,11 @@
 |---|--------|--------|
 | 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
 | 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
-| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; **honest framing + why-it-matters**; compliance enforced; 13 tests |
+| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; honest framing + why-it-matters + **key-point cards**; compliance enforced; 17 tests |
 | 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain; 14 tests (incl. live) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) · *Phase B: story-specific* |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel; 7 tests (incl. live full render) |
-| 7 | Subtitles (faster-whisper) | ✅ Done — **active-word karaoke (ASS \k) + Montserrat**; 16 tests (incl. live burn) |
+| 7 | Subtitles (faster-whisper) | ✅ Done — **karaoke + frame-1 hook + key-point cards** (Montserrat); 20 tests (incl. live burn) |
 | 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |
 | 10 | Orchestrator (`production.py`) | ✅ Done — wires the full chain, idempotent + fail-soft; 8 tests |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
@@ -93,6 +93,23 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-15 — Content-quality overhaul Phase B (story-specific visuals + curated topics) + Chirp 3 HD LIVE
+- **On-screen key-point cards** (`scriptwriter.py` → `subtitles.py` → `production.py`): the
+  scriptwriter emits 3-5 ultra-short `key_points`; subtitles burns them as SPARSE bold mid-frame
+  cards (new `Card` ASS style, distributed across the reel after the hook window). Layers
+  story-specific TEXT over the generic stock B-roll — the core fix for the "AI-slop" look. Knobs
+  `ENABLE_TEXT_CARDS`/`CARD_SECONDS`. Verified with a real karaoke+cards burn (live test green).
+- **Curated news topics** (`src/news.py` → ideation): ideation is now seeded by real Google News
+  RSS headlines (India locale, no key) IN ADDITION to trends — ideas track actual current stories,
+  not just trending search noise. Best-effort (rule 11); override via `NEWS_RSS_URL`.
+- **Chirp 3 HD LIVE** (operator added the key): verified `en-IN-Chirp3-HD-Kore` synthesizes via the
+  real chain (5.8s WAV). Set local `.env` + **GitHub secret `GOOGLE_TTS_API_KEY` + var
+  `GOOGLE_TTS_VOICE`** so cloud runs use it. 30 en-IN Chirp3-HD voices available — A/B by changing
+  the var (`tools/list_google_voices.py`, which now loads `.env`).
+- **171 pass, 2 skipped.** New knobs wired into both workflows + `.env.example`. Branch
+  `feat/phase-b-visuals-topics`. **Phase C remains** (metadata trims, optional Telegram hot-take
+  lever, optional data-viz/maps). Spec: `docs/superpowers/specs/2026-06-15-content-quality-overhaul-design.md`.
 
 ### 2026-06-15 — Content-quality overhaul Phase A (voice + honest scripts + karaoke captions)
 - **Voice → Google Chirp 3 HD** (`voice.py`): near-human en-IN narration via Google Cloud TTS v1

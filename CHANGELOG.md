@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.4.0] — 2026-06-15 — Content-quality overhaul Phase B: story-specific visuals + curated topics
+
+Phase B of the overhaul (same spec as 0.3.0). Layers story-specific on-screen text over the B-roll,
+seeds ideation with real news, and wires Google Chirp 3 HD live (operator added the key).
+
+### Added
+- **On-screen key-point text cards** (`scriptwriter.py`, `subtitles.py`, `production.py`): the
+  scriptwriter emits 3-5 ultra-short `key_points`; subtitles burns them as sparse bold mid-frame
+  cards (new `Card` ASS style) distributed across the reel. Layers story-specific TEXT over the
+  generic stock B-roll — the core fix for the "AI-slop" look. Knobs `ENABLE_TEXT_CARDS`, `CARD_SECONDS`.
+- **Curated news topics** (`src/news.py`): ideation is now seeded by real Google News RSS headlines
+  (India locale, no key) alongside trends, so ideas track actual current stories. Best-effort
+  (rule 11); override via `NEWS_RSS_URL`.
+
+### Changed
+- **`tools/list_google_voices.py`** now loads `.env` (dev convenience).
+- **Live voice wired**: `en-IN-Chirp3-HD-Kore` selected + verified end-to-end; GitHub secret
+  `GOOGLE_TTS_API_KEY` + variable `GOOGLE_TTS_VOICE` set so cloud runs narrate in Chirp 3 HD.
+- **171 tests pass** (was 161; +10). New knobs wired into both workflows + `.env.example`.
+
 ## [0.3.0] — 2026-06-15 — Content-quality overhaul: honest framing, near-human voice, karaoke captions
 
 Phase A of the content-quality overhaul (spec: `docs/superpowers/specs/2026-06-15-content-quality-overhaul-design.md`).

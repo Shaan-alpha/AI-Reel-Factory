@@ -5,6 +5,13 @@ Run: GOOGLE_TTS_API_KEY=... python tools/list_google_voices.py
 import os
 import sys
 
+try:  # load local .env so the key is available when run on the dev machine (CI sets env directly)
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 import requests
 
 KEY = os.environ.get("GOOGLE_TTS_API_KEY", "")

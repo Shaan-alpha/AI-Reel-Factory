@@ -68,6 +68,9 @@ jobs:
           ENABLE_HUMAN_ANGLE: ${{ vars.ENABLE_HUMAN_ANGLE || 'true' }}  # require a genuine why-it-matters take
           CAPTION_FONT: ${{ vars.CAPTION_FONT || 'Montserrat' }}
           CAPTION_HIGHLIGHT_COLOR: ${{ vars.CAPTION_HIGHLIGHT_COLOR || '&H0000FFFF' }}  # active-word fill colour
+          ENABLE_TEXT_CARDS: ${{ vars.ENABLE_TEXT_CARDS || 'true' }}  # on-screen key-point cards (story-specific)
+          CARD_SECONDS: ${{ vars.CARD_SECONDS || '1.8' }}            # how long each key-point card flashes
+          NEWS_RSS_URL: ${{ vars.NEWS_RSS_URL }}                     # optional: override the news feed seeding ideation
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || 'public' }}   # set var to 'unlisted' for safe first runs
           VISUAL_SOURCE: ${{ vars.VISUAL_SOURCE || 'photos' }}        # photos | ai | video
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}                   # optional: Cloudflare Workers AI (VISUAL_SOURCE=ai)
