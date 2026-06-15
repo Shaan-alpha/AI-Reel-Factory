@@ -45,3 +45,17 @@ def test_fetch_headlines_respects_limit():
 def test_fetch_headlines_best_effort_on_error():
     with mock.patch("src.news.requests.get", side_effect=ConnectionError("offline")):
         assert news.fetch_headlines() == []   # never raises; ideation proceeds without it
+
+
+def test_empty_news_rss_url_env_falls_back_to_default(monkeypatch):
+    # an unset repo var arrives as "" in CI — it must NOT become the request URL (regression)
+    monkeypatch.setenv("NEWS_RSS_URL", "")
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        return _resp(_SAMPLE_RSS)
+
+    with mock.patch("src.news.requests.get", side_effect=fake_get):
+        news.fetch_headlines(2)
+    assert captured["url"].startswith("https://news.google.com")

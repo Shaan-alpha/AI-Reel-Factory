@@ -28,7 +28,9 @@ _TIMEOUT = 20
 
 def fetch_headlines(limit: int = 12) -> list[str]:
     """Return up to `limit` current headline titles (e.g. 'Headline - Source'). [] on failure."""
-    url = config.get("NEWS_RSS_URL", _DEFAULT_URL)
+    # `or _DEFAULT_URL` (not config.get's default arg): an empty NEWS_RSS_URL repo var reaches
+    # us as "" in CI, which would otherwise become an invalid request URL.
+    url = config.get("NEWS_RSS_URL") or _DEFAULT_URL
     try:
         resp = requests.get(
             url, timeout=_TIMEOUT,

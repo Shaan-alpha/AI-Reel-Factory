@@ -151,8 +151,8 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     or the API errors."""
     import wave
 
-    api_key = config.get("GOOGLE_TTS_API_KEY", "")
-    voice_name = config.get("GOOGLE_TTS_VOICE", "")
+    api_key = (config.get("GOOGLE_TTS_API_KEY", "") or "").strip()
+    voice_name = (config.get("GOOGLE_TTS_VOICE", "") or "").strip()
     if not api_key or not voice_name:
         raise RuntimeError("google tts: GOOGLE_TTS_API_KEY / GOOGLE_TTS_VOICE not set")
 
@@ -162,8 +162,11 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
         "voice": {"languageCode": lang, "name": voice_name},
         "audioConfig": {"audioEncoding": "LINEAR16"},
     }
-    r = requests.post(f"{_GOOGLE_TTS_URL}?key={api_key}", json=body, timeout=60)
-    r.raise_for_status()
+    r = requests.post(_GOOGLE_TTS_URL, params={"key": api_key}, json=body, timeout=60)
+    if r.status_code != 200:
+        # Surface Google's actual reason (invalid/blocked key, byte limit, etc.) so the chain's
+        # fallback warning is actionable instead of an opaque "400 Client Error".
+        raise RuntimeError(f"google tts HTTP {r.status_code}: {r.text[:300]}")
     b64 = (r.json() or {}).get("audioContent")
     if not b64:
         raise RuntimeError("google tts: empty audioContent")

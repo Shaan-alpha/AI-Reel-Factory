@@ -45,7 +45,7 @@ def test_synthesize_google_writes_wav_and_measures_duration(tmp_path, monkeypatc
     monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Achernar")
 
     resp = mock.Mock()
-    resp.raise_for_status = mock.Mock()
+    resp.status_code = 200
     resp.json = mock.Mock(return_value={"audioContent": _fake_wav_b64(0.5)})
     with mock.patch("src.voice.requests.post", return_value=resp) as post:
         path, dur = voice._synthesize_google("Hello world.", str(tmp_path))
@@ -57,6 +57,7 @@ def test_synthesize_google_writes_wav_and_measures_duration(tmp_path, monkeypatc
     assert sent["voice"]["name"] == "en-IN-Chirp3-HD-Achernar"
     assert sent["voice"]["languageCode"] == "en-IN"
     assert sent["audioConfig"]["audioEncoding"] == "LINEAR16"
+    assert post.call_args.kwargs["params"] == {"key": "test-key"}   # key in params, stripped
 
 
 def test_synthesize_google_missing_key_raises(tmp_path, monkeypatch):
@@ -64,6 +65,17 @@ def test_synthesize_google_missing_key_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Achernar")
     with pytest.raises(RuntimeError):
         voice._synthesize_google("hi", str(tmp_path))
+
+
+def test_synthesize_google_non200_raises_with_google_reason(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Achernar")
+    resp = mock.Mock()
+    resp.status_code = 400
+    resp.text = "API key not valid. Please pass a valid API key."
+    with mock.patch("src.voice.requests.post", return_value=resp):
+        with pytest.raises(RuntimeError, match="google tts HTTP 400: API key not valid"):
+            voice._synthesize_google("hi", str(tmp_path))
 
 
 # --- fallback chain --------------------------------------------------------------------
