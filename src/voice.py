@@ -166,7 +166,7 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     if r.status_code != 200:
         # Surface Google's actual reason (invalid/blocked key, byte limit, etc.) so the chain's
         # fallback warning is actionable instead of an opaque "400 Client Error".
-        raise RuntimeError(f"google tts HTTP {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"google tts HTTP {r.status_code}: {r.text[:500]}")
     b64 = (r.json() or {}).get("audioContent")
     if not b64:
         raise RuntimeError("google tts: empty audioContent")

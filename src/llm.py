@@ -73,6 +73,10 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int) -> str:
     cfg = types.GenerateContentConfig(
         max_output_tokens=max_tokens,
         tools=[types.Tool(google_search=types.GoogleSearch())],
+        # Disable "thinking" (on by default for 2.5-flash) — it eats max_output_tokens and was
+        # truncating the grounded JSON reply mid-script, forcing the ungrounded fallback. Keep
+        # the whole budget for the actual output (mirrors _gen_gemini).
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
     resp = _gemini_client().models.generate_content(
         model=_GEMINI_MODEL, contents=prompt, config=cfg

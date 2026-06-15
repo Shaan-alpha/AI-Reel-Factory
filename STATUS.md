@@ -94,6 +94,22 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-16 — First live short-form run (idea 88): news works; 2 fixes shipped
+- **Ran make-short on the new code** → https://www.youtube.com/shorts/sO25uMROuFw. **News topics
+  now work** (`news: 38 headlines`); published OK; cards/karaoke/short-form structure all fired.
+- **Grounded LLM truncation FIXED** (`llm.py`): `_gen_gemini_grounded` wasn't disabling
+  gemini-2.5-flash "thinking", which ate `max_output_tokens` and truncated the grounded script
+  mid-sentence → forced the Groq fallback → an 11-word **6.4s** reel (under the 12-20s floor).
+  Set `thinking_budget=0` (mirrors `_gen_gemini`). Plus a **HARD 30-50 word / 12-20s floor** in the
+  scriptwriter prompt so no fallback ships a one-liner.
+- **Chirp 3 HD — root cause CONFIRMED** (the new error logging worked): CI returned
+  `"reason": "API_KEY_INVALID"` while the SAME key returns 200 locally → the key has an
+  **Application/IP restriction** (Google reports an IP-blocked key as "invalid"). Re-set the secret
+  via `--body` (exact 39-char key) to rule out corruption. ⚠️ **Operator: remove the key's
+  Application restriction** — Console → Credentials → key → **Application restrictions = None**
+  (keep API restriction = Cloud TTS). GitHub Actions IPs are dynamic; any IP/referrer rule blocks them.
+- **173 pass, 3 skipped** (one live-LLM test skipped on a Gemini 503).
+
 ### 2026-06-15 — Short-form pivot (12-20s on-point bites) + cloud voice/news hotfix
 - **Format → 12-20 SECOND Shorts** (operator directive): `scriptwriter` now writes a tight ~30-45
   word bite — HOOK → THE NEWS → one honest "why it matters" clause → 2-3 word CTA (was ~110-130

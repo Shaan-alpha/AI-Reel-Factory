@@ -51,8 +51,10 @@ interesting TRUE fact or tension, then pay it off with real analysis. Stories wi
 money & power, conflict with consequences, science, big human impact — travel, but the pull must \
 come from the REAL story framed honestly, never from a title the body can't cash. Promise == payoff.
 
-Write a SHORT, on-point **12-20 SECOND** narration — about **30-45 words, NEVER more than 50**. \
-Just the news/info, sharp and current; every word earns its place. Structure it tight:
+Write a SHORT, on-point **12-20 SECOND** narration — **30-45 words** (aim ~15 seconds). This is a \
+HARD window: NEVER under 30 words / 12 seconds (a one-liner is too thin to publish) and never over \
+50 words / 20 seconds. Just the news/info, sharp and current; every word earns its place. \
+Structure it tight:
 1. HOOK (first ~2s): the single most surprising TRUE fact, stated instantly. No "in this video", \
 no throat-clearing, no over-claim the body can't back up.
 2. THE NEWS (1-2 crisp sentences): exactly what happened, in your own words, accurate.
