@@ -23,10 +23,12 @@ r = requests.get(
     "https://texttospeech.googleapis.com/v1/voices",
     params={"key": KEY, "languageCode": "en-IN"}, timeout=30,
 )
-r.raise_for_status()
+if r.status_code != 200:
+    print(f"FAIL: HTTP {r.status_code} - {r.text[:400]}")
+    sys.exit(1)
 voices = [v["name"] for v in r.json().get("voices", []) if "Chirp3" in v.get("name", "")]
-print("en-IN Chirp 3 HD voices:")
+print(f"OK: key works ({len(voices)} en-IN Chirp 3 HD voices)")
 for name in sorted(voices):
     print(" -", name)
 if not voices:
-    print(" (none returned - check the API is enabled / key is valid)")
+    print(" (none returned - check the API is enabled)")

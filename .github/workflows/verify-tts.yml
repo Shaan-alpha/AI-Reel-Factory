@@ -1,0 +1,20 @@
+# Diagnostic: proves GOOGLE_TTS_API_KEY works from GitHub's IP (no Short, no approval).
+# Lists en-IN Chirp 3 HD voices using the repo secret; prints OK + voices, or FAIL + Google's reason.
+name: verify-tts
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Check Google TTS key from CI
+        env:
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+        run: python tools/list_google_voices.py
