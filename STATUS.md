@@ -94,6 +94,20 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-06-16 — Chirp key FIXED (corrupted secret) + 25-30s sarcastic tone
+- **Voice root cause corrected**: the cloud `API_KEY_INVALID` was a **corrupted secret**, NOT an IP
+  restriction (operator's key has Application restrictions = None, confirmed by screenshot). Cause:
+  Windows PowerShell 5.1 mangled the piped value (`$key | gh secret set`) with UTF-16/BOM. Re-set via
+  `gh secret set --body` (clean argv); new **`verify-tts` workflow** confirmed from CI:
+  `OK: key works (30 en-IN Chirp 3 HD voices)`. So Chirp 3 HD fires on the next run — no operator action.
+- **Length → 25-30s**, **tone → sarcastic but serious & humorous** (operator directive): `scriptwriter`
+  persona + structure rewritten (~65-75 words, dry wit, facts straight, no-harassment guard kept);
+  `ideation` sized to 25-30s. Word guard now ~50-90.
+- **Music**: still none. Bensound blocks direct download (403, won't circumvent); Pixabay tracks got
+  Content-ID-claimed; CC0 file URLs aren't reliably auto-fetchable here. Claim-safe fix = **YouTube
+  Audio Library** (manual, ~3 min → drop files in `assets/music/`).
+- **174 pass, 2 skipped.**
+
 ### 2026-06-16 — First live short-form run (idea 88): news works; 2 fixes shipped
 - **Ran make-short on the new code** → https://www.youtube.com/shorts/sO25uMROuFw. **News topics
   now work** (`news: 38 headlines`); published OK; cards/karaoke/short-form structure all fired.

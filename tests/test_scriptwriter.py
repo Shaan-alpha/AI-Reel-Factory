@@ -237,8 +237,9 @@ def test_key_points_default_empty_when_absent(monkeypatch):
     assert out["key_points"] == []
 
 
-def test_prompt_targets_short_form_12_20s():
+def test_prompt_targets_25_30s_sarcastic():
     prompt = scriptwriter._build_prompt(IDEA, "N").lower()
-    assert "12-20 second" in prompt          # explicit short-form length
-    assert "30-45 words" in prompt           # word budget for ~12-20s
-    assert "110-130 word" not in prompt      # the old long-form target is gone
+    assert "25-30 second" in prompt          # explicit length
+    assert "65-75 words" in prompt           # word budget for ~25-30s
+    assert "sarcastic" in prompt             # tone
+    assert "12-20 second" not in prompt      # old short-form target gone
