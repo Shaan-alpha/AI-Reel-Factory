@@ -63,14 +63,16 @@ These were confirmed with the operator and drive every downstream choice:
 5. **Free LLMs as the fallback safety-net.** Gemini free: 1,500 req/day, 1M tokens/min.
    Groq free: 14,400 req/day on Llama 3.1‑8B, 1,000/day on Llama 3.3‑70B, per-model limits.
    Fires only if a Routine cap is hit or the token lapses, so the digest never fails.
-6. **TTS resilience.** `edge-tts` is free but *unofficial* and can break without notice.
-   Add **Kokoro TTS** (Apache‑2.0, 82M params, CPU-capable, 54 voices) as a fallback and as
-   the engine for the two-voice "Agent Debate" format (Phase 2).
+6. **TTS resilience.** Primary is **Google Chirp 3 HD** (near-human `en-IN`, free at our volume).
+   Because `edge-tts` is free but *unofficial* (can break) and Chirp needs a key, the engine is an
+   ordered **fallback chain — `Google Chirp 3 HD → edge-tts (en-IN) → Kokoro`** — so the digest
+   never fails. Kokoro (Apache‑2.0, CPU, offline-safe) is the last-resort floor.
 7. **Subtitles (now MVP).** **faster-whisper** (CPU-friendly, word timestamps) is the
    default for karaoke word-by-word captions; **WhisperX** is the higher-accuracy upgrade.
-8. **Generative video is not MVP-ready at daily volume.** Free Veo/Runway tiers are
-   rate-capped and unreliable. MVP relies on **stock B-roll (Pexels + Pixabay APIs, CC0,
-   free for commercial use)** plus Ken Burns motion. Generative video is a later garnish.
+8. **AI images, not generative video, at daily volume.** Free Veo/Runway *video* tiers are
+   rate-capped and unreliable. The pipeline generates **AI B-roll images** (Cloudflare Workers AI /
+   Flux, free tier) + Ken Burns motion as the primary source, falling back to **CC0 stock
+   (Pexels/Pixabay)**. Generative *video* remains a later garnish.
 9. **Hosting.** **GitHub Actions cron** is the best free runner for the deterministic Python
    pipeline (unlimited minutes on public repos; ~2,000/mo private; runs in **UTC**).
    Anthropic **Routines** handles the Claude ideation step (sidesteps the known
@@ -166,11 +168,11 @@ explicit input → output contract.
 |---|--------|----------------|------------------|-------|
 | 1 | **Trend + Ideation** | (trend research) → 15–20 scored ideas (title, hook, angle, score) | **Claude Code (Pro) via Routine**; Gemini/Groq fallback | 1 |
 | 2 | **Approval** | ideas → 4–5 approved | Telegram Bot API (inline buttons) | 1 |
-| 3 | **Scriptwriter** | idea + template → script + caption + hashtags | Gemini/Groq (Claude optional); Templates A–D | 1 |
-| 4 | **Voice** | script → narration `.wav` | edge-tts (default), Kokoro (fallback) | 1 |
-| 5 | **Visuals** | keywords → B-roll clips | Pexels + Pixabay APIs | 1 |
-| 6 | **Assembly** | audio + clips → 1080×1920 reel | FFmpeg (Ken Burns) | 1 |
-| 7 | **Subtitles** | reel + audio → word-by-word burned captions | faster-whisper (WhisperX upgrade) + FFmpeg | **1** |
+| 3 | **Scriptwriter** | idea + template → script + caption + hashtags | Gemini/Groq; **Template N** (25–30s, hook-judge punch-up, 80-word cap) | 1 |
+| 4 | **Voice** | script → narration `.wav` | **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** (fallback chain) | 1 |
+| 5 | **Visuals** | keywords → B-roll clips | **AI: Cloudflare Workers AI / Flux + Ken Burns** → Pexels/Pixabay stock | 1 |
+| 6 | **Assembly** | audio + clips → 1080×1920 reel | FFmpeg — **xfade · cinematic grade · vignette/grain · music ducking · brand-logo bug · loop** (toggle-gated, fail-soft) | 1 |
+| 7 | **Subtitles** | reel + audio → burned captions | faster-whisper — **karaoke + frame-1 hook + key-point cards + source lower-third** + FFmpeg | **1** |
 | 8 | **Thumbnail** | reel frame → cover image | Pillow / FFmpeg | 2 |
 | 9 | **Publish** | reel + metadata → live / draft | YouTube Data API (auto); IG/TikTok later | 1 (YT), 3 (IG/TT) |
 | 10 | **Analytics + Learning** | post IDs → metrics → hook/template scores | YouTube Analytics API → Supabase | 4 |
@@ -219,11 +221,13 @@ performers (Module 10 → Module 1 loop). See [08-news-niche-playbook.md](08-new
 
 ## 8. Development Roadmap
 
-- **Phase 1 — MVP.** Modules 1→2→3→4→5→6→**7 (subtitles)**→9(YouTube only), Template D,
-  Claude-driven ideation via Routine. **Exit: 4–5 captioned YouTube Shorts/day, reliable,
-  one human tap, 7 days running.**
-- **Phase 2 — Quality.** Kokoro + debate voices, thumbnails, beat-sync, WhisperX upgrade,
-  programmatic B-roll.
+- **Phase 1 — MVP.** ✅ **Built & publishing live (v0.4.3).** Modules 1→2→3→4→5→6→**7
+  (subtitles)**→9(YouTube only), Template N, Claude-driven ideation via Routine. Shipped *beyond*
+  the original MVP scope: **Google Chirp 3 HD** voice, **AI B-roll** (Cloudflare Flux + Ken Burns),
+  and **premium auto-editing** (transitions, grade, ducking, brand bug, loop). **Exit: 4–5
+  captioned Shorts/day, reliable, one human tap, 7 days running.**
+- **Phase 2 — Quality.** Debate voices, thumbnails, beat-sync, WhisperX upgrade, AI-image
+  fidelity (paid-ready Imagen), audio polish.
 - **Phase 3 — Multi-platform.** Instagram Reels (after Meta App Review) + TikTok drafts.
 - **Phase 4 — Learning loop.** Analytics ingestion + hook/template scoring feeding ideation.
 - **Phase 5 — Multi-niche scale.** Oracle Free ARM VM + n8n; one infra, multiple brands.

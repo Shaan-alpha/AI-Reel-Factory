@@ -55,8 +55,9 @@ Google Cloud TTS gives **1M chars/month free** (≈ our entire volume), so the $
 
 | Tool | Notes | Link |
 |------|-------|------|
-| **Pexels API** | CC0, commercial OK, no attribution, has video | https://www.pexels.com/api/ |
-| **Pixabay API** | CC0-like, download & self-host friendly | https://pixabay.com/api/docs/ |
+| **Cloudflare Workers AI — Flux** ★ primary | `VISUAL_SOURCE=ai` — story-specific AI images (`@cf/black-forest-labs/flux-1-schnell`) + Ken Burns. Free tier; needs `CF_API_TOKEN`+`CF_ACCOUNT_ID` | https://developers.cloudflare.com/workers-ai/ |
+| **Pexels API** | CC0, commercial OK, no attribution, has video (stock fallback) | https://www.pexels.com/api/ |
+| **Pixabay API** | CC0-like, download & self-host friendly (stock fallback) | https://pixabay.com/api/docs/ |
 | Coverr | Free AI + stock clips | https://coverr.co/ |
 | (Generative video) | Veo/Runway free tiers — rate-capped, **not** for daily volume | — |
 
@@ -66,7 +67,7 @@ Google Cloud TTS gives **1M chars/month free** (≈ our entire volume), so the $
 
 | Tool | Notes | Link |
 |------|-------|------|
-| **FFmpeg** | Concat, crop to 9:16, Ken Burns, audio mux, burn captions | https://ffmpeg.org/ |
+| **FFmpeg** | Crop to 9:16, Ken Burns, **xfade transitions, cinematic grade, vignette/grain, sidechain music ducking, logo overlay**, audio mux, burn captions | https://ffmpeg.org/ |
 | ffmpeg-python | Pythonic wrapper | https://github.com/kkroening/ffmpeg-python |
 | MoviePy (alt) | Higher-level, slower | https://github.com/Zulko/moviepy |
 

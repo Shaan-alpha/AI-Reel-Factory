@@ -44,15 +44,17 @@ Supabase. Telegram is the only human touchpoint.
 ## Module → engine map
 
 ```
-1 Ideation      → Claude Code (Pro) via Routine  [fallback: Gemini/Groq]
-2 Approval      → Telegram Bot (inline buttons)
-3 Scriptwriter  → Gemini/Groq + Templates A–D
-4 Voice         → edge-tts (Kokoro fallback)
-5 Visuals       → Pexels + Pixabay APIs
-6 Assembly      → FFmpeg (1080×1920, Ken Burns)
-7 Subtitles     → faster-whisper + FFmpeg burn-in      ★ MVP
+1 Ideation      → Claude Code (Pro) via Routine  [fallback: Gemini(search-grounded)/Groq]
+2 Approval      → Telegram Bot (Make-it / Pass / Reject)
+3 Scriptwriter  → Gemini/Groq + Template N (25–30s; hook-judge punch-up; 80-word cap)
+4 Voice         → Google Chirp 3 HD → edge-tts (en-IN) → Kokoro   [fallback chain]
+5 Visuals       → AI B-roll: Cloudflare Workers AI / Flux + Ken Burns → Pexels/Pixabay stock
+6 Assembly      → FFmpeg 1080×1920 — xfade transitions · cinematic grade · vignette/grain ·
+                  music ducking · brand-logo bug · loop-friendly ending   (all toggle-gated, fail-soft)
+7 Subtitles     → faster-whisper — word-by-word karaoke + frame-1 hook + key-point cards +
+                  source lower-third (FFmpeg/libass burn-in)              ★ MVP
 8 Thumbnail     → Pillow / FFmpeg                       (Phase 2)
-9 Publish       → YouTube Data API (auto); IG/TikTok (Phase 3)
+9 Publish       → YouTube Data API (auto, synthetic-content flag); IG/TikTok (Phase 3)
 10 Analytics    → YouTube Analytics API → Supabase      (Phase 4)
 ```
 
@@ -63,8 +65,8 @@ Supabase. Telegram is the only human touchpoint.
 ```
 Claude Routine: research trends ─► ideas (pending)
    └─approve─► ideas (approved)
-        └─► scripts ──► [voice.wav] + [broll clips/]
-              └─► assembled.mp4 ──► subtitles burned in ──► final.mp4
+        └─► scripts ──► [voice.wav (Chirp 3 HD)] + [AI/stock broll clips/]
+              └─► assembled.mp4 (graded · ducked · logo · loop) ──► captions+source burned in ──► final.mp4
                     └─► YouTube upload ──► posts (published, videoId, url)
                           └─delete local .mp4 (asset policy)
                                 └─next day─► analytics (views, retention, …)

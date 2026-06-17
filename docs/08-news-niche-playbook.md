@@ -44,11 +44,15 @@ Sources: [invideo](https://invideo.io/blog/youtube-kills-ai-faceless-channels/) 
   (SynthID / C2PA). For sensitive topics (elections, health, finance, major news) it may add
   a **prominent on-player label**.
 - **India:** platforms must label/remove flagged AI content within **3 hours** of notice.
-- **Our exposure is low by design:** we use illustrative stock B-roll + captions + synthetic
-  *voiceover* — **not** fake footage of real people/events. That's the safe side of the line.
-- **Still, we disclose:** set the "altered/synthetic content" flag on upload (Module 9) and
-  add a line in the description (e.g. "Narration is AI-generated; visuals are stock/illustrative;
-  sources linked above"). Honesty here protects the channel.
+- **Our exposure is low by design:** we use **illustrative visuals** — AI-generated B-roll
+  (Cloudflare Flux, symbolic/conceptual stand-ins) and CC0 stock — plus captions + synthetic
+  *voiceover*. **Never** fake photoreal footage of real, named people or specific real events
+  presented as real. AI images stay abstract/symbolic (e.g. "a stylized digital rupee", not a
+  fabricated photo of a named official). That's the safe side of the line.
+- **Still, we disclose:** set the "altered/synthetic content" flag on upload (Module 9), add a
+  description line (e.g. "Narration and visuals are AI-generated/illustrative; sources linked
+  above"), **and burn an on-screen "Source: <domain>" citation** into the first seconds of the
+  reel (Module 7). Honesty here protects the channel.
 
 Sources: [YouTube disclosure](https://blog.youtube/news-and-events/disclosing-ai-generated-content/) ·
 [India AI labeling](https://www.truefan.ai/blogs/youtube-ai-labeling-policy-india)
@@ -60,10 +64,11 @@ Sources: [YouTube disclosure](https://blog.youtube/news-and-events/disclosing-ai
 - **Never use broadcaster/news-agency footage** (Reuters, AP, ANI, NDTV, etc.) or copyrighted
   clips. AI summaries of news articles are also under active copyright litigation in 2026 —
   so **rewrite in your own words + cite**, never copy phrasing.
-- **Narration is the primary asset; stock B-roll is secondary/supporting** — this is what
-  makes it commentary/documentary rather than a re-upload.
-- Use **Pexels/Pixabay (CC0)** clips, plus **maps, charts, and data visualizations** (great
-  for impact stories and inherently safer).
+- **Narration + original analysis is the primary asset; B-roll is secondary/supporting** — this
+  is what makes it commentary/documentary rather than a re-upload.
+- Use **AI-generated illustrative B-roll** (Cloudflare Flux, symbolic stand-ins) and **Pexels/Pixabay
+  (CC0)** clips, plus **maps, charts, and data visualizations** (great for impact stories and
+  inherently safer). Generated images are owned/illustrative — never broadcaster footage.
 - **High edit density:** never let a clip run >5–8s without a cut/transition. Helps retention
   *and* defeats automated copy-detection.
 - Background music must be royalty-free.
@@ -108,8 +113,9 @@ at approval.**
 | **1 Ideation (Claude)** | Research today's developments in the lane; prefer high-impact under-covered angles; capture **source URLs**; apply the sensitivity filter; output `{title, hook, angle, est_score, sources}`. |
 | **2 Approval** | Digest shows the source link per idea so you can sanity-check before approving. |
 | **3 Scriptwriter** | Template N; **rewrite facts in own words + cite**; the core of the script is **original "why it matters" analysis**; neutral framing. |
-| **5 Visuals** | Stock B-roll + maps/charts/data viz; **no broadcaster footage**; high edit density. |
-| **9 Publish** | Set the **AI-disclosure flag**; description includes sources + disclosure line; `#Shorts`. |
+| **5 Visuals** | AI-generated illustrative B-roll (symbolic stand-ins) + CC0 stock + maps/charts/data viz; **no broadcaster footage**; AI images stay abstract, never photoreal fakes of real people/events; high edit density. |
+| **7 Subtitles** | Burn an on-screen **"Source: <domain>"** citation in the first seconds (reinforces sourcing on-screen). |
+| **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; description includes sources + disclosure line; `#Shorts`. |
 | **10 Analytics** | Track which *angles/sub-lanes* retain best to sharpen future ideation. |
 
 ---

@@ -128,6 +128,27 @@ create table hook_performance (
 1. Go to https://pixabay.com/api/docs/ → sign up → get key.
 2. Save as `PIXABAY_API_KEY`.
 
+## 6c. Cloudflare Workers AI — AI-generated B-roll (free tier) ★ recommended
+
+The default visual source is **AI imagery** (`VISUAL_SOURCE=ai`): story-specific Flux images +
+Ken Burns motion, falling back to stock when unavailable.
+
+1. Create a Cloudflare account → **Workers & Pages** → note your **Account ID**.
+2. **My Profile → API Tokens → Create Token** with the **Workers AI** permission.
+3. Save as `CF_API_TOKEN` and `CF_ACCOUNT_ID`. Model default: `@cf/black-forest-labs/flux-1-schnell`
+   (override via `CF_IMAGE_MODEL`). Free at our volume.
+
+## 6d. Google Cloud Text-to-Speech — Chirp 3 HD voice (the one billed service) ★ required
+
+Near-human `en-IN` narration. **1M chars/mo free** (~117k used); the **only** sanctioned billed
+service — set a hard **$5 budget cap** so it can never overrun (rule 2).
+
+1. Google Cloud Console → enable **Cloud Text-to-Speech API** → create an **API key**
+   (restrict it to the TTS API). Save as `GOOGLE_TTS_API_KEY`.
+2. Set a **Budget + alert** ($5 cap) under Billing.
+3. Run `python tools/list_google_voices.py` → paste an `en-IN-Chirp3-HD-*` name into `GOOGLE_TTS_VOICE`.
+   Empty key → the pipeline falls back to edge-tts (en-IN) → Kokoro automatically.
+
 ---
 
 ## 7. faster-whisper — subtitles (free, local) ★ required (MVP)
@@ -185,7 +206,14 @@ SUPABASE_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
-# Visuals
+# Voice (Chirp 3 HD; empty key -> edge-tts -> Kokoro fallback chain)
+GOOGLE_TTS_API_KEY=
+GOOGLE_TTS_VOICE=          # an en-IN Chirp3-HD name (tools/list_google_voices.py)
+
+# Visuals (VISUAL_SOURCE=ai uses Cloudflare Flux; else stock photos/video)
+VISUAL_SOURCE=ai
+CF_API_TOKEN=
+CF_ACCOUNT_ID=
 PEXELS_API_KEY=
 PIXABAY_API_KEY=
 

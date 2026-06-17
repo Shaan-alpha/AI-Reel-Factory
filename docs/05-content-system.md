@@ -38,7 +38,8 @@ Narrative; strong for "how this unfolded" backstories.
 
 ## Script constraints (YouTube Shorts, MVP)
 
-- ≤ 60 seconds → roughly **130–150 spoken words**
+- **25–30 seconds → roughly 65–75 spoken words** (hard cap 80 words — the scriptwriter truncates to
+  the last full sentence over the cap; shorter = higher completion rate on Shorts).
 - **First 3 seconds = the hook.** No throat-clearing.
 - **Cite the source** in the script/caption ("according to …") — credibility + originality.
 - **Add genuine analysis**, not just facts (the originality requirement — non-negotiable).
