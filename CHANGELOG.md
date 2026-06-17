@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.4.3] — 2026-06-17 — Retention refinements v2
+
+### Added
+- **Brand-logo bug** (`assembly.py`): the circular *But It Matters* logo (committed at
+  `assets/brand/logo.png`) is overlaid small + semi-transparent in the top-right of every reel.
+  Fail-soft (skips if the file is absent) and polish-gated. Knobs: `ENABLE_BRAND_BUG`, `BRAND_LOGO`,
+  `BRAND_LOGO_HEIGHT`/`_OPACITY`/`_MARGIN`.
+- **Source-citation lower-third** (`subtitles.py` + `production.py`): a brief "Source: domain" line
+  (derived from the idea's first source URL) shown for the first ~3s — credibility + news-compliance
+  (rule 6). Knobs: `ENABLE_SOURCE_CITE`, `SOURCE_CITE_SECONDS`.
+- **Loop-friendly endings** (`assembly.py`): the final clip reuses the opening shot so replays don't
+  jar. Knob: `ENABLE_SEAMLESS_LOOP`.
+
+### Changed
+- **25-30s length now enforced** (`scriptwriter.py`): the hook punch-up pass carried stale long-form
+  instructions (~110-130 words) and a loose 80-220 word guard, ballooning reels to ~38s. The prompt
+  now forbids lengthening, the guard accepts only ≤ `SCRIPT_MAX_WORDS` (default 80), and a final hard
+  backstop truncates an over-long body to its last full sentence.
+- **Music ducking** (`assembly.py`): the flat 10% music bed is replaced by sidechain ducking — the
+  music dips under the narration and swells between sentences (clearer speech). Polish-gated; the
+  fail-soft retry uses the old flat mix. Knob: `ENABLE_DUCKING`.
+
 ## [0.4.2] — 2026-06-17 — Premium edit polish (transitions + cinematic grade)
 
 ### Added

@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.4.2 (**PUBLIC** — Premium edit polish: crossfade transitions + cinematic grade + Ken Burns variety; 185 tests pass)
+**Version:** 0.4.3 (**PUBLIC** — Retention v2: 25-30s length enforcement, music ducking, brand-logo bug, source lower-third, loop-friendly endings; 199 tests pass)
 **Last updated:** 2026-06-17
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -36,11 +36,11 @@
 |---|--------|--------|
 | 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
 | 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
-| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; honest framing + why-it-matters + **key-point cards**; compliance enforced; 17 tests |
+| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; honest framing + why-it-matters + **key-point cards**; compliance enforced; **25-30s length enforced** (punch-up no longer lengthens + hard word cap); 20 tests |
 | 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain; 14 tests (incl. live) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) · *Phase B: story-specific* |
-| 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel + **premium polish** (crossfade transitions, cinematic grade, vignette/grain), all toggle-gated + fail-soft; 21 tests (incl. live full render) |
-| 7 | Subtitles (faster-whisper) | ✅ Done — **karaoke + frame-1 hook + key-point cards** (Montserrat); 20 tests (incl. live burn) |
+| 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel + **premium polish** (crossfade transitions, cinematic grade, vignette/grain) + **retention v2** (music ducking, brand-logo bug, loop-friendly endings), all toggle-gated + fail-soft; 29 tests (incl. live full render) |
+| 7 | Subtitles (faster-whisper) | ✅ Done — **karaoke + frame-1 hook + key-point cards** (Montserrat) + **source lower-third**; 22 tests (incl. live burn) |
 | 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |
 | 10 | Orchestrator (`production.py`) | ✅ Done — wires the full chain, idempotent + fail-soft; 8 tests |
 | — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
