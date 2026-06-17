@@ -37,6 +37,37 @@ def test_ordered_clips_staggers_repeated_clip(monkeypatch):
     assert [s for _p, s in out] == [0.0, 3.0, 6.0, 0.0, 3.0]
 
 
+def test_ordered_clips_overlap_adds_slices(monkeypatch):
+    monkeypatch.setenv("CLIP_SECONDS", "6")
+    # overlap=0 reproduces the old count exactly (regression guard)
+    assert len(assembly._ordered_clips(["a.mp4", "b.mp4"], 18.0, overlap=0.0)) == 4
+    # with overlap each slice covers less → needs at least as many slices
+    assert len(assembly._ordered_clips(["a.mp4", "b.mp4"], 18.0, overlap=1.0)) >= 4
+
+
+def test_build_cmd_xfade_chain_and_offsets(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("ENABLE_XFADE", "true")
+    monkeypatch.setenv("XFADE_SECONDS", "0.4")
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    cmd = assembly._build_cmd(
+        [("c0.mp4", 0.0), ("c1.mp4", 0.0), ("c2.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade=transition=fade:duration=0.400" in fc
+    assert "concat=n=" not in fc                 # concat replaced by xfade
+    assert "offset=3.100" in fc                  # i=1 → 1*(3.5-0.4)=3.1
+    assert "offset=6.200" in fc                  # i=2 → 2*(3.5-0.4)=6.2
+    assert "[v]" in cmd                          # final graded video still mapped
+
+
+def test_build_cmd_single_slice_uses_concat_not_xfade(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("ENABLE_XFADE", "true")
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 5.0, "out.mp4")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "concat=n=1" in fc and "xfade" not in fc  # nothing to crossfade with one clip
+
+
 def test_clip_seconds_clamped(monkeypatch):
     monkeypatch.setenv("CLIP_SECONDS", "0.2")   # too fast → clamped up
     assert assembly._clip_seconds() == assembly._MIN_CLIP_SECONDS
@@ -46,6 +77,7 @@ def test_clip_seconds_clamped(monkeypatch):
 
 def test_build_cmd_structure(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("ENABLE_XFADE", "false")  # exercise the plain concat path
     cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
     # two video inputs + one audio input
     assert cmd.count("-i") == 3

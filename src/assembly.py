@@ -51,6 +51,19 @@ def _clip_seconds() -> float:
     return max(_MIN_CLIP_SECONDS, min(_MAX_CLIP_SECONDS, v))
 
 
+def _xfade_enabled() -> bool:
+    return config.get_bool("ENABLE_XFADE", True)
+
+
+def _xfade_seconds() -> float:
+    """Crossfade overlap, clamped below half a slice so xfade offsets stay positive."""
+    try:
+        v = float(config.get("XFADE_SECONDS", "0.35"))
+    except (TypeError, ValueError):
+        v = 0.35
+    return max(0.1, min(v, _clip_seconds() * 0.5))
+
+
 def _grade_filters() -> str:
     """Cinematic grade applied once on the final stream — unifies varied shots into a house look.
 
@@ -129,14 +142,22 @@ def _safe_probe(path: str) -> float:
         return 0.0
 
 
-def _ordered_clips(clip_paths: list[str], duration: float) -> list[tuple[str, float]]:
+def _ordered_clips(clip_paths: list[str], duration: float,
+                   overlap: float = 0.0) -> list[tuple[str, float]]:
     """Cycle clips into enough slices to over-cover the narration. Returns [(path, start_offset)].
 
     When a clip repeats (few clips, many fast cuts), its start advances by one slice each time
     and wraps within the clip's length — so a repeat shows a DIFFERENT segment, not the same
-    opening frames twice. Clips that can't be probed get start 0.0 (safe fallback)."""
+    opening frames twice. Clips that can't be probed get start 0.0 (safe fallback).
+
+    `overlap` (xfade seconds) shrinks each slice's effective coverage to slice_s - overlap, so
+    crossfaded reels still over-cover the narration. overlap=0 reproduces the hard-cut count."""
     slice_s = _clip_seconds()
-    n = min(_MAX_SLICES, math.ceil(duration / slice_s) + 1)  # +1 slice of safety margin
+    step = max(0.1, slice_s - overlap)  # effective coverage per slice after the first
+    if duration > slice_s:
+        n = min(_MAX_SLICES, math.ceil((duration - slice_s) / step) + 2)
+    else:
+        n = 2
     durs = [_safe_probe(c) for c in clip_paths]
     used: dict[int, int] = {}
     ordered: list[tuple[str, float]] = []
@@ -165,11 +186,22 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
             f"scale={_W}:{_H}:force_original_aspect_ratio=increase,"
             f"crop={_W}:{_H},setsar=1,fps={_FPS}[v{k}]"
         )
-    concat_in = "".join(f"[v{k}]" for k in range(n))
-    parts.append(f"{concat_in}concat=n={n}:v=1:a=0[vc]")
     grade = _grade_filters()
     grade_suffix = ("," + grade) if grade else ""
-    parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS{grade_suffix}[v]")
+    if _xfade_enabled() and n >= 2:
+        xf = _xfade_seconds()
+        prev = "[v0]"
+        for i in range(1, n):
+            offset = i * (slice_s - xf)
+            dst = "[vx]" if i == n - 1 else f"[xf{i}]"
+            parts.append(
+                f"{prev}[v{i}]xfade=transition=fade:duration={xf:.3f}:offset={offset:.3f}{dst}")
+            prev = dst
+        parts.append(f"[vx]trim=0:{duration:.3f},setpts=PTS-STARTPTS{grade_suffix}[v]")
+    else:
+        concat_in = "".join(f"[v{k}]" for k in range(n))
+        parts.append(f"{concat_in}concat=n={n}:v=1:a=0[vc]")
+        parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS{grade_suffix}[v]")
 
     cmd = [_ffmpeg(), "-y"]
     for clip, _start in ordered:
@@ -211,7 +243,8 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     duration = probe_duration(audio_path)
-    ordered = _ordered_clips(clip_paths, duration)
+    overlap = _xfade_seconds() if _xfade_enabled() else 0.0
+    ordered = _ordered_clips(clip_paths, duration, overlap=overlap)
     music = _pick_music(os.path.abspath(audio_path))
     cmd = _build_cmd(ordered, audio_path, duration, out_path, music_path=music)
 
