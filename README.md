@@ -1,10 +1,12 @@
 # 🎬 AI Reel Factory — **But It Matters**
 
 **Channel:** *But It Matters* — daily impact news/info explainers (India + world).
+**Live:** publishing captioned Shorts to **[@butitmatters](https://youtube.com/@butitmatters)**.
 
-A near-zero-cost autonomous system that generates ideas, writes scripts, narrates, assembles
-captioned vertical video, and publishes faceless reels — requiring **one human action per
-day**: approving 4–5 ideas via a Telegram "Morning Digest."
+A near-zero-cost autonomous system that researches the news, writes scripts, narrates in a
+near-human voice, generates story-specific visuals, edits a polished captioned vertical video,
+and publishes faceless Shorts — requiring **one human action per day**: approving 4–5 ideas via
+a Telegram "Morning Digest."
 
 > **Primary goal:** Reliably publish **4–5 automated, captioned YouTube Shorts per day.**
 > Consistency beats sophistication. Don't chase perfection early.
@@ -15,7 +17,8 @@ day**: approving 4–5 ideas via a Telegram "Morning Digest."
 
 1. **[CLAUDE.md](CLAUDE.md)** — operating rules for any agent working in this repo. **Read first.**
 2. **[STATUS.md](STATUS.md)** — live build state (what's done, what's next, blockers).
-3. The docs, in order:
+3. **[CHANGELOG.md](CHANGELOG.md)** — what shipped, version by version.
+4. The docs, in order:
 
 | # | Doc | What it's for |
 |---|-----|---------------|
@@ -35,37 +38,44 @@ day**: approving 4–5 ideas via a Telegram "Morning Digest."
 | Layer | Tool | Cost |
 |-------|------|------|
 | **Ideation (trend research)** | **Claude Code (Pro) via Anthropic Routine** | Pro sub |
-| Ideation fallback | Gemini / Groq | Free |
-| Orchestration | GitHub Actions (cron) + Routines | Free |
+| Ideation fallback | Gemini (search-grounded) → Groq | Free |
+| Orchestration | GitHub Actions (on-demand + cron) + Routines | Free |
 | Database/state | Supabase Postgres | Free |
-| Approval UI | Telegram Bot | Free |
+| Approval UI | Telegram Bot (Make-it / Pass / Reject) | Free |
 | Scripts | Gemini API (Groq failover) | Free |
-| Narration | edge-tts (Kokoro fallback) | Free |
-| Visuals | Pexels + Pixabay APIs | Free |
-| Video assembly | FFmpeg | Free |
-| Captions (MVP) | faster-whisper (word-by-word) | Free |
-| Publishing | YouTube Data API v3 | Free |
+| **Narration** | **Google Chirp 3 HD** → edge-tts (en-IN) → Kokoro | ≤ $5/mo cap (free at our volume) |
+| **Visuals** | **AI B-roll — Cloudflare Workers AI / Flux + Ken Burns** → Pexels/Pixabay stock | Free |
+| **Video edit** | FFmpeg — crossfade transitions · cinematic grade · vignette/grain · **music ducking** · **brand-logo bug** · loop-friendly endings | Free |
+| Captions | faster-whisper — word-by-word karaoke + frame-1 hook + key-point cards + **source lower-third** | Free |
+| Publishing | YouTube Data API v3 (synthetic-content flag + disclosure) | Free |
 
-**Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (Google Cloud TTS voice; free at our volume).
-
----
-
-## ✅ Current status (summary — see [STATUS.md](STATUS.md) for live detail)
-
-- [x] Design spec written & approved
-- [x] Documentation package imported into this repo
-- [x] Project rules written ([CLAUDE.md](CLAUDE.md))
-- [x] Niche locked: daily impact news/info explainers (India + world), soft/positive lean
-- [x] Channel name locked: **But It Matters** · YouTube handle **@butitmatters** secured
-- [x] Most API keys collected (Gemini · Groq · Supabase · Telegram · Pexels) — YouTube + Claude token pending
-- [ ] Accounts & API keys finished → [docs/03-setup-guide.md](docs/03-setup-guide.md) · see [STATUS.md](STATUS.md)
-- [ ] Phase-1 MVP build → [docs/02-implementation-plan.md](docs/02-implementation-plan.md)
+**Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (realized spend is
+effectively $0 — Google Cloud TTS and Cloudflare AI both sit inside free tiers at our volume).
 
 ---
 
-## 🚀 When you're ready to build
+## ✅ Current status — **Phase-1 MVP complete & publishing live**
 
-1. Work through [docs/03-setup-guide.md](docs/03-setup-guide.md) — create accounts, run
-   `claude setup-token`, collect API keys.
-2. Open [docs/02-implementation-plan.md](docs/02-implementation-plan.md) and build module by module.
-3. Each module is independently testable — get Module 1 working before Module 2.
+See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.md](CHANGELOG.md).
+
+- [x] Full pipeline **built, tested, and publishing** captioned Shorts to **@butitmatters**
+- [x] Every module done + tested in isolation — **199 tests** (config · db · llm · ideation · approval · scriptwriter · voice · visuals · assembly · subtitles · publish · orchestrator)
+- [x] All credentials collected & verified (Gemini · Groq · Supabase · Telegram · Pexels · Cloudflare · Google TTS · YouTube OAuth)
+- [x] **Near-human voice** — Google Chirp 3 HD (en-IN), graceful fallback chain
+- [x] **Story-specific AI B-roll** — Cloudflare Flux images + Ken Burns motion
+- [x] **Premium auto-editing** — crossfade transitions, cinematic grade, music ducking, brand-logo bug, loop-friendly endings
+- [x] **News-niche compliance** — ≥2 sources/claim, on-screen source citation, AI-disclosure + synthetic-content flag, CC0/own-words
+- [x] **On-demand operation** — trigger the `make-short` workflow → ideas → Telegram digest → approve → render → published link
+
+---
+
+## 🚀 How it runs (on-demand)
+
+The primary trigger is the **`make-short`** GitHub Actions workflow (machine can be off):
+
+1. **Run workflow** (GitHub web/mobile) → it proposes fresh ideas.
+2. They arrive in **Telegram** with **Make-it / Pass / Reject** buttons.
+3. Tap to approve → the cloud renders the polished, captioned reel and **replies with the YouTube link**.
+
+A scheduled cron path (`production.yml`) remains available but optional. Render artifacts are
+created in the cloud, uploaded, then deleted — never stored (asset policy, rule 15).

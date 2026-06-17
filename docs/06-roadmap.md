@@ -5,14 +5,17 @@ Don't advance a phase until the previous one's exit criteria hold.
 
 ---
 
-## Phase 1 — MVP ⭐ (start here)
+## Phase 1 — MVP ⭐ ✅ **BUILT & PUBLISHING LIVE** (v0.4.3)
 **Goal:** 4–5 **captioned** YouTube Shorts/day, fully automated except one Telegram tap.
 
-- Ideation: **Claude Code (Pro) via Anthropic Routine** (trend research) + opt-in free fallback
-- Modules: Ideation → Approval → Scriptwriter → Voice(basic) → Visuals(stock) →
-  Assembly → **Subtitles (faster-whisper)** → Publish(YouTube)
-- Template D, edge-tts, Pexels/Pixabay, FFmpeg, GitHub Actions cron, Supabase
-- **Exit:** 7 consecutive days of reliable auto-publishing with only approval taps.
+- Ideation: **Claude Code (Pro) via Anthropic Routine** (trend research) + free fallback (Gemini→Groq)
+- Modules: Ideation → Approval → Scriptwriter → Voice → Visuals → Assembly →
+  **Subtitles (faster-whisper)** → Publish(YouTube)
+- **Shipped beyond MVP scope:** near-human **Google Chirp 3 HD** voice (fallback chain), **AI-generated
+  B-roll** (Cloudflare Flux + Ken Burns), **premium auto-editing** (crossfade transitions, cinematic
+  grade, music ducking, brand-logo bug, loop-friendly endings), Template N, FFmpeg, Supabase,
+  GitHub Actions (on-demand + cron).
+- **Exit:** 7 consecutive days of reliable auto-publishing with only approval taps. *(In progress — pipeline live.)*
 
 See [02-implementation-plan.md](02-implementation-plan.md) for the step-by-step build.
 

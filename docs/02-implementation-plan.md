@@ -1,8 +1,17 @@
 # Phase 1 — MVP Implementation Plan
 
+> ✅ **STATUS: BUILT & PUBLISHING LIVE** (v0.4.3) — every module below is done, tested, and
+> shipping captioned Shorts to **[@butitmatters](https://youtube.com/@butitmatters)**. The
+> checklist in this doc is the **original build guide** (kept as a historical record of the
+> step-by-step path); the live state of the system is in **[STATUS.md](../STATUS.md)** and the
+> shipped features are in **[CHANGELOG.md](../CHANGELOG.md)**. Several modules shipped *beyond*
+> this plan's MVP scope — near-human **Google Chirp 3 HD** voice, **AI-generated B-roll**
+> (Cloudflare Flux + Ken Burns), and **premium auto-editing** (transitions, cinematic grade,
+> music ducking, brand-logo bug, loop-friendly endings).
+
 **Goal:** Reliably publish **4–5 captioned YouTube Shorts per day**, fully automated except
-for one Telegram approval tap. Template D (fast listicle). YouTube only. Claude-driven
-ideation. Basic edge-tts narration. Stock B-roll. **Word-by-word subtitles included.**
+for one Telegram approval tap. Template N (news-impact). YouTube only. Claude-driven
+ideation. **Word-by-word subtitles included.**
 
 > Build **module by module, in order**. Get each one working and tested in isolation
 > before starting the next. Do not wire everything together until the modules each work alone.
