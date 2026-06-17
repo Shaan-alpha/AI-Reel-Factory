@@ -164,6 +164,24 @@ def test_build_cmd_mixes_music_when_present(monkeypatch):
     assert "[aout]" in cmd  # mixed audio is mapped
 
 
+def test_build_cmd_ducks_music_when_polish(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.delenv("ENABLE_DUCKING", raising=False)  # default on
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4", music_path="bed.mp3")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "sidechaincompress" in fc and "asplit" in fc
+    assert "[aout]" in cmd
+
+
+def test_build_cmd_plain_mix_when_polish_false(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4",
+                              music_path="bed.mp3", polish=False)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "sidechaincompress" not in fc      # fail-soft retry uses the simple mix
+    assert "amix=inputs=2:duration=first" in fc
+
+
 def test_pick_music_none_when_empty(monkeypatch, tmp_path):
     monkeypatch.setenv("MUSIC_DIR", str(tmp_path))  # empty dir
     assert assembly._pick_music("narr.mp3") is None

@@ -58,6 +58,10 @@ def _xfade_enabled() -> bool:
     return config.get_bool("ENABLE_XFADE", True)
 
 
+def _ducking_enabled() -> bool:
+    return config.get_bool("ENABLE_DUCKING", True)
+
+
 def _xfade_seconds() -> float:
     """Crossfade overlap, clamped below half a slice so xfade offsets stay positive."""
     try:
@@ -213,12 +217,21 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
     cmd += ["-i", audio_path]  # narration = input n
 
     if music_path:
-        # music looped to cover narration, mixed quietly UNDER it so speech stays clear.
-        # Narration stays at full volume; music sits low (env MUSIC_VOLUME, default 0.10).
-        vol = config.get("MUSIC_VOLUME", "0.10")
+        # music looped under the narration. With polish on, sidechain-DUCK it so it dips while the
+        # voice speaks and swells between sentences (clearer speech = retention); the fail-soft retry
+        # (polish=False) uses today's flat mix. MUSIC_VOLUME sets the base bed level.
+        vol = config.get("MUSIC_VOLUME", "0.12")
         cmd += ["-stream_loop", "-1", "-i", music_path]  # music = input n+1
-        parts.append(f"[{n + 1}:a]volume={vol}[abg]")
-        parts.append(f"[{n}:a][abg]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]")
+        if polish and _ducking_enabled():
+            parts.append(f"[{n}:a]asplit=2[vmix][vkey]")
+            parts.append(f"[{n + 1}:a]volume={vol}[bg]")
+            parts.append("[bg][vkey]sidechaincompress=threshold=0.03:ratio=8:"
+                         "attack=20:release=300[duck]")
+            parts.append("[vmix][duck]amix=inputs=2:duration=first:dropout_transition=3:"
+                         "normalize=0[aout]")
+        else:
+            parts.append(f"[{n + 1}:a]volume={vol}[abg]")
+            parts.append(f"[{n}:a][abg]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]")
         audio_map = "[aout]"
     else:
         audio_map = f"{n}:a"
