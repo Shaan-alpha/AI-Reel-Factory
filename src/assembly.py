@@ -51,6 +51,24 @@ def _clip_seconds() -> float:
     return max(_MIN_CLIP_SECONDS, min(_MAX_CLIP_SECONDS, v))
 
 
+def _grade_filters() -> str:
+    """Cinematic grade applied once on the final stream — unifies varied shots into a house look.
+
+    Each effect is independently env-gated. Returns a comma-joined ffmpeg filter string (or "")."""
+    parts = []
+    if config.get_bool("ENABLE_GRADE", True):
+        contrast = config.get("GRADE_CONTRAST", "1.06")
+        saturation = config.get("GRADE_SATURATION", "1.12")
+        parts.append(f"eq=contrast={contrast}:saturation={saturation}:brightness=0.01:gamma=0.98")
+        parts.append("colorbalance=rs=0.03:gs=0.01:bs=-0.03")  # slight warmth
+    if config.get_bool("ENABLE_VIGNETTE", True):
+        parts.append("vignette=PI/5")
+    if config.get_bool("ENABLE_GRAIN", True):
+        strength = config.get("GRAIN_STRENGTH", "8")
+        parts.append(f"noise=alls={strength}:allf=t+u")  # subtle temporal film grain
+    return ",".join(parts)
+
+
 def _pick_music(audio_path: str) -> str | None:
     """Pick a royalty-free track from MUSIC_DIR (default assets/music) to bed under narration.
 
@@ -149,7 +167,9 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
         )
     concat_in = "".join(f"[v{k}]" for k in range(n))
     parts.append(f"{concat_in}concat=n={n}:v=1:a=0[vc]")
-    parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS[v]")
+    grade = _grade_filters()
+    grade_suffix = ("," + grade) if grade else ""
+    parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS{grade_suffix}[v]")
 
     cmd = [_ffmpeg(), "-y"]
     for clip, _start in ordered:

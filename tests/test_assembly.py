@@ -62,6 +62,29 @@ def test_build_cmd_structure(monkeypatch):
     assert f"scale={assembly._W}:{assembly._H}" in fc
 
 
+def test_grade_filters_present_by_default(monkeypatch):
+    for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
+        monkeypatch.delenv(k, raising=False)  # defaults on
+    f = assembly._grade_filters()
+    assert "eq=contrast=" in f and "vignette" in f and "noise=" in f
+
+
+def test_grade_filters_empty_when_all_disabled(monkeypatch):
+    for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
+        monkeypatch.setenv(k, "false")
+    assert assembly._grade_filters() == ""
+
+
+def test_build_cmd_includes_grade_in_filtergraph(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("ENABLE_XFADE", "false")  # isolate the concat path
+    for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
+        monkeypatch.delenv(k, raising=False)
+    cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "eq=contrast=" in fc and "vignette" in fc
+
+
 def test_build_cmd_mixes_music_when_present(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
     cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4", music_path="bed.mp3")
