@@ -14,6 +14,18 @@ import pytest
 from src import subtitles
 
 
+def test_build_ass_includes_source_lowerthird(monkeypatch):
+    monkeypatch.delenv("ENABLE_SOURCE_CITE", raising=False)  # default on
+    ass = subtitles._build_ass([(0.0, 0.5, "hi")], source_label="thehindu.com")
+    assert "Style: Source," in ass
+    assert "Source: thehindu.com" in ass
+
+
+def test_build_ass_no_source_when_label_missing(monkeypatch):
+    ass = subtitles._build_ass([(0.0, 0.5, "hi")], source_label=None)
+    assert "Source: " not in ass
+
+
 # --- timestamp + events (pure) ---------------------------------------------------------
 
 def test_format_ts():

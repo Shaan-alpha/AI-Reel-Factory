@@ -10,6 +10,12 @@ import pytest
 from src import production
 
 
+def test_source_domain_derivation():
+    assert production._source_domain(["https://www.thehindu.com/news/x"]) == "thehindu.com"
+    assert production._source_domain(["pib.gov.in/PressRelease"]) == "pib.gov.in"
+    assert production._source_domain([]) is None
+
+
 IDEA = {"id": 7, "title": "ISRO rocket, explained", "hook": "h", "angle": "a",
         "sources": ["https://x.example"]}
 SCRIPT = {"script_id": 70, "script_body": "body words " * 20,

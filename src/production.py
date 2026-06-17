@@ -20,6 +20,7 @@ import os
 import shutil
 import tempfile
 import time
+from urllib.parse import urlparse
 
 from src import (
     approval,
@@ -36,6 +37,17 @@ from src import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("production")
+
+
+def _source_domain(sources: list[str] | None) -> str | None:
+    """Bare domain of the first source URL (for an on-screen citation), or None."""
+    for s in sources or []:
+        host = urlparse(s if "://" in str(s) else "http://" + str(s)).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if host:
+            return host
+    return None
 
 _PLATFORM = "youtube"
 
@@ -113,7 +125,8 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
         hook = script.get("title") or idea.get("title")
         final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
-                                        hook_text=hook, key_points=script.get("key_points"))
+                                        hook_text=hook, key_points=script.get("key_points"),
+                                        source_label=_source_domain(idea.get("sources")))
         video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url

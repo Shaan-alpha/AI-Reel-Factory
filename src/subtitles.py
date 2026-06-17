@@ -169,6 +169,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,640,1
 Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
 Style: Card,{font},90,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,5,40,40,0,1
+Style: Source,{font},46,&H20FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,40,40,120,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -196,10 +197,17 @@ def _card_events(key_points: list[str], total_dur: float, start_after: float,
 
 
 def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None,
-               key_points: list[str] | None = None, total_dur: float | None = None) -> str:
+               key_points: list[str] | None = None, total_dur: float | None = None,
+               source_label: str | None = None) -> str:
     """Render the full .ass subtitle file: active-word karaoke captions + an optional frame-1
-    hook banner + optional sparse on-screen key-point cards."""
+    hook banner + optional sparse on-screen key-point cards + an optional source lower-third."""
     lines = [_ass_header()]
+
+    # Brief source citation (bottom, faint) — credibility + news-compliance (rule 6: cite sources).
+    if source_label and config.get_bool("ENABLE_SOURCE_CITE", True):
+        secs = float(config.get("SOURCE_CITE_SECONDS", "3.0"))
+        label = _ass_escape(_NON_RENDERABLE.sub("", f"Source: {source_label}"))
+        lines.append(f"Dialogue: 1,{_format_ts(0)},{_format_ts(secs)},Source,,0,0,0,,{label}")
 
     # Frame-1 hook banner: the first frame IS the in-feed thumbnail, so a bold top-of-screen
     # hook is the single biggest free CTR lever. Drawn on Layer 1 (top), the word captions sit
@@ -270,7 +278,8 @@ def _burn(video_path: str, ass_path: str, out_path: str) -> None:
 
 
 def burn_captions(video_path: str, audio_path: str, out_path: str,
-                  hook_text: str | None = None, key_points: list[str] | None = None) -> str:
+                  hook_text: str | None = None, key_points: list[str] | None = None,
+                  source_label: str | None = None) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
@@ -292,7 +301,7 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
     total_dur = words[-1][1] if words else None
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_build_ass(words, hook_text, key_points, total_dur))
+        f.write(_build_ass(words, hook_text, key_points, total_dur, source_label))
 
     log.info("subtitles: burning %d word events into %s", len(words), out_path)
     _burn(video_path, ass_path, out_path)
