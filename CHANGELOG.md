@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.4.2] — 2026-06-17 — Premium edit polish (transitions + cinematic grade)
+
+### Added
+- **Crossfade transitions** (`assembly.py`): hard `concat` between cuts replaced by a chained
+  `xfade` (default 0.35s overlap, `ENABLE_XFADE` / `XFADE_SECONDS`). `_ordered_clips` is now
+  overlap-aware so crossfaded reels still over-cover the narration; `overlap=0` reproduces the
+  old hard-cut slice count exactly.
+- **Cinematic color grade** (`assembly.py`): a single grade pass over the final stream
+  (`eq` contrast/saturation + warm `colorbalance`) that unifies independently-generated AI shots
+  into one house look — the biggest premium lever. Plus **vignette** and subtle **film grain**.
+  All independently toggle-gated (`ENABLE_GRADE`/`GRADE_CONTRAST`/`GRADE_SATURATION`,
+  `ENABLE_VIGNETTE`, `ENABLE_GRAIN`/`GRAIN_STRENGTH`).
+- **Ken Burns motion variety** (`visuals.py`): image clips now alternate slow zoom-in / zoom-out
+  by index instead of always zooming in, for less monotonous motion. Deterministic per index.
+
+### Changed
+- **Fail-soft render** (`assembly.py`): `assemble()` builds the polished filtergraph first and, on
+  any ffmpeg error, automatically retries with the plain graph — a polish failure can never lose
+  the reel or kill the daily batch (rules 11, 14). `_build_cmd` gains a `polish` flag.
+
 ## [0.4.1] — 2026-06-15 — Short-form 12-20s bites + cloud voice/news hotfix
 
 ### Changed

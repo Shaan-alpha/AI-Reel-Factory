@@ -13,8 +13,11 @@ and shorter single-clip use is *more* copyright-safe, docs/08 §3). When a clip 
 start offset advances so the repeat shows a different segment (variety on fast cuts). The reel
 is a render artifact: assembly writes it, publish uploads it, then it's deleted (rule 15).
 
-MVP scope (rule 16: reliable + watchable beats cinematic): no Ken Burns / music bed yet —
-those are easy follow-ups once the core renders consistently.
+Polish layer (all toggle-gated, all fail-soft): crossfade transitions (xfade), a cinematic
+color grade + vignette + film grain applied once over the final stream (unifies independently-
+generated AI shots into one house look), and a quiet music bed. If the polished filtergraph
+errors, assemble() retries the plain graph so a reel is never lost (rules 11, 14). Ken Burns
+motion lives upstream in visuals.py (image sources).
 
 Binary resolution (rule 14: fail loud on misconfig): FFMPEG_BINARY env → PATH → a Windows
 winget fallback. On GitHub Actions (UTC) FFmpeg is installed onto PATH in the workflow.
