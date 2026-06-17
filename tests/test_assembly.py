@@ -117,6 +117,44 @@ def test_build_cmd_includes_grade_in_filtergraph(monkeypatch):
     assert "eq=contrast=" in fc and "vignette" in fc
 
 
+def test_build_cmd_plain_when_polish_false(monkeypatch):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    for k in ("ENABLE_XFADE", "ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
+        monkeypatch.delenv(k, raising=False)  # all default ON…
+    cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4",
+                              polish=False)  # …but polish=False overrides
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade" not in fc and "eq=contrast=" not in fc
+    assert "concat=n=2" in fc
+
+
+def test_assemble_falls_back_to_plain_on_polish_failure(monkeypatch, tmp_path):
+    audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00")
+    clip = tmp_path / "c.mp4"; clip.write_bytes(b"\x00")
+    out = tmp_path / "o.mp4"
+
+    monkeypatch.setattr(assembly, "probe_duration", lambda p: 6.0)
+    monkeypatch.setattr(assembly, "_pick_music", lambda p: None)
+
+    calls = {"n": 0}
+
+    def fake_run(cmd, **kw):
+        calls["n"] += 1
+        fc = cmd[cmd.index("-filter_complex") + 1]
+        polished = ("xfade" in fc) or ("eq=contrast=" in fc)
+        class R:
+            returncode = 1 if (polished and calls["n"] == 1) else 0
+            stderr = "boom"
+        if R.returncode == 0:
+            out.write_bytes(b"\x00" * 60_000)  # simulate a produced file
+        return R()
+
+    monkeypatch.setattr(assembly.subprocess, "run", fake_run)
+    result = assembly.assemble(str(audio), [str(clip)], str(out))
+    assert result == str(out)
+    assert calls["n"] == 2  # polished attempt failed → plain retry succeeded
+
+
 def test_build_cmd_mixes_music_when_present(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
     cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4", music_path="bed.mp3")

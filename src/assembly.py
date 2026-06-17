@@ -172,11 +172,12 @@ def _ordered_clips(clip_paths: list[str], duration: float,
 
 
 def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: float, out_path: str,
-               music_path: str | None = None) -> list[str]:
-    """Construct the ffmpeg argv: normalize → concat → trim → mux narration (+ optional music bed).
+               music_path: str | None = None, polish: bool = True) -> list[str]:
+    """Construct the ffmpeg argv: normalize → concat/xfade → grade → trim → mux narration.
 
     `ordered` is [(clip_path, start_offset)] from _ordered_clips; each slice is trimmed at its
-    own start so repeated clips show different segments."""
+    own start so repeated clips show different segments. `polish=False` forces the plain graph
+    (no xfade, no grade) — used by the fail-soft retry in assemble() (rules 11, 14)."""
     slice_s = _clip_seconds()
     n = len(ordered)
     parts = []
@@ -186,9 +187,9 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
             f"scale={_W}:{_H}:force_original_aspect_ratio=increase,"
             f"crop={_W}:{_H},setsar=1,fps={_FPS}[v{k}]"
         )
-    grade = _grade_filters()
+    grade = _grade_filters() if polish else ""
     grade_suffix = ("," + grade) if grade else ""
-    if _xfade_enabled() and n >= 2:
+    if polish and _xfade_enabled() and n >= 2:
         xf = _xfade_seconds()
         prev = "[v0]"
         for i in range(1, n):
@@ -252,7 +253,15 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
              out_path, duration, len(ordered), len(clip_paths), os.path.basename(music) if music else "none")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise RuntimeError(f"assembly: ffmpeg failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
+        # Fail-soft (rules 11, 14): a polished filtergraph error must never lose the reel.
+        log.warning("assembly: polished render failed (%d); retrying plain.\n%s",
+                    proc.returncode, proc.stderr[-800:])
+        ordered_plain = _ordered_clips(clip_paths, duration, overlap=0.0)
+        cmd = _build_cmd(ordered_plain, audio_path, duration, out_path,
+                         music_path=music, polish=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"assembly: ffmpeg failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("assembly: ffmpeg reported success but produced no output file.")
     return out_path
