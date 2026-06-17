@@ -117,7 +117,7 @@ def test_fetch_broll_photos_makes_kenburns_clips(monkeypatch, tmp_path):
         return True
     monkeypatch.setattr(visuals, "_fetch_image", fake_fetch_image)
 
-    def fake_kb(img, dest, seconds):
+    def fake_kb(img, dest, seconds, index=0):
         with open(dest, "wb") as f:
             f.write(b"\x00" * 4096)
     monkeypatch.setattr(visuals, "_image_to_kenburns_clip", fake_kb)
@@ -134,6 +134,31 @@ def test_fetch_broll_photos_fall_back_to_video(monkeypatch, tmp_path):
     _fake_download(monkeypatch)
     paths = visuals.fetch_broll(["a"], target_seconds=12, out_dir=str(tmp_path))
     assert paths and all(p.endswith(".mp4") for p in paths)  # fell back to stock video
+
+
+def test_kenburns_zoom_varies_by_index(monkeypatch):
+    """Even index zooms in, odd index zooms out — built into the ffmpeg vf string."""
+    from src import assembly
+
+    captured = []
+
+    def fake_run(cmd, **kw):
+        captured.append(" ".join(cmd))
+        class R:  # minimal CompletedProcess stand-in
+            returncode = 0
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(visuals.subprocess, "run", fake_run)
+
+    visuals._image_to_kenburns_clip("in.jpg", "out0.mp4", 7.0, index=0)
+    visuals._image_to_kenburns_clip("in.jpg", "out1.mp4", 7.0, index=1)
+
+    vf_in, vf_out = captured[0], captured[1]
+    assert "zoom+" in vf_in            # even → zoom IN (increasing)
+    assert "zoom-" in vf_out           # odd  → zoom OUT (decreasing)
+    assert vf_in != vf_out
 
 
 def test_cloudflare_image_no_creds_returns_false(monkeypatch):

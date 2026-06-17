@@ -288,14 +288,21 @@ def _fetch_image(keyword: str, dest: str, seed: int, source: str) -> bool:
         return False
 
 
-def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float) -> None:
-    """Render a slow Ken Burns zoom over an image → 1080x1920 mp4 clip (FFmpeg)."""
+def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: int = 0) -> None:
+    """Render a slow Ken Burns move over an image → 1080x1920 mp4 clip (FFmpeg).
+
+    Motion alternates by index for variety (rule 16): even = slow zoom IN, odd = slow zoom OUT.
+    Deterministic per index so cron retries are stable (rule 12)."""
     from src.assembly import _ffmpeg
 
     frames = int(seconds * 30)
+    if index % 2 == 0:
+        z = "min(zoom+0.0010,1.12)"                      # slow zoom IN
+    else:
+        z = "if(eq(on,0),1.12,max(zoom-0.0009,1.0))"     # slow zoom OUT (start zoomed, pull back)
     vf = (
         "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
-        f"zoompan=z='min(zoom+0.0010,1.18)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+        f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
         f"d={frames}:s=1080x1920:fps=30,setsar=1"
     )
     proc = subprocess.run(
@@ -318,7 +325,7 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
             continue
         clip = os.path.join(out_dir, f"imgclip_{i:02d}.mp4")
         try:
-            _image_to_kenburns_clip(img, clip, _IMAGE_CLIP_SECONDS)
+            _image_to_kenburns_clip(img, clip, _IMAGE_CLIP_SECONDS, index=i)
             clips.append(clip)
         except Exception as e:  # noqa: BLE001
             log.warning("visuals: ken burns failed (%s); skipping", e)
