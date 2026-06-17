@@ -13,6 +13,23 @@ import pytest
 
 from src import scriptwriter
 
+
+def test_truncate_to_words_cuts_at_sentence_boundary():
+    body = "One two three. Four five six seven. Eight nine ten eleven twelve."
+    out = scriptwriter._truncate_to_words(body, 7)
+    assert out == "One two three. Four five six seven."   # last full sentence within 7 words
+
+
+def test_truncate_to_words_noop_when_within_cap():
+    body = "Short enough already."
+    assert scriptwriter._truncate_to_words(body, 50) == body
+
+
+def test_punchup_prompt_targets_short_form():
+    assert "110-130" not in scriptwriter._PUNCHUP_PROMPT      # stale long-form gone
+    assert "never lengthen" in scriptwriter._PUNCHUP_PROMPT.lower()
+
+
 IDEA = {
     "id": 42,
     "title": "ISRO's reusable rocket, explained - why it matters",
@@ -144,21 +161,21 @@ def test_missing_idea_id_raises(monkeypatch):
 
 # --- scroll-stop hook judge (_punch_up_hook) -------------------------------------------
 
-_LONG_BODY = "word " * 120  # ~120 words → inside the sane-rewrite band
+_REWRITE_BODY = "word " * 70  # ~70 words → inside the 25-30s acceptance band (<= SCRIPT_MAX_WORDS)
 
 
 def test_punch_up_keeps_original_when_hook_already_strong(monkeypatch):
     monkeypatch.setattr(scriptwriter.llm, "generate",
-                        lambda *a, **k: json.dumps({"hook_score": 9, "title": "NEW", "script_body": _LONG_BODY}))
+                        lambda *a, **k: json.dumps({"hook_score": 9, "title": "NEW", "script_body": _REWRITE_BODY}))
     title, body = scriptwriter._punch_up_hook("Original Title", "the original body text")
     assert title == "Original Title" and body == "the original body text"  # strong → untouched
 
 
 def test_punch_up_rewrites_weak_hook(monkeypatch):
     monkeypatch.setattr(scriptwriter.llm, "generate",
-                        lambda *a, **k: json.dumps({"hook_score": 3, "title": "PUNCHIER", "script_body": _LONG_BODY}))
+                        lambda *a, **k: json.dumps({"hook_score": 3, "title": "PUNCHIER", "script_body": _REWRITE_BODY}))
     title, body = scriptwriter._punch_up_hook("Meh Title", "weak body")
-    assert title == "PUNCHIER" and body.strip() == _LONG_BODY.strip()
+    assert title == "PUNCHIER" and body.strip() == _REWRITE_BODY.strip()
 
 
 def test_punch_up_rejects_too_short_rewrite(monkeypatch):

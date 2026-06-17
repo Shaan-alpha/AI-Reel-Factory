@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from src import config, db, llm
 
@@ -162,8 +163,8 @@ already in the script, or a real question the viewer needs answered. Keep the re
 
 HARD RULE — DO NOT add, remove, or change any FACT, name, number, date, quote, statistic, or claim. \
 Every factual statement must stay exactly as true as the original. You may ONLY re-word, re-order, \
-and intensify the DELIVERY. Keep the narration roughly the same length (~110-130 words) and keep \
-the closing CTA / loop-back line.
+and intensify the DELIVERY. Keep it a tight 25-30 SECOND bite (~65-75 words) — sharpen wording but \
+NEVER lengthen it — and keep the closing CTA / loop-back line.
 
 OUTPUT — return ONE valid JSON object and NOTHING else. No markdown, no code fences, no commentary:
 {{"hook_score": 7, "title": "the punchier title", "script_body": "the full narration with a punchier opening"}}
@@ -199,11 +200,23 @@ def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
 
     new_body = (data.get("script_body") or "").strip()
     new_title = (data.get("title") or "").strip()
-    if new_body and 80 <= len(new_body.split()) <= 220:  # sane rewrite only
+    max_words = int(config.get("SCRIPT_MAX_WORDS", "80"))
+    if new_body and 40 <= len(new_body.split()) <= max_words:  # accept only if it stayed short
         log.info("scriptwriter: punched up a weak hook (score %d).", score)
         return (new_title or title), new_body
     log.info("scriptwriter: punch-up rewrite unusable (score %d); keeping original.", score)
     return title, body
+
+
+def _truncate_to_words(body: str, max_words: int) -> str:
+    """Hard length backstop: if the body exceeds max_words, cut to the last full sentence
+    at or under the cap (so we never end mid-thought). Deterministic."""
+    words = body.split()
+    if len(words) <= max_words:
+        return body
+    truncated = " ".join(words[:max_words])
+    ends = list(re.finditer(r"[.!?]", truncated))
+    return (truncated[: ends[-1].end()] if ends else truncated).strip()
 
 
 def _ensure_sources(caption: str, sources: list[str]) -> str:
@@ -269,9 +282,13 @@ def write_script(idea: dict, template: str = "N") -> dict:
     key_points = ([str(p).strip() for p in kp if str(p).strip()][:5]
                   if isinstance(kp, list) else [])
 
-    words = len(body.split())
-    if not 50 <= words <= 90:  # ~65-75 target (25-30s); warn on a miss, don't block (rule 14)
-        log.warning("scriptwriter: idea %s script is %d words (target ~65-75 / 25-30s)", idea_id, words)
+    max_words = int(config.get("SCRIPT_MAX_WORDS", "80"))
+    if len(body.split()) > max_words:
+        log.warning("scriptwriter: idea %s script %d words > %d cap; truncating to a sentence.",
+                    idea_id, len(body.split()), max_words)
+        body = _truncate_to_words(body, max_words)
+    if len(body.split()) < 50:
+        log.warning("scriptwriter: idea %s script is short (%d words)", idea_id, len(body.split()))
 
     # Persist the published title too, so the analytics loop can learn which title STYLE wins
     # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.
