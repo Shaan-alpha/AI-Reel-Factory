@@ -48,6 +48,7 @@ def test_ordered_clips_overlap_adds_slices(monkeypatch):
 def test_build_cmd_xfade_chain_and_offsets(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setenv("ENABLE_XFADE", "true")
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")  # isolate the xfade video chain (no logo map)
     monkeypatch.setenv("XFADE_SECONDS", "0.4")
     monkeypatch.setenv("CLIP_SECONDS", "3.5")
     cmd = assembly._build_cmd(
@@ -78,6 +79,7 @@ def test_clip_seconds_clamped(monkeypatch):
 def test_build_cmd_structure(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setenv("ENABLE_XFADE", "false")  # exercise the plain concat path
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")  # isolate base video plumbing (no logo input/map)
     cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
     # two video inputs + one audio input
     assert cmd.count("-i") == 3
@@ -180,6 +182,34 @@ def test_build_cmd_plain_mix_when_polish_false(monkeypatch):
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "sidechaincompress" not in fc      # fail-soft retry uses the simple mix
     assert "amix=inputs=2:duration=first" in fc
+
+
+def test_build_cmd_overlays_logo_when_present(monkeypatch, tmp_path):
+    logo = tmp_path / "logo.png"; logo.write_bytes(b"\x89PNG\r\n")
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("BRAND_LOGO", str(logo))
+    monkeypatch.delenv("ENABLE_BRAND_BUG", raising=False)
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "overlay=" in fc and "colorchannelmixer=aa=" in fc
+    assert "[vout]" in cmd                       # logo-composited video is what gets mapped
+    assert str(logo) in cmd                      # logo added as an input
+
+
+def test_build_cmd_no_logo_when_absent(monkeypatch, tmp_path):
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("BRAND_LOGO", str(tmp_path / "missing.png"))  # does not exist
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "overlay=" not in fc
+    assert "[v]" in cmd and "[vout]" not in cmd  # plain video map
+
+
+def test_brand_logo_disabled(monkeypatch, tmp_path):
+    logo = tmp_path / "logo.png"; logo.write_bytes(b"\x89PNG\r\n")
+    monkeypatch.setenv("BRAND_LOGO", str(logo))
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")
+    assert assembly._brand_logo() is None
 
 
 def test_pick_music_none_when_empty(monkeypatch, tmp_path):

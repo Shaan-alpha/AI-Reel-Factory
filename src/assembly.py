@@ -89,6 +89,14 @@ def _grade_filters() -> str:
     return ",".join(parts)
 
 
+def _brand_logo() -> str | None:
+    """Path to the brand-bug logo if enabled and the file exists, else None (fail-soft)."""
+    if not config.get_bool("ENABLE_BRAND_BUG", True):
+        return None
+    path = config.get("BRAND_LOGO", "assets/brand/logo.png")
+    return path if path and os.path.isfile(path) else None
+
+
 def _pick_music(audio_path: str) -> str | None:
     """Pick a royalty-free track from MUSIC_DIR (default assets/music) to bed under narration.
 
@@ -236,9 +244,23 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
     else:
         audio_map = f"{n}:a"
 
+    # Brand-bug overlay: composite the logo (added as the LAST input so it never shifts the
+    # voice/music indices) small + semi-transparent in the top-right. Fail-soft + polish-gated.
+    video_label = "[v]"
+    logo_path = _brand_logo() if polish else None
+    if logo_path:
+        logo_idx = n + 1 + (1 if music_path else 0)
+        cmd += ["-loop", "1", "-i", logo_path]
+        h = config.get("BRAND_LOGO_HEIGHT", "150")
+        op = config.get("BRAND_LOGO_OPACITY", "0.55")
+        m = config.get("BRAND_LOGO_MARGIN", "44")
+        parts.append(f"[{logo_idx}:v]scale=-1:{h},format=rgba,colorchannelmixer=aa={op}[lg]")
+        parts.append(f"[v][lg]overlay=W-w-{m}:{m}[vout]")
+        video_label = "[vout]"
+
     cmd += [
         "-filter_complex", ";".join(parts),
-        "-map", "[v]", "-map", audio_map,
+        "-map", video_label, "-map", audio_map,
         "-t", f"{duration:.3f}",
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
