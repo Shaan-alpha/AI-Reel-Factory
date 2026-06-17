@@ -69,6 +69,25 @@ def test_build_cmd_single_slice_uses_concat_not_xfade(monkeypatch):
     assert "concat=n=1" in fc and "xfade" not in fc  # nothing to crossfade with one clip
 
 
+def test_seamless_loop_ends_on_first_clip(monkeypatch):
+    monkeypatch.delenv("ENABLE_SEAMLESS_LOOP", raising=False)  # default on
+    ordered = [("a.mp4", 0.0), ("b.mp4", 0.0), ("c.mp4", 3.0)]
+    out = assembly._apply_seamless_loop(ordered)
+    assert out[-1] == ("a.mp4", 0.0)          # last slice reuses the opening clip
+    assert out[:-1] == ordered[:-1]           # earlier slices unchanged
+
+
+def test_seamless_loop_disabled_is_noop(monkeypatch):
+    monkeypatch.setenv("ENABLE_SEAMLESS_LOOP", "false")
+    ordered = [("a.mp4", 0.0), ("b.mp4", 0.0)]
+    assert assembly._apply_seamless_loop(ordered) == ordered
+
+
+def test_seamless_loop_single_slice_noop(monkeypatch):
+    monkeypatch.delenv("ENABLE_SEAMLESS_LOOP", raising=False)
+    assert assembly._apply_seamless_loop([("a.mp4", 0.0)]) == [("a.mp4", 0.0)]
+
+
 def test_clip_seconds_clamped(monkeypatch):
     monkeypatch.setenv("CLIP_SECONDS", "0.2")   # too fast → clamped up
     assert assembly._clip_seconds() == assembly._MIN_CLIP_SECONDS

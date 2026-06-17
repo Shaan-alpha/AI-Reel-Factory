@@ -186,6 +186,14 @@ def _ordered_clips(clip_paths: list[str], duration: float,
     return ordered
 
 
+def _apply_seamless_loop(ordered: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Make the final slice reuse the opening clip so the ending visually rhymes with the start
+    (loop-friendly replays). No-op when disabled or there's only one slice."""
+    if config.get_bool("ENABLE_SEAMLESS_LOOP", True) and len(ordered) >= 2:
+        return ordered[:-1] + [(ordered[0][0], 0.0)]
+    return ordered
+
+
 def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: float, out_path: str,
                music_path: str | None = None, polish: bool = True) -> list[str]:
     """Construct the ffmpeg argv: normalize → concat/xfade → grade → trim → mux narration.
@@ -283,7 +291,7 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     duration = probe_duration(audio_path)
     overlap = _xfade_seconds() if _xfade_enabled() else 0.0
-    ordered = _ordered_clips(clip_paths, duration, overlap=overlap)
+    ordered = _apply_seamless_loop(_ordered_clips(clip_paths, duration, overlap=overlap))
     music = _pick_music(os.path.abspath(audio_path))
     cmd = _build_cmd(ordered, audio_path, duration, out_path, music_path=music)
 
