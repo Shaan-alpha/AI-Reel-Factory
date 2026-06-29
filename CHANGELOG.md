@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Ideation diversity & virality
+
+### Added
+- **Two-stage news-anchored ideation** (`ideation_fallback.py`): a cheap **Stage 1** (Groq,
+  `prefer_groq` to spare Gemini RPD) clusters the real news headlines into N **distinct**,
+  share-worthy stories; **Stage 2** (Gemini grounded → ungrounded fallback) expands them into ideas.
+  This breaks the single-call "mode collapse" that made batches similar, and makes freshness survive
+  a grounding outage (Stage 2 still expands real current headlines).
+- **`share_score` virality bar**: each idea carries a 0–1 "would someone send this to a friend?"
+  score (defaults to `est_score` when omitted). On-demand ranking (`generate_ideas`/`seed_ideas`) is
+  now **share_score-first, est_score-second**. Ranking-only — stripped before DB insert (no schema
+  change) via `_to_rows`.
+- **Token-overlap dedup backstop** (`_validate_and_clean`): drops same-story near-duplicates
+  (Jaccard ≥ 0.6) that exact-title dedup missed.
+
+### Changed
+- **Trends demoted to a supplementary signal** (`trends.py`): a best-effort noise filter drops
+  generic search junk (weather, calendars/festival-date lookups, `X vs Y` sports matchups,
+  scorecards, lotteries). The ideation prompt now treats trends as optional flavour and **anchors on
+  the real news feed**.
+- **Ideation prompts rewritten** (both stages): one-idea-per-distinct-story, spread across categories,
+  an explicit share test + curiosity-gap guidance — with every rule-6 hard guard intact (no
+  fabrication, neutral framing, ≥2 real sources).
+- Tests: +13 (`tests/test_ideation_fallback.py`, `tests/test_trends.py`); suite **204 pass** (gated
+  live tests deselected).
+
 ## [0.4.3] — 2026-06-17 — Retention refinements v2
 
 ### Added

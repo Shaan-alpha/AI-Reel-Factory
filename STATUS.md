@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.4.3 (**PUBLIC** — Retention v2: 25-30s length enforcement, music ducking, brand-logo bug, source lower-third, loop-friendly endings; 199 tests pass)
-**Last updated:** 2026-06-17
+**Version:** 0.4.3 (**PUBLIC**) · _Unreleased:_ ideation diversity & virality (two-stage news-anchored ideation, share_score ranking, trends noise filter; 204 tests pass)
+**Last updated:** 2026-06-29
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -93,6 +93,29 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-06-29 — Ideation diversity & virality (two-stage, news-anchored)
+- **Root-caused the "similar + not viral/trendy" complaint** with live evidence: ideation made the
+  whole batch in ONE LLM call (mode-collapse → near-duplicate ideas); dedup was exact-title only; the
+  **Google Trends feed was returning junk** ("weather", "june 2026 calendar", "wimbledon",
+  "germany vs paraguay") that the prompt told the model to *prefer*; and a grounding outage (Gemini
+  RPD) silently dropped ideation to stale training knowledge.
+- **Fix — Approach A (news-anchored two-stage):**
+  - `trends.py`: best-effort **noise filter** (weather/calendar/festival-date/`X vs Y`/scorecard/
+    lottery) + demoted trends from "prefer" to a supplementary flavour signal. The **news feed is the
+    primary anchor** (verified live: 12 real, current, diverse stories).
+  - `ideation_fallback.py`: **Stage 1** (`_select_stories`, Groq via `prefer_groq`) clusters real
+    headlines into N **distinct** share-worthy stories → **Stage 2** (existing grounded→ungrounded)
+    expands one idea per story. Diversity is now structural, not hoped-for. Freshness no longer depends
+    on grounding succeeding.
+  - **`share_score`** virality field (0–1, "would someone share this?"); on-demand ranking is
+    share-first, est-second (`_rank_key`). It's ranking-only — **projected out before DB insert**
+    (`_to_rows`), so **no DB schema change**.
+  - **Token-overlap dedup backstop** (Jaccard ≥ 0.6) catches same-story near-duplicates.
+  - Prompts rewritten (both stages): one-idea-per-story, spread categories, share test + curiosity-gap
+    — **all rule-6 hard guards intact** (no fabrication, neutral framing, ≥2 real sources).
+- **+13 tests; 204 pass** (gated live tests deselected). No workflow changes. Branch
+  `feat/ideation-diversity-virality`. Spec/plan in `docs/superpowers/{specs,plans}/2026-06-29-*`.
 
 ### 2026-06-16 — Chirp key FIXED (corrupted secret) + 25-30s sarcastic tone
 - **Voice root cause corrected**: the cloud `API_KEY_INVALID` was a **corrupted secret**, NOT an IP
