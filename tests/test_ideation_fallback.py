@@ -216,6 +216,49 @@ def test_live_real_llm_ideation(monkeypatch):
         assert len(r["sources"]) >= int(fb.config.get("MIN_SOURCES", "2"))
 
 
+# --- two-stage production + ranking ----------------------------------------------------
+
+def test_produce_ideas_runs_two_stages(monkeypatch):
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: ["Real headline - PTI"])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    calls = {"select": 0}
+    def _sel(target, headlines, trending, winners):
+        calls["select"] += 1
+        return [{"story": "Story X", "category": "world", "why_shareworthy": "stakes"}]
+    monkeypatch.setattr(fb, "_select_stories", _sel)
+    captured = {}
+    def _grounded(prompt, **k):
+        captured["prompt"] = prompt
+        return json.dumps({"ideas": [_idea("Expanded", share_score=0.9)]})
+    monkeypatch.setattr(fb.llm, "generate_grounded", _grounded)
+    out = fb._produce_ideas(3)
+    assert calls["select"] == 1
+    assert out and out[0]["title"] == "Expanded"
+    assert "Story X" in captured["prompt"]  # selected story flowed into Stage 2
+
+
+def test_rank_key_orders_by_share_then_est():
+    a = {"title": "a", "est_score": 0.9, "share_score": 0.2}
+    b = {"title": "b", "est_score": 0.1, "share_score": 0.8}
+    assert sorted([a, b], key=fb._rank_key)[0]["title"] == "b"  # higher share wins
+
+
+def test_generate_ideas_ranks_by_share_score(monkeypatch):
+    monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])
+    ideas = [
+        _idea("Low share", est_score=0.9, share_score=0.1),
+        _idea("High share", est_score=0.2, share_score=0.9),
+        _idea("Mid share", est_score=0.5, share_score=0.5),
+    ]
+    monkeypatch.setattr(fb, "_produce_ideas", lambda t: fb._validate_and_clean(ideas))
+    captured = {}
+    monkeypatch.setattr(fb.db, "insert_ideas",
+                        lambda rows: captured.setdefault("rows", rows) or rows)
+    fb.generate_ideas(2)
+    assert [r["title"] for r in captured["rows"]] == ["High share", "Mid share"]
+
+
 # --- stage-1 story selection -----------------------------------------------------------
 
 def test_select_stories_parses_distinct_stories(monkeypatch):

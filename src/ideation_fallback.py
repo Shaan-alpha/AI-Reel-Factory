@@ -37,6 +37,11 @@ def _to_rows(ideas: list[dict]) -> list[dict]:
     return [{k: idea[k] for k in _ROW_KEYS} for idea in ideas]
 
 
+def _rank_key(idea: dict):
+    """Sort key: share_score first (virality), est_score as tiebreaker. Highest first."""
+    return (-idea.get("share_score", idea["est_score"]), -idea["est_score"])
+
+
 # Tiny stopword set so near-identical titles overlap on meaningful words, not glue words.
 _STOPWORDS = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "with",
               "at", "by", "from", "as", "new", "today"}
@@ -51,39 +56,38 @@ def _tokens(title: str) -> set[str]:
 _ROUTINE_IDEAS_FILE = "data/daily-ideas.json"
 
 _PROMPT = """You are the ideation engine for "But It Matters", a channel of daily, punchy \
-**25-30 second** news/info Shorts (India + world). Generate {n} TIMELY ideas a human will approve \
-4-5 of, each tied to what is TRENDING / in the news RIGHT NOW, each a single crisp on-point fact \
-that still carries one honest "why it matters" angle (not a bare summary), with strong \
-scroll-stopping potential.
+**25-30 second** news/info Shorts (India + world). Turn the SELECTED stories below into {n} \
+TIMELY ideas a human will approve 4-5 of — each a single crisp on-point fact that still carries \
+one honest "why it matters" angle (not a bare summary), with strong scroll-stopping, \
+share-worthy potential.
 
-TODAY'S TRENDING IN INDIA (prefer ideas tied to these where a solid, factual explainer fits):
-{trending}
+SELECTED DISTINCT STORIES (write EXACTLY ONE idea per story, in order; NEVER two ideas on the \
+same event):
+{selected}
 
-TODAY'S NEWS HEADLINES (real, current stories — PREFER turning one of THESE into an honest \
-explainer over a generic evergreen topic; verify the facts before using):
+PRIMARY ANCHOR — REAL CURRENT HEADLINES (verify the facts against these; prefer these real \
+stories over generic evergreen topics):
 {headlines}
 
-WINNING TITLE STYLES ON THIS CHANNEL (these actual published titles + their view counts show what \
-the feed rewards — copy the ENERGY and framing, never the exact title; if empty, ignore):
+SUPPLEMENTARY TREND SIGNAL (optional flavour only; ignore generic weather/calendar/sports-score noise):
+{trending}
+
+WINNING TITLE STYLES ON THIS CHANNEL (these actual published titles + view counts show what the \
+feed rewards — copy the ENERGY and framing, never the exact title; if empty, ignore):
 {winners}
 
-HONEST SCROLL APPEAL: pick stories a smart person finds genuinely surprising or consequential — \
-real stakes, money & power, conflict with real consequences, science/space, big human impact. The \
-hook must be a TRUE curiosity gap the explainer can actually CLOSE (a bait topic the facts can't \
-support gets suppressed). A local or wonky policy story qualifies when there's a genuinely \
-surprising, well-sourced angle. Set est_score by how strong an HONEST hook plus a real \
-"why it matters" angle the story supports — not by how dramatic a title you could slap on it.
-
-Cover what people care about NOW across: current affairs, government & policy, major \
-court/legal rulings, economy & business, science & space (ISRO), technology & AI, health, \
-climate & energy, India infrastructure, sports, and notable world events. Be CURRENT, not generic.
+HONEST SCROLL APPEAL: pick the angle a smart person finds genuinely surprising or consequential \
+— real stakes, money & power, conflict with real consequences, science/space, big human impact. \
+The hook must be a TRUE curiosity gap the explainer can actually CLOSE (a bait topic the facts \
+can't support gets suppressed). Apply a SHARE TEST: would someone send this to a friend? Set \
+share_score by that; set est_score by how strong an HONEST hook plus a real "why it matters" \
+angle the story supports — never by how dramatic a title you could slap on it.
 
 ACCURACY (CRITICAL — this is the #1 rule): propose only REAL, verifiable developments that \
 ACTUALLY happened recently. NEVER invent product names, version numbers, launches, statistics, \
-quotes, or events, and never attribute a claim to a company/person unless it's real. If you are \
-not certain a specific thing genuinely happened, DO NOT make it up — choose a different, real, \
-verifiable story. Fabricated news = instant demonetization and strikes. When unsure, generalize \
-truthfully rather than invent specifics.
+quotes, or events, and never attribute a claim to a company/person unless it's real. If unsure a \
+thing genuinely happened, DO NOT make it up — choose a different real story. When unsure, \
+generalize truthfully rather than invent specifics. Fabricated news = instant demonetization and strikes.
 
 FRAMING RULES (monetization safety): strictly NEUTRAL and factual — explain what happened and \
 why it matters; never take political sides or editorialize. Politics, government actions, and \
@@ -92,16 +96,15 @@ religious incitement or hate; anything that could inflame violence; unverified r
 stated as fact; deepfakes/impersonation; graphic tragedy exploitation; medical/financial advice \
 stated as fact.
 
-Each idea: a PUNCHY, curiosity-driven title (the scriptwriter will sharpen it further) that is \
-honest to the story — NOT a dry "X explained" search title, and NOT a bait title the facts can't \
-back; a story that lands in 25-30 seconds (a single development with a sharp angle, not a deep-dive); \
->= {min_src} \
-reputable, independent source URLs from real outlets (never invent URLs); and a "hook" that is a \
-genuine first-2-seconds scroll-stopper (one surprising true fact).
+Each idea: a PUNCHY, curiosity-driven title honest to the story (NOT a dry "X explained" search \
+title, NOT a bait title the facts can't back); a story that lands in 25-30 seconds (a single \
+development with a sharp angle, not a deep-dive); >= {min_src} reputable, independent source URLs \
+from real outlets (never invent URLs); a "hook" that is a genuine first-2-seconds scroll-stopper \
+(one surprising true fact); and a share_score.
 
 Return ONLY JSON:
 {{"ideas": [{{"niche": "impact-news", "title": "...", "hook": "the first 3 seconds", \
-"angle": "the original why-it-matters take", "est_score": 0.0, \
+"angle": "the original why-it-matters take", "est_score": 0.0, "share_score": 0.0, \
 "sources": ["https://...", "https://..."]}}]}}
 """
 
@@ -242,14 +245,16 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
 
 
 def _produce_ideas(target: int) -> list[dict]:
-    """Ask the LLM for ~target ideas and return the validated/cleaned subset.
+    """Two-stage: select DISTINCT share-worthy stories (Stage 1), then expand them (Stage 2).
 
-    Researches the live web via Gemini Google Search grounding for current, well-sourced
-    ideas; falls back to ungrounded generation (Gemini→Groq) if grounding is unavailable.
+    Stage 1 (Groq) clusters real headlines into distinct stories — the anti-clustering /
+    diversity mechanism. Stage 2 expands via Gemini Google Search grounding for current,
+    well-sourced ideas, falling back to ungrounded generation if grounding is unavailable.
+    Freshness survives a grounding outage because Stage 2 still expands real current headlines.
     """
     topics = trends.fetch_trending(15)
     trending_block = "\n".join(f"- {t}" for t in topics) or \
-        "- (live trends unavailable — use your own knowledge of today's biggest stories)"
+        "- (live trends unavailable — rely on the headlines below)"
     headlines = news.fetch_headlines(12)
     headlines_block = "\n".join(f"- {h}" for h in headlines) or \
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"
@@ -259,10 +264,21 @@ def _produce_ideas(target: int) -> list[dict]:
         log.warning("ideation: could not load past winners (%s)", e)
         winners = []
     winners_block = "\n".join(f"- {w}" for w in winners) or "- (no performance data yet)"
+
+    stories = _select_stories(target, headlines, topics, winners)
+    if stories:
+        selected_block = "\n".join(
+            f"- {s['story']}" + (f" [{s['category']}]" if s["category"] else "")
+            for s in stories
+        )
+    else:
+        selected_block = ("- (no pre-selected stories — choose DISTINCT, current, "
+                          "share-worthy stories yourself; never two on the same event)")
+
     prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
-                            trending=trending_block, headlines=headlines_block,
-                            winners=winners_block)
-    # Try web-grounded research first, INCLUDING the parse — grounded JSON is sometimes
+                            selected=selected_block, trending=trending_block,
+                            headlines=headlines_block, winners=winners_block)
+    # Stage 2: web-grounded first, INCLUDING the parse — grounded JSON is sometimes
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     try:
         raw = llm.generate_grounded(prompt, max_tokens=8192)
@@ -306,7 +322,7 @@ def generate_ideas(n: int = 3) -> int:
     request always produces fresh options (the operator picks via the digest buttons).
     """
     n = max(1, n)
-    clean = sorted(_produce_ideas(max(n * 2, 4)), key=lambda d: -d["est_score"])[:n]
+    clean = sorted(_produce_ideas(max(n * 2, 4)), key=_rank_key)[:n]
     if not clean:
         raise RuntimeError("ideation: could not generate any valid idea.")
     inserted = db.insert_ideas(_to_rows(clean))
@@ -341,8 +357,7 @@ def seed_ideas(n: int = 3) -> int:
     source = "routine file" if routine else "gemini/groq fallback"
 
     seen = db.existing_idea_titles()
-    fresh = sorted((i for i in pool if i["title"].lower() not in seen),
-                   key=lambda d: -d["est_score"])[:n]
+    fresh = sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key)[:n]
     if not fresh:
         raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")
     log.info("ideation: seeding %d idea(s) from %s.", len(fresh), source)
