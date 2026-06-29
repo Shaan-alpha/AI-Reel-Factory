@@ -339,3 +339,10 @@ def test_ideation_prompt_dehyped():
     assert "honest" in prompt          # new: honest scroll appeal
     assert "why it matters" in prompt  # kept: original analysis requirement
     assert "scroll" in prompt          # kept: still wants a strong (honest) hook
+
+
+def test_ideation_prompt_asks_for_spread_scores():
+    prompt = fb._PROMPT.lower()
+    assert "score calibration" in prompt   # require relative, spread-out scores
+    assert "spread" in prompt and "0.0-1.0" in prompt
+    assert "do not give everything" in prompt

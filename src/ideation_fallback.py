@@ -83,6 +83,11 @@ can't support gets suppressed). Apply a SHARE TEST: would someone send this to a
 share_score by that; set est_score by how strong an HONEST hook plus a real "why it matters" \
 angle the story supports — never by how dramatic a title you could slap on it.
 
+SCORE CALIBRATION (IMPORTANT): RANK the ideas against each OTHER and SPREAD the scores across the \
+full 0.0-1.0 range — do NOT give everything ~1.0. The strongest single idea may approach 1.0, the \
+weakest should sit near 0.3-0.5, and the rest in between. Use DISTINCT share_score values so the \
+list has a clear best-to-worst order; est_score may differ from share_score per idea.
+
 ACCURACY (CRITICAL — this is the #1 rule): propose only REAL, verifiable developments that \
 ACTUALLY happened recently. NEVER invent product names, version numbers, launches, statistics, \
 quotes, or events, and never attribute a claim to a company/person unless it's real. If unsure a \

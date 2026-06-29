@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.4.3 (**PUBLIC**) · _Unreleased:_ ideation diversity & virality (two-stage news-anchored ideation, share_score ranking, trends noise filter; 204 tests pass)
+**Version:** 0.4.3 (**PUBLIC**) · _Unreleased:_ ideation diversity & virality (two-stage news-anchored ideation, share_score ranking + calibration, trends noise filter; 205 tests pass)
 **Last updated:** 2026-06-29
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -116,6 +116,9 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
     — **all rule-6 hard guards intact** (no fabrication, neutral framing, ≥2 real sources).
 - **+13 tests; 204 pass** (gated live tests deselected). No workflow changes. Branch
   `feat/ideation-diversity-virality`. Spec/plan in `docs/superpowers/{specs,plans}/2026-06-29-*`.
+- **Follow-up (same day): score calibration.** Stage 2 now ranks ideas relative to each other and
+  spreads `share_score`/`est_score` across 0–1 (was saturating at 1.0 → flat ranking). Verified live
+  (0.95 → 0.55 spread). +1 test (205 pass).
 
 ### 2026-06-16 — Chirp key FIXED (corrupted secret) + 25-30s sarcastic tone
 - **Voice root cause corrected**: the cloud `API_KEY_INVALID` was a **corrupted secret**, NOT an IP

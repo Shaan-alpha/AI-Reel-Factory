@@ -19,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   change) via `_to_rows`.
 - **Token-overlap dedup backstop** (`_validate_and_clean`): drops same-story near-duplicates
   (Jaccard ≥ 0.6) that exact-title dedup missed.
+- **Score calibration**: Stage 2 is instructed to rank ideas against each other and spread
+  `share_score`/`est_score` across the full 0–1 range (no clustering at 1.0), so the share-first
+  ranking produces a meaningful best-to-worst order. Verified live (0.95 → 0.55 spread).
 
 ### Changed
 - **Trends demoted to a supplementary signal** (`trends.py`): a best-effort noise filter drops
