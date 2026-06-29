@@ -27,6 +27,14 @@ log = logging.getLogger(__name__)
 _MAX_IDEAS = 20
 _MIN_IDEAS = 5  # below this, treat the run as failed rather than ship a thin digest
 
+# Columns the `ideas` table actually has — `share_score` is ranking-only, never persisted.
+_ROW_KEYS = ("niche", "title", "hook", "angle", "est_score", "sources")
+
+
+def _to_rows(ideas: list[dict]) -> list[dict]:
+    """Project validated ideas to the DB columns (drops ranking-only fields like share_score)."""
+    return [{k: idea[k] for k in _ROW_KEYS} for idea in ideas]
+
 # The daily Anthropic Routine (Claude + web research) commits its ideas here; the on-demand
 # flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
 _ROUTINE_IDEAS_FILE = "data/daily-ideas.json"
@@ -137,10 +145,15 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
         except (TypeError, ValueError):
             est = 0.5
         est = min(1.0, max(0.0, est))
+        try:
+            share = float(idea.get("share_score", est))
+        except (TypeError, ValueError):
+            share = est
+        share = min(1.0, max(0.0, share))
 
         seen_titles.add(title.lower())
         clean.append({"niche": niche, "title": title, "hook": hook, "angle": angle,
-                      "est_score": est, "sources": sources})
+                      "est_score": est, "share_score": share, "sources": sources})
         if len(clean) >= _MAX_IDEAS:
             break
     return clean
@@ -199,7 +212,7 @@ def run_fallback_ideation() -> int:
             "not inserting a thin digest."
         )
 
-    inserted = db.insert_ideas(clean)
+    inserted = db.insert_ideas(_to_rows(clean))
     log.info("ideation_fallback: inserted %d pending ideas.", len(inserted))
     return len(inserted)
 
@@ -214,7 +227,7 @@ def generate_ideas(n: int = 3) -> int:
     clean = sorted(_produce_ideas(max(n * 2, 4)), key=lambda d: -d["est_score"])[:n]
     if not clean:
         raise RuntimeError("ideation: could not generate any valid idea.")
-    inserted = db.insert_ideas(clean)
+    inserted = db.insert_ideas(_to_rows(clean))
     log.info("ideation: generated %d on-demand idea(s).", len(inserted))
     return len(inserted)
 
@@ -251,4 +264,4 @@ def seed_ideas(n: int = 3) -> int:
     if not fresh:
         raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")
     log.info("ideation: seeding %d idea(s) from %s.", len(fresh), source)
-    return len(db.insert_ideas(fresh))
+    return len(db.insert_ideas(_to_rows(fresh)))

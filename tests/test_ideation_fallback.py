@@ -216,6 +216,29 @@ def test_live_real_llm_ideation(monkeypatch):
         assert len(r["sources"]) >= int(fb.config.get("MIN_SOURCES", "2"))
 
 
+# --- share_score + row projection ------------------------------------------------------
+
+def test_validate_adds_share_score_default_to_est(monkeypatch):
+    out = fb._validate_and_clean([_idea("A", est_score=0.8)])
+    assert out[0]["share_score"] == 0.8  # defaults to est_score when model omits it
+
+
+def test_validate_share_score_coerced_and_clamped():
+    out = fb._validate_and_clean([
+        _idea("A", share_score=5.0),
+        _idea("B", share_score="nope", est_score=0.4),
+    ])
+    by = {r["title"]: r["share_score"] for r in out}
+    assert by["A"] == 1.0 and by["B"] == 0.4  # clamp high; bad value -> est_score
+
+
+def test_to_rows_projects_to_db_columns_only():
+    ideas = fb._validate_and_clean([_idea("A", share_score=0.9)])
+    rows = fb._to_rows(ideas)
+    assert set(rows[0]) == {"niche", "title", "hook", "angle", "est_score", "sources"}
+    assert "share_score" not in rows[0]
+
+
 # --- de-hyped ideation framing ---------------------------------------------------------
 
 def test_ideation_prompt_dehyped():
