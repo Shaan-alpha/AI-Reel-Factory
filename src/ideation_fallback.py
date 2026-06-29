@@ -176,6 +176,71 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
     return clean
 
 
+_STAGE1_PROMPT = """You are the story scout for "But It Matters", a channel of daily 25-30 \
+second news/info Shorts (India + world). From the REAL headlines below, choose the {n} MOST \
+share-worthy, DISTINCT stories to turn into Shorts today.
+
+PRIMARY SOURCE — REAL CURRENT HEADLINES (choose from THESE; cluster items about the same event \
+into ONE story):
+{headlines}
+
+SUPPLEMENTARY TREND SIGNAL (optional flavour only; ignore generic weather/calendar/sports-score noise):
+{trending}
+
+WINNING STYLES ON THIS CHANNEL (what the feed rewards; pick stories with similar pull — if empty, ignore):
+{winners}
+
+RULES:
+- Pick {n} DISTINCT stories — NEVER two about the same event. Spread them across DIFFERENT \
+categories (world affairs, economy & business, science & space, technology & AI, health, \
+climate & energy, India infrastructure, government & policy, sports, notable world events).
+- Prefer stories a smart person would actually SEND TO A FRIEND: real stakes, money & power, \
+genuine surprise, big human impact. Apply a SHARE test, not a clickbait test.
+- Compliance (hard line): only real, verifiable developments; neutral framing; exclude \
+communal/religious incitement, calls to violence, unverified rumour-as-fact, deepfakes, \
+graphic tragedy exploitation, medical/financial advice.
+
+Return ONLY a JSON object:
+{{"stories": [{{"story": "one-line description of the single development", "category": "...", \
+"why_shareworthy": "why someone would share this"}}]}}
+"""
+
+
+def _select_stories(target: int, headlines: list[str], trending: list[str],
+                    winners: list[str]) -> list[dict]:
+    """Stage 1: cluster real headlines into `target` DISTINCT share-worthy stories.
+
+    Cheap, no-web pass routed to Groq first (rule 13) so Gemini's scarce grounded RPD is
+    reserved for Stage 2. Returns [] when there are no headlines or on any failure (rule 11),
+    so the caller falls back to expanding from headlines directly.
+    """
+    if not headlines:
+        return []
+    prompt = _STAGE1_PROMPT.format(
+        n=target,
+        headlines="\n".join(f"- {h}" for h in headlines),
+        trending="\n".join(f"- {t}" for t in trending) or "- (none)",
+        winners="\n".join(f"- {w}" for w in winners) or "- (no performance data yet)",
+    )
+    try:
+        raw = llm.generate(prompt, json=True, max_tokens=2048, prefer_groq=True)
+        start, end = raw.find("{"), raw.rfind("}")
+        data = json.loads(raw[start : end + 1], strict=False)
+        stories = data.get("stories", []) if isinstance(data, dict) else []
+        out: list[dict] = []
+        for s in stories:
+            if isinstance(s, dict) and str(s.get("story", "")).strip():
+                out.append({
+                    "story": str(s["story"]).strip(),
+                    "category": str(s.get("category", "")).strip(),
+                    "why_shareworthy": str(s.get("why_shareworthy", "")).strip(),
+                })
+        return out[:target]
+    except Exception as e:  # noqa: BLE001 — selection is best-effort; never block ideation
+        log.warning("ideation: stage-1 story selection failed (%s); expanding from headlines", e)
+        return []
+
+
 def _produce_ideas(target: int) -> list[dict]:
     """Ask the LLM for ~target ideas and return the validated/cleaned subset.
 

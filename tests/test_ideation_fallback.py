@@ -216,6 +216,36 @@ def test_live_real_llm_ideation(monkeypatch):
         assert len(r["sources"]) >= int(fb.config.get("MIN_SOURCES", "2"))
 
 
+# --- stage-1 story selection -----------------------------------------------------------
+
+def test_select_stories_parses_distinct_stories(monkeypatch):
+    payload = {"stories": [
+        {"story": "West Asia ceasefire talks", "category": "world", "why_shareworthy": "war stakes"},
+        {"story": "Weakest monsoon in 17 years", "category": "climate", "why_shareworthy": "food prices"},
+    ]}
+    seen = {}
+    def _gen(prompt, **kw):
+        seen.update(kw)
+        return json.dumps(payload)
+    monkeypatch.setattr(fb.llm, "generate", _gen)
+    out = fb._select_stories(2, ["West Asia ceasefire - The Hindu", "Monsoon fails - PTI"], [], [])
+    assert [s["story"] for s in out] == ["West Asia ceasefire talks", "Weakest monsoon in 17 years"]
+    assert seen.get("prefer_groq") is True  # spares Gemini RPD (rule 13)
+
+
+def test_select_stories_empty_without_headlines(monkeypatch):
+    monkeypatch.setattr(fb.llm, "generate",
+                        lambda *a, **k: pytest.fail("must not call LLM with no headlines"))
+    assert fb._select_stories(3, [], ["ISRO"], []) == []
+
+
+def test_select_stories_returns_empty_on_failure(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("groq down")
+    monkeypatch.setattr(fb.llm, "generate", _boom)
+    assert fb._select_stories(3, ["a headline"], [], []) == []
+
+
 # --- dedup backstop --------------------------------------------------------------------
 
 def test_dedup_backstop_drops_same_story_near_duplicate():
