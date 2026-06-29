@@ -216,6 +216,26 @@ def test_live_real_llm_ideation(monkeypatch):
         assert len(r["sources"]) >= int(fb.config.get("MIN_SOURCES", "2"))
 
 
+# --- dedup backstop --------------------------------------------------------------------
+
+def test_dedup_backstop_drops_same_story_near_duplicate():
+    ideas = [
+        _idea("ISRO launches new navigation satellite NVS-02"),
+        _idea("ISRO launches new navigation satellite today"),  # same story, reworded
+        _idea("RBI cuts repo rate by 25 basis points"),
+    ]
+    out = fb._validate_and_clean(ideas)
+    titles = [o["title"] for o in out]
+    assert "RBI cuts repo rate by 25 basis points" in titles
+    assert len(titles) == 2  # one of the two ISRO near-duplicates dropped
+
+
+def test_dedup_backstop_keeps_distinct_short_titles():
+    # synthetic distinct titles (used widely in other tests) must NOT be over-merged
+    out = fb._validate_and_clean([_idea(f"Idea {i}") for i in range(6)])
+    assert len(out) == 6
+
+
 # --- share_score + row projection ------------------------------------------------------
 
 def test_validate_adds_share_score_default_to_est(monkeypatch):

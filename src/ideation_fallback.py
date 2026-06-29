@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 
 from src import config, db, llm, news, trends
 
@@ -34,6 +35,16 @@ _ROW_KEYS = ("niche", "title", "hook", "angle", "est_score", "sources")
 def _to_rows(ideas: list[dict]) -> list[dict]:
     """Project validated ideas to the DB columns (drops ranking-only fields like share_score)."""
     return [{k: idea[k] for k in _ROW_KEYS} for idea in ideas]
+
+
+# Tiny stopword set so near-identical titles overlap on meaningful words, not glue words.
+_STOPWORDS = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "with",
+              "at", "by", "from", "as", "new", "today"}
+
+
+def _tokens(title: str) -> set[str]:
+    """Significant lowercased word tokens of a title (numbers kept, stopwords dropped)."""
+    return {t for t in re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOPWORDS}
 
 # The daily Anthropic Routine (Claude + web research) commits its ideas here; the on-demand
 # flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
@@ -124,6 +135,7 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
     min_src = int(config.get("MIN_SOURCES", "2"))
     niche = config.get("NICHE", "impact-news")
     seen_titles: set[str] = set()
+    kept_tokens: list[set[str]] = []
     clean: list[dict] = []
 
     for idea in ideas:
@@ -135,6 +147,10 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
         if not (title and hook and angle):
             continue
         if title.lower() in seen_titles:
+            continue
+        toks = _tokens(title)
+        if toks and any(len(toks & kt) / len(toks | kt) >= 0.6 for kt in kept_tokens):
+            log.debug("ideation_fallback: dropping near-duplicate %r", title)
             continue
         sources = _clean_sources(idea.get("sources"))
         if len(sources) < min_src:
@@ -152,6 +168,7 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
         share = min(1.0, max(0.0, share))
 
         seen_titles.add(title.lower())
+        kept_tokens.append(toks)
         clean.append({"niche": niche, "title": title, "hook": hook, "angle": angle,
                       "est_score": est, "share_score": share, "sources": sources})
         if len(clean) >= _MAX_IDEAS:
