@@ -216,6 +216,122 @@ def test_live_real_llm_ideation(monkeypatch):
         assert len(r["sources"]) >= int(fb.config.get("MIN_SOURCES", "2"))
 
 
+# --- two-stage production + ranking ----------------------------------------------------
+
+def test_produce_ideas_runs_two_stages(monkeypatch):
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: ["Real headline - PTI"])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    calls = {"select": 0}
+    def _sel(target, headlines, trending, winners):
+        calls["select"] += 1
+        return [{"story": "Story X", "category": "world", "why_shareworthy": "stakes"}]
+    monkeypatch.setattr(fb, "_select_stories", _sel)
+    captured = {}
+    def _grounded(prompt, **k):
+        captured["prompt"] = prompt
+        return json.dumps({"ideas": [_idea("Expanded", share_score=0.9)]})
+    monkeypatch.setattr(fb.llm, "generate_grounded", _grounded)
+    out = fb._produce_ideas(3)
+    assert calls["select"] == 1
+    assert out and out[0]["title"] == "Expanded"
+    assert "Story X" in captured["prompt"]  # selected story flowed into Stage 2
+
+
+def test_rank_key_orders_by_share_then_est():
+    a = {"title": "a", "est_score": 0.9, "share_score": 0.2}
+    b = {"title": "b", "est_score": 0.1, "share_score": 0.8}
+    assert sorted([a, b], key=fb._rank_key)[0]["title"] == "b"  # higher share wins
+
+
+def test_generate_ideas_ranks_by_share_score(monkeypatch):
+    monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])
+    ideas = [
+        _idea("Low share", est_score=0.9, share_score=0.1),
+        _idea("High share", est_score=0.2, share_score=0.9),
+        _idea("Mid share", est_score=0.5, share_score=0.5),
+    ]
+    monkeypatch.setattr(fb, "_produce_ideas", lambda t: fb._validate_and_clean(ideas))
+    captured = {}
+    monkeypatch.setattr(fb.db, "insert_ideas",
+                        lambda rows: captured.setdefault("rows", rows) or rows)
+    fb.generate_ideas(2)
+    assert [r["title"] for r in captured["rows"]] == ["High share", "Mid share"]
+
+
+# --- stage-1 story selection -----------------------------------------------------------
+
+def test_select_stories_parses_distinct_stories(monkeypatch):
+    payload = {"stories": [
+        {"story": "West Asia ceasefire talks", "category": "world", "why_shareworthy": "war stakes"},
+        {"story": "Weakest monsoon in 17 years", "category": "climate", "why_shareworthy": "food prices"},
+    ]}
+    seen = {}
+    def _gen(prompt, **kw):
+        seen.update(kw)
+        return json.dumps(payload)
+    monkeypatch.setattr(fb.llm, "generate", _gen)
+    out = fb._select_stories(2, ["West Asia ceasefire - The Hindu", "Monsoon fails - PTI"], [], [])
+    assert [s["story"] for s in out] == ["West Asia ceasefire talks", "Weakest monsoon in 17 years"]
+    assert seen.get("prefer_groq") is True  # spares Gemini RPD (rule 13)
+
+
+def test_select_stories_empty_without_headlines(monkeypatch):
+    monkeypatch.setattr(fb.llm, "generate",
+                        lambda *a, **k: pytest.fail("must not call LLM with no headlines"))
+    assert fb._select_stories(3, [], ["ISRO"], []) == []
+
+
+def test_select_stories_returns_empty_on_failure(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("groq down")
+    monkeypatch.setattr(fb.llm, "generate", _boom)
+    assert fb._select_stories(3, ["a headline"], [], []) == []
+
+
+# --- dedup backstop --------------------------------------------------------------------
+
+def test_dedup_backstop_drops_same_story_near_duplicate():
+    ideas = [
+        _idea("ISRO launches new navigation satellite NVS-02"),
+        _idea("ISRO launches new navigation satellite today"),  # same story, reworded
+        _idea("RBI cuts repo rate by 25 basis points"),
+    ]
+    out = fb._validate_and_clean(ideas)
+    titles = [o["title"] for o in out]
+    assert "RBI cuts repo rate by 25 basis points" in titles
+    assert len(titles) == 2  # one of the two ISRO near-duplicates dropped
+
+
+def test_dedup_backstop_keeps_distinct_short_titles():
+    # synthetic distinct titles (used widely in other tests) must NOT be over-merged
+    out = fb._validate_and_clean([_idea(f"Idea {i}") for i in range(6)])
+    assert len(out) == 6
+
+
+# --- share_score + row projection ------------------------------------------------------
+
+def test_validate_adds_share_score_default_to_est(monkeypatch):
+    out = fb._validate_and_clean([_idea("A", est_score=0.8)])
+    assert out[0]["share_score"] == 0.8  # defaults to est_score when model omits it
+
+
+def test_validate_share_score_coerced_and_clamped():
+    out = fb._validate_and_clean([
+        _idea("A", share_score=5.0),
+        _idea("B", share_score="nope", est_score=0.4),
+    ])
+    by = {r["title"]: r["share_score"] for r in out}
+    assert by["A"] == 1.0 and by["B"] == 0.4  # clamp high; bad value -> est_score
+
+
+def test_to_rows_projects_to_db_columns_only():
+    ideas = fb._validate_and_clean([_idea("A", share_score=0.9)])
+    rows = fb._to_rows(ideas)
+    assert set(rows[0]) == {"niche", "title", "hook", "angle", "est_score", "sources"}
+    assert "share_score" not in rows[0]
+
+
 # --- de-hyped ideation framing ---------------------------------------------------------
 
 def test_ideation_prompt_dehyped():
