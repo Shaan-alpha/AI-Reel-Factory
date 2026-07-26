@@ -4,16 +4,19 @@ Contract:
     what it does : synthesizes narration audio from a script body.
     input        : script_body (str); output dir.
     output       : (audio_path, duration_seconds).
-    depends on   : Google Cloud TTS (Chirp 3 HD) → edge-tts → Kokoro, plus an opt-in Gemini
-                   Developer API TTS engine (rule 11: every engine has a fallback).
+    depends on   : Gemini Developer API TTS → Google Cloud TTS (Chirp 3 HD) → edge-tts → Kokoro
+                   (rule 11: every engine has a fallback behind it).
 
-Default engine is **Google Chirp 3 HD** (near-human en-IN); the chain falls through to edge-tts
-then Kokoro, resolved by name at call time so a missing key just advances a link. Pick the
-primary via VOICE_ENGINE (google|edge|kokoro|gemini).
+Default engine is **Gemini TTS** on the free `gemini-2.5-flash-preview-tts` model, voice
+**Zubenelgenubi** ("Casual") — chosen by ear because it carries dry sarcasm, which is the
+channel's whole register. The chain falls through to Chirp 3 HD, then edge-tts, then Kokoro,
+resolved by name at call time so a missing key or a withdrawn preview model just advances a
+link. Pick the primary via VOICE_ENGINE (gemini|google|edge|kokoro).
 
 **Expressive delivery is per-engine**, because the control signals are not portable:
   · `gemini`  — promptable: honours VOICE_STYLE_PROMPT *and* inline style tags ([sarcastic]).
-                Opt-in via VOICE_ENGINE=gemini; the default model is the free one.
+                Free tier is metered per model: 3 RPM / 10 RPD (measured 2026-07-27), so it
+                cannot starve the grounded ideation that shares the same API key.
   · `google`  — Chirp 3 HD reads `[pause]` tags, but only through its `markup` input field,
                 and supports GOOGLE_TTS_SPEAKING_RATE.
   · `edge`/`kokoro` — no tag support at all; every tag is stripped before synthesis.
@@ -271,7 +274,9 @@ def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
     spoken = _style_text(text)  # keep style tags, drop Chirp's pause tags
     style = config.get("VOICE_STYLE_PROMPT", _DEFAULT_STYLE_PROMPT)
     model = config.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
-    voice_name = config.get("GEMINI_TTS_VOICE", "Kore")
+    # Zubenelgenubi ("Casual") was chosen by ear over Kore/Schedar/Algenib/Charon — it is the
+    # channel's voice identity now, not an incidental default. Re-pick via tools/tune_voice.py.
+    voice_name = config.get("GEMINI_TTS_VOICE", "Zubenelgenubi")
 
     client = genai.Client(api_key=key)
     resp = client.models.generate_content(
@@ -443,7 +448,7 @@ def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
         raise ValueError("voice.synthesize: empty script_body.")
     os.makedirs(out_dir, exist_ok=True)
 
-    primary = str(config.get("VOICE_ENGINE", "google")).lower()
+    primary = str(config.get("VOICE_ENGINE", "gemini")).lower()
     primary = _ENGINE_ALIASES.get(primary, primary)
     order = [primary] + [e for e in _ENGINE_ORDER if e != primary]
 

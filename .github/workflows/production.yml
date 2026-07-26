@@ -52,7 +52,7 @@ jobs:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          VOICE_ENGINE: ${{ vars.VOICE_ENGINE || 'google' }}          # google | edge | kokoro (chain fallback)
+          VOICE_ENGINE: ${{ vars.VOICE_ENGINE || 'gemini' }}          # gemini | google | edge | kokoro (chain)
           GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}       # Chirp 3 HD; empty -> falls back to edge-tts
           GOOGLE_TTS_VOICE: ${{ vars.GOOGLE_TTS_VOICE }}              # an en-IN Chirp3-HD voice name
           GOOGLE_TTS_LANGUAGE: ${{ vars.GOOGLE_TTS_LANGUAGE || 'en-IN' }}
@@ -98,7 +98,7 @@ jobs:
           MAX_STYLE_TAGS: ${{ vars.MAX_STYLE_TAGS || '3' }}
           VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only
           GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts' }}  # free tier
-          GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}    # bare name, not the Chirp form
+          GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Zubenelgenubi' }}  # chosen by ear; bare name
           GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}       # optional; isolates TTS quota
           DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
           APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it

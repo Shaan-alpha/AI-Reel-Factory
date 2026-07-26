@@ -7,6 +7,7 @@
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
 **Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **280 pass, 3 skipped**)
 **Last updated:** 2026-07-27
+**Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -93,6 +94,25 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-07-27 — Voice chosen by ear: Gemini TTS + Zubenelgenubi is now the channel voice
+- **Operator A/B'd 5 renders and picked `Zubenelgenubi` ("Casual")** over Kore/Schedar/Algenib/
+  Charon. That voice only exists on the Gemini engine, so **`VOICE_ENGINE` now defaults to
+  `gemini`** and `GEMINI_TTS_VOICE` to `Zubenelgenubi` — in code and in both workflows. The
+  previous default `Kore` is documented as **"Firm"**, which is not the same thing as dry.
+- **Style prompt rewritten** to Google's documented structure (audio profile → director's notes on
+  pace/inflection → paralinguistic detail). Their guidance is explicit that naming an emotion
+  underperforms describing what it *sounds* like, so the prompt is now mostly **restraint** — the
+  failure mode for this channel is a narrator who announces the joke.
+- **`tools/tune_voice.py`** renders one script across the voices whose documented characteristics
+  suit deadpan, budget-aware (paces for 3 RPM, refuses to exceed 5 calls against the 10 RPD free
+  tier, retries a transient 500 once so a blip doesn't cost a voice slot).
+- **Still $0** — `gemini-2.5-flash-preview-tts` is free on input and output. Chirp 3 HD remains the
+  first fallback, which matters because the Gemini TTS models are all **preview**; there's a test
+  pinning that fallback.
+- ⚠️ **Free tier is 10 requests/day.** At 3 Shorts/day that's 3, but clicking make-short 4+ times in
+  one day will exhaust it — TTS then falls back to Chirp automatically (degraded voice, not a
+  failure). **282 pass, 3 skipped.**
 
 ### 2026-07-27 — Expressive narration: sarcasm you can actually hear
 Implements [the expressive-narration spec](docs/superpowers/specs/2026-07-26-expressive-narration-design.md).

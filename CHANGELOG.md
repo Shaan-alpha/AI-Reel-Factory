@@ -7,7 +7,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ## [Unreleased] — Expressive narration
 
+### Changed
+- **Gemini TTS with the `Zubenelgenubi` ("Casual") voice is now the default narration**, chosen by
+  ear against Kore, Schedar, Algenib and Charon. `VOICE_ENGINE` defaults to `gemini` and
+  `GEMINI_TTS_VOICE` to `Zubenelgenubi`, in code and in both workflows. The old default `Kore` is
+  documented as "Firm", which is not the same as dry. Still $0 — the default model is free on input
+  and output — and Chirp 3 HD remains the first fallback, which matters because every Gemini TTS
+  model is preview; a test pins that fallback.
+- **The style prompt follows Google's documented structure** (audio profile → director's notes on
+  pace and inflection → paralinguistic detail) instead of naming an emotion, which their guidance
+  says underperforms. It is now mostly restraint: the failure mode is a narrator who announces the
+  joke.
+- `test_gemini_absent_from_chain_by_default` retargeted to
+  `test_gemini_absent_from_chain_when_another_engine_is_primary` — it encoded the pre-A/B "default
+  is google" stance, but the invariant worth keeping is that selecting a different primary excludes
+  Gemini entirely rather than leaving it a silent fallback.
+
 ### Added
+- **`tools/tune_voice.py`** renders one script across the voices whose documented characteristics
+  suit deadpan. Budget-aware (rule 13): paces calls for the 3 RPM ceiling, refuses to exceed 5 calls
+  against the 10 RPD free tier, reports usage, and retries a transient 500 once so a blip does not
+  cost a voice slot.
+
 - **Per-engine delivery tags** (`voice._filter_tags`): the scriptwriter emits two tag families and
   each engine keeps only what it understands — `[pause]`/`[pause long]` become Chirp 3 HD `markup`,
   `[sarcastic]`/`[deadpan]`/`[dry]` pass through to Gemini TTS, and both are stripped for edge-tts

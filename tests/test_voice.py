@@ -575,9 +575,11 @@ def test_gemini_tts_raises_on_unexpected_response_shape(monkeypatch, tmp_path):
         voice._synthesize_gemini("hi there", str(tmp_path))
 
 
-def test_gemini_absent_from_chain_by_default(monkeypatch, tmp_path):
-    """Ships inert: the default VOICE_ENGINE must not reach the new engine at all."""
-    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+def test_gemini_absent_from_chain_when_another_engine_is_primary(monkeypatch, tmp_path):
+    """Gemini is kept out of _ENGINE_ORDER, so selecting a different primary excludes it
+    ENTIRELY rather than leaving it as a silent fallback. Anyone who moves off Gemini (to avoid
+    a preview model, or a quota, or the style prompt) must actually get what they asked for."""
+    monkeypatch.setenv("VOICE_ENGINE", "google")
     called = []
     monkeypatch.setattr(voice, "_engine_gemini", lambda *a: called.append(1) or ("x.wav", 1.0))
     monkeypatch.setattr(voice, "_engine_google", lambda *a: ("ok.wav", 2.0))
@@ -620,3 +622,42 @@ def test_live_gemini_tts(tmp_path):
         str(tmp_path))
     assert os.path.getsize(path) > 10_000
     assert 1.0 < dur < 30.0
+
+
+def test_default_engine_and_voice_are_the_chosen_ones(monkeypatch, tmp_path):
+    """The voice identity was picked by ear (Zubenelgenubi, 'Casual') and the engine that carries
+    it is Gemini. Pinned so neither silently drifts back to an incidental default."""
+    for k in ("VOICE_ENGINE", "GEMINI_TTS_VOICE", "GEMINI_TTS_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+
+    order = []
+    real = voice._engine_gemini
+    monkeypatch.setattr(voice, "_engine_gemini",
+                        lambda t, d: (order.append("gemini"), real(t, d))[1])
+    monkeypatch.setattr(voice, "_engine_google",
+                        lambda *a: (order.append("google"), ("chirp.wav", 1.0))[1])
+
+    voice.synthesize("Sure. [sarcastic] Brilliant.", str(tmp_path))
+    assert order == ["gemini"], "Gemini must be the primary engine, not a fallback"
+    vc = cap["config"].speech_config.voice_config.prebuilt_voice_config
+    assert vc.voice_name == "Zubenelgenubi"
+    assert cap["model"] == "gemini-2.5-flash-preview-tts"  # the free one
+
+
+def test_chirp_is_still_the_first_fallback(monkeypatch, tmp_path):
+    """Gemini TTS runs on a PREVIEW model; Chirp must catch it if that model goes away."""
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+    order = []
+
+    def _boom(*_a):
+        order.append("gemini")
+        raise RuntimeError("404 model not found")
+
+    monkeypatch.setattr(voice, "_engine_gemini", _boom)
+    monkeypatch.setattr(voice, "_engine_google",
+                        lambda *a: (order.append("google"), ("chirp.wav", 2.0))[1])
+    path, _ = voice.synthesize("hello there", str(tmp_path))
+    assert order == ["gemini", "google"] and path == "chirp.wav"
