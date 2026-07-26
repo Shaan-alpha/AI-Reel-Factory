@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Content-engine audit: provider fixes, SFX retune, opt-in stat cards
+
+### Fixed
+- **GitHub Models provider was non-functional.** Wrong host (the retired Azure preview
+  `models.inference.ai.azure.com`) and a bare model name where the API requires a publisher
+  prefix. Now `https://models.github.ai/inference/chat/completions` with `openai/gpt-4o-mini`
+  (a bare name is auto-prefixed). Requires a token scoped `models: read`.
+- **Env-var names could never have existed as Actions secrets/vars** — GitHub rejects names
+  beginning with `GITHUB_`. Renamed to `GH_MODELS_KEY`, `ENABLE_GH_MODELS`, `PREFER_GH_MODELS`,
+  `GH_MODEL`.
+- **`GH_PAT` removed from the LLM credential chain** (rule 5): it is the Telegram bot's Actions
+  read+write PAT, and this repo's Actions hold the upload/DB/Telegram secrets.
+- **`pillow` pinned** in `requirements.txt` — `graphics.py` imported it but it was undeclared,
+  so CI would have failed on import while passing locally (rule 10).
+- **Raw newlines in the scriptwriter's JSON example** made the target format invalid JSON and
+  taught the model to emit the same; now shown escaped, with an explicit instruction.
+- **SFX would have clipped the narration and sounded cheap.** A limiter now caps the summed mix
+  (`amix normalize=0` has no headroom): verified 0.95 + 0.30 → +0.0003 dB clipped without it,
+  −0.445 dB with it. Levels cut 0.5–0.6 → **0.18**, density every cut → **every 2nd cut**, and a
+  **1.5s lead-in** keeps the hook clean.
+- **SFX assets were not reproducible**: a shared module-level `Random` made generated waveforms
+  depend on call order. Each generator now seeds its own (rule 10).
+
+### Added
+- **Opt-in PIL stat cards** (`ENABLE_GRAPHIC_CARDS`, default off): `graphics.py` — previously
+  imported by nothing — is now wired into `subtitles.py`, sharing `_card_events` with the ASS path
+  so the two treatments never double-draw. Overlaid via `-loop 1` + `enable='between(t,…)'` +
+  `-shortest`, with a full-featured fallback to ASS text cards on any failure (rules 11, 14).
+- **GitHub Models as an explicit opt-in third provider**: `ENABLE_GH_MODELS` adds it as a middle
+  fallback, `PREFER_GH_MODELS` puts it first. Deliberately not enabled by mere token presence —
+  a dead provider in the chain delays the Groq failover it exists to provide (rules 11, 13).
+- **Knobs wired into `.env.example` and both workflows**: `ENABLE_SFX`, `SFX_VOLUME`,
+  `SFX_EVERY_N_CUTS`, `SFX_DIR`, `ENABLE_GRAPHIC_CARDS`, `ENABLE_CHANNEL_TAGS`, `CAPTION_FONT_FILE`
+  and the four `GH_*` keys — `ENABLE_SFX` defaults on, so it previously had no kill switch.
+
+### Changed
+- `audio_sfx.mix_sfx_events` writes PCM in bulk via `array` (0.42s → 0.19s per 28s track,
+  byte-identical), caches each effect's decode, and skips malformed events instead of raising.
+- Dropped dead code: `_SFX_NAMES`, the unused `extra_events` parameter, and a mid-file
+  `import requests` in `llm.py`.
+- **242 tests pass, 2 skipped** (was 215).
+
 ## [Unreleased] — Ideation diversity & virality
 
 ### Added
