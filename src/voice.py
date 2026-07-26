@@ -229,6 +229,15 @@ def _engine_kokoro(text: str, out_dir: str) -> tuple[str, float]:
     return out_path, dur
 
 
+_TAG_RE = re.compile(r"\[[^\]]+\]|<[^>]+>")
+
+
+def _clean_tts_text(text: str) -> str:
+    """Strip bracketed emotion/tone tags ([sarcastic], [sigh]) and SFX tags (<sfx:...>) for clean TTS synthesis."""
+    cleaned = _TAG_RE.sub("", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
     """Return (audio_path, duration_seconds) via an ordered fallback chain (rule 11):
     google (Chirp 3 HD) → edge-tts (en-IN) → kokoro. VOICE_ENGINE picks the primary engine;
@@ -238,7 +247,7 @@ def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
     Raises ValueError on empty input, RuntimeError only if EVERY engine fails — the orchestrator
     skips that one reel and keeps the batch going (rule 14: soft on runtime).
     """
-    text = (script_body or "").strip()
+    text = _clean_tts_text(script_body or "")
     if not text:
         raise ValueError("voice.synthesize: empty script_body.")
     os.makedirs(out_dir, exist_ok=True)
