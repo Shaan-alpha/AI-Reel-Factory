@@ -273,6 +273,97 @@ def test_missing_clip_raises(tmp_path):
         assembly.assemble(str(audio), [str(tmp_path / "ghost.mp4")], str(tmp_path / "o.mp4"))
 
 
+# --- SFX events + mix plumbing ---------------------------------------------------------
+
+def _ordered(n: int) -> list[tuple[str, float]]:
+    return [(f"c{i}.mp4", 0.0) for i in range(n)]
+
+
+def test_sfx_events_skip_the_hook_window(monkeypatch):
+    """Nothing may fire over the opening — the hook is the highest-leverage retention moment."""
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_XFADE", "false")
+    monkeypatch.setenv("SFX_EVERY_N_CUTS", "1")  # densest setting still respects the lead-in
+    events = assembly._build_sfx_events(_ordered(9), 28.0)
+    assert events, "expected some SFX events"
+    assert min(e["time"] for e in events) >= assembly._SFX_LEAD_IN
+
+
+def test_sfx_events_are_sparse_and_quiet_by_default(monkeypatch):
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_XFADE", "false")
+    for k in ("SFX_EVERY_N_CUTS", "SFX_VOLUME"):
+        monkeypatch.delenv(k, raising=False)
+    events = assembly._build_sfx_events(_ordered(9), 28.0)
+    # every 2nd cut, not all 8 of them
+    assert 2 <= len(events) <= 5
+    assert all(e["volume"] == pytest.approx(0.18) for e in events)
+    # never past the end of the narration
+    assert all(e["time"] < 28.0 - 0.5 for e in events)
+
+
+def test_sfx_event_times_land_on_the_xfade_cuts(monkeypatch):
+    """SFX times must mirror _build_cmd's xfade offsets or the stings land beside the cuts."""
+    monkeypatch.setenv("CLIP_SECONDS", "4.0")
+    monkeypatch.setenv("XFADE_SECONDS", "0.5")
+    monkeypatch.setenv("ENABLE_XFADE", "true")
+    monkeypatch.setenv("SFX_EVERY_N_CUTS", "1")
+    events = assembly._build_sfx_events(_ordered(6), 30.0)
+    step = 4.0 - 0.5
+    assert [e["time"] for e in events] == [pytest.approx(i * step) for i in range(1, 6)]
+
+
+def test_sfx_volume_zero_disables_events(monkeypatch):
+    monkeypatch.setenv("SFX_VOLUME", "0")
+    assert assembly._build_sfx_events(_ordered(9), 28.0) == []
+
+
+def test_sfx_volume_and_density_are_clamped(monkeypatch):
+    monkeypatch.setenv("SFX_VOLUME", "5")
+    assert assembly._sfx_volume() == 1.0
+    monkeypatch.setenv("SFX_VOLUME", "not-a-number")
+    assert assembly._sfx_volume() == pytest.approx(0.18)
+    monkeypatch.setenv("SFX_EVERY_N_CUTS", "0")
+    assert assembly._sfx_every_n_cuts() == 1
+
+
+def test_build_cmd_mixes_sfx_and_limits_the_sum(tmp_path, monkeypatch):
+    """`normalize=0` sums inputs, so an SFX layer needs a limiter or the narration clips."""
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")
+    sfx = tmp_path / "sfx_track.wav"
+    sfx.write_bytes(b"RIFFfake")
+    cmd = assembly._build_cmd(_ordered(2), "narr.mp3", 9.0, "out.mp4", sfx_path=str(sfx))
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "[2:a]" in graph, "SFX must be added as the input after the narration"
+    assert "amix=inputs=2" in graph
+    assert "alimiter=limit=0.95" in graph
+    assert cmd[cmd.index("-map") + 1] == "[v]"
+
+
+def test_build_cmd_sfx_plus_music_keeps_input_indices_straight(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")
+    monkeypatch.setenv("ENABLE_DUCKING", "false")  # exercise the flat 3-way mix
+    monkeypatch.setenv("MUSIC_VOLUME", "0.10")
+    sfx = tmp_path / "sfx_track.wav"
+    sfx.write_bytes(b"RIFFfake")
+    cmd = assembly._build_cmd(_ordered(2), "narr.mp3", 9.0, "out.mp4",
+                              sfx_path=str(sfx), music_path="bed.mp3")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    # inputs: 0,1 clips · 2 narration · 3 sfx · 4 music
+    assert "[4:a]volume=0.10[abg]" in graph
+    assert "[2:a][3:a][abg]amix=inputs=3" in graph
+    assert "alimiter" in graph
+
+
+def test_build_cmd_without_sfx_is_unchanged(monkeypatch):
+    """No SFX → no limiter and no extra input: the path that ships today must not shift."""
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")
+    cmd = assembly._build_cmd(_ordered(2), "narr.mp3", 9.0, "out.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "alimiter" not in graph
+    assert cmd[cmd.index("-map", cmd.index("-map") + 1) + 1] == "2:a"
+
+
 # --- live end-to-end render ------------------------------------------------------------
 
 def test_live_full_reel(tmp_path):

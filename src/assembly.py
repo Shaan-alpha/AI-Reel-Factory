@@ -194,9 +194,62 @@ def _apply_seamless_loop(ordered: list[tuple[str, float]]) -> list[tuple[str, fl
     return ordered
 
 
+def _sfx_enabled() -> bool:
+    return config.get_bool("ENABLE_SFX", True)
+
+
+def _sfx_volume() -> float:
+    """SFX level, clamped to [0, 1]. Deliberately LOW: `amix ... normalize=0` sums its inputs
+    without headroom, so a loud marker on top of a near-full-scale narration peak clips."""
+    try:
+        v = float(config.get("SFX_VOLUME", "0.18"))
+    except (TypeError, ValueError):
+        v = 0.18
+    return max(0.0, min(v, 1.0))
+
+
+def _sfx_every_n_cuts() -> int:
+    """Mark every Nth cut, not every cut. A transition sting on all ~9 cuts of a 28s reel reads
+    as cheap; sparse markers punctuate instead of nagging."""
+    try:
+        n = int(config.get("SFX_EVERY_N_CUTS", "2"))
+    except (TypeError, ValueError):
+        n = 2
+    return max(1, n)
+
+
+# Keep the opening clean: the first frames carry the hook, the single highest-leverage
+# retention moment — a whoosh over it competes with the line that has to land.
+_SFX_LEAD_IN = 1.5
+
+
+def _build_sfx_events(ordered: list[tuple[str, float]], duration: float) -> list[dict]:
+    """SFX events on a sparse subset of the clip cuts. Times mirror `_build_cmd`'s xfade offsets
+    (i * (slice - xfade)) so a sting lands ON the cut, not beside it."""
+    vol = _sfx_volume()
+    if vol <= 0.0:
+        return []
+    slice_s = _clip_seconds()
+    xf = _xfade_seconds() if _xfade_enabled() else 0.0
+    step = max(0.1, slice_s - xf)
+    every = _sfx_every_n_cuts()
+
+    events: list[dict] = []
+    for i in range(1, len(ordered)):
+        if i % every:
+            continue
+        t = round(i * step, 2)
+        if t < _SFX_LEAD_IN or t >= duration - 0.5:
+            continue
+        name = "click" if (i // every) % 2 else "whoosh"
+        events.append({"time": t, "name": name, "volume": vol})
+    return events
+
+
 def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: float, out_path: str,
-               music_path: str | None = None, polish: bool = True) -> list[str]:
-    """Construct the ffmpeg argv: normalize → concat/xfade → grade → trim → mux narration.
+               music_path: str | None = None, sfx_path: str | None = None,
+               polish: bool = True) -> list[str]:
+    """Construct the ffmpeg argv: normalize → concat/xfade → grade → trim → mux narration + SFX + music.
 
     `ordered` is [(clip_path, start_offset)] from _ordered_clips; each slice is trimmed at its
     own start so repeated clips show different segments. `polish=False` forces the plain graph
@@ -232,32 +285,56 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
         cmd += ["-i", clip]
     cmd += ["-i", audio_path]  # narration = input n
 
+    # Audio inputs, in a FIXED order after the clips: narration (n) → SFX → music → logo.
+    # `duration=first` on every amix keys the mix to the narration, so the reel still ends with
+    # the voice; `normalize=0` keeps the voice at unity instead of being halved by the mix.
+    curr_idx = n
+    audio_inputs = [f"[{curr_idx}:a]"]
+
+    has_sfx = bool(sfx_path and os.path.isfile(sfx_path))
+    if has_sfx:
+        cmd += ["-i", sfx_path]
+        curr_idx += 1
+        audio_inputs.append(f"[{curr_idx}:a]")
+
+    # `normalize=0` sums without headroom, so anything layered over the narration can push past
+    # full scale. Cap the SUM with a lookahead limiter rather than pre-attenuating the voice.
+    mix_out = "[amixed]" if has_sfx else "[aout]"
     if music_path:
-        # music looped under the narration. With polish on, sidechain-DUCK it so it dips while the
-        # voice speaks and swells between sentences (clearer speech = retention); the fail-soft retry
-        # (polish=False) uses today's flat mix. MUSIC_VOLUME sets the base bed level.
         vol = config.get("MUSIC_VOLUME", "0.12")
-        cmd += ["-stream_loop", "-1", "-i", music_path]  # music = input n+1
+        cmd += ["-stream_loop", "-1", "-i", music_path]
+        curr_idx += 1
         if polish and _ducking_enabled():
             parts.append(f"[{n}:a]asplit=2[vmix][vkey]")
-            parts.append(f"[{n + 1}:a]volume={vol}[bg]")
+            parts.append(f"[{curr_idx}:a]volume={vol}[bg]")
             parts.append("[bg][vkey]sidechaincompress=threshold=0.03:ratio=8:"
                          "attack=20:release=300[duck]")
-            parts.append("[vmix][duck]amix=inputs=2:duration=first:dropout_transition=3:"
-                         "normalize=0[aout]")
+            m_inputs = [f"[{i}:a]" for i in range(n + 1, curr_idx)] + ["[duck]"]
+            parts.append(f"[vmix]{''.join(m_inputs)}amix=inputs={len(m_inputs)+1}"
+                         f":duration=first:dropout_transition=3:normalize=0{mix_out}")
         else:
-            parts.append(f"[{n + 1}:a]volume={vol}[abg]")
-            parts.append(f"[{n}:a][abg]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]")
+            parts.append(f"[{curr_idx}:a]volume={vol}[abg]")
+            all_in = "".join(audio_inputs) + "[abg]"
+            parts.append(f"{all_in}amix=inputs={len(audio_inputs)+1}"
+                         f":duration=first:dropout_transition=3:normalize=0{mix_out}")
+        audio_map = "[aout]"
+    elif has_sfx:
+        all_in = "".join(audio_inputs)
+        parts.append(f"{all_in}amix=inputs={len(audio_inputs)}"
+                     f":duration=first:dropout_transition=3:normalize=0{mix_out}")
         audio_map = "[aout]"
     else:
         audio_map = f"{n}:a"
+
+    if has_sfx:
+        parts.append("[amixed]alimiter=limit=0.95:level=0[aout]")
 
     # Brand-bug overlay: composite the logo (added as the LAST input so it never shifts the
     # voice/music indices) small + semi-transparent in the top-right. Fail-soft + polish-gated.
     video_label = "[v]"
     logo_path = _brand_logo() if polish else None
     if logo_path:
-        logo_idx = n + 1 + (1 if music_path else 0)
+        logo_idx = curr_idx + 1
         cmd += ["-loop", "1", "-i", logo_path]
         h = config.get("BRAND_LOGO_HEIGHT", "150")
         op = config.get("BRAND_LOGO_OPACITY", "0.55")
@@ -293,10 +370,23 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
     overlap = _xfade_seconds() if _xfade_enabled() else 0.0
     ordered = _apply_seamless_loop(_ordered_clips(clip_paths, duration, overlap=overlap))
     music = _pick_music(os.path.abspath(audio_path))
-    cmd = _build_cmd(ordered, audio_path, duration, out_path, music_path=music)
+    sfx_path = None
+    if _sfx_enabled():
+        try:
+            from src import audio_sfx
+            events = _build_sfx_events(ordered, duration)
+            if events:
+                sfx_path = os.path.join(os.path.dirname(os.path.abspath(out_path)), "sfx_track.wav")
+                audio_sfx.mix_sfx_events(events, duration, sfx_path)
+        except Exception as e:  # noqa: BLE001 — SFX is best-effort (rule 11/14)
+            log.warning("assembly: SFX track generation failed (%s); proceeding without SFX", e)
+            sfx_path = None
 
-    log.info("assembly: rendering %s (%.1fs, %d slices from %d clips, music=%s)",
-             out_path, duration, len(ordered), len(clip_paths), os.path.basename(music) if music else "none")
+    cmd = _build_cmd(ordered, audio_path, duration, out_path, music_path=music, sfx_path=sfx_path)
+
+    log.info("assembly: rendering %s (%.1fs, %d slices from %d clips, music=%s, sfx=%s)",
+             out_path, duration, len(ordered), len(clip_paths),
+             os.path.basename(music) if music else "none", "yes" if sfx_path else "no")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         # Fail-soft (rules 11, 14): a polished filtergraph error must never lose the reel.
