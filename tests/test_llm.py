@@ -43,12 +43,14 @@ def test_raises_when_all_providers_fail(monkeypatch):
 
 
 def test_generate_grounded_returns_text(monkeypatch):
-    monkeypatch.setattr(llm, "_gen_gemini_grounded", lambda prompt, *, max_tokens: "grounded")
+    monkeypatch.setattr(llm, "_gen_gemini_grounded",
+                        lambda prompt, *, max_tokens, model=None: "grounded")
     assert llm.generate_grounded("x") == "grounded"
 
 
 def test_generate_grounded_raises_on_empty(monkeypatch):
-    monkeypatch.setattr(llm, "_gen_gemini_grounded", lambda prompt, *, max_tokens: "   ")
+    monkeypatch.setattr(llm, "_gen_gemini_grounded",
+                        lambda prompt, *, max_tokens, model=None: "   ")
     with pytest.raises(RuntimeError, match="empty"):
         llm.generate_grounded("x")
 
@@ -167,3 +169,15 @@ def test_github_models_never_uses_gh_pat(monkeypatch):
     assert llm._github_key() is None
     assert llm._github_enabled() is False
 
+
+
+def test_generate_grounded_passes_a_model_override(monkeypatch):
+    """Free-tier grounding quota is metered per model, so callers must be able to aim a grounded
+    call at a specific one."""
+    seen = {}
+    monkeypatch.setattr(llm, "_gen_gemini_grounded",
+                        lambda prompt, *, max_tokens, model=None: seen.update(model=model) or "ok")
+    llm.generate_grounded("x", model="gemini-2.5-pro")
+    assert seen["model"] == "gemini-2.5-pro"
+    llm.generate_grounded("x")
+    assert seen["model"] is None   # None = fall through to GEMINI_MODEL

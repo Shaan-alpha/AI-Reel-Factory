@@ -157,3 +157,26 @@ def test_strict_mode_does_not_affect_a_real_verdict(monkeypatch):
     monkeypatch.setenv("FACTCHECK_STRICT", "true")
     _mock_grounded(monkeypatch, '{"checked": 3, "unsupported": [], "verdict": "pass"}')
     assert factcheck.verify("Body.", [])["ok"] is True
+
+
+def test_default_model_is_none_so_the_shared_free_model_is_used(monkeypatch):
+    """Measured 2026-07-27: every model except gemini-2.5-flash returns `limit: 0` (no free
+    allowance) on this account. A non-None default would make the gate fail every single time —
+    permanently fail-open, which is worse than having no gate."""
+    monkeypatch.delenv("FACTCHECK_MODEL", raising=False)
+    assert factcheck._model() is None
+
+    seen = {}
+    monkeypatch.setattr(factcheck.llm, "generate_grounded",
+                        lambda p, **k: seen.update(k) or '{"checked":1,"unsupported":[],"verdict":"pass"}')
+    factcheck.verify("Body.", [])
+    assert seen["model"] is None, "must fall through to GEMINI_MODEL, the only free grounded model"
+
+
+def test_model_override_is_honoured(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_MODEL", "gemini-2.5-pro")
+    seen = {}
+    monkeypatch.setattr(factcheck.llm, "generate_grounded",
+                        lambda p, **k: seen.update(k) or '{"checked":1,"unsupported":[],"verdict":"pass"}')
+    factcheck.verify("Body.", [])
+    assert seen["model"] == "gemini-2.5-pro"

@@ -67,12 +67,17 @@ def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
     return resp.text or ""
 
 
-def _gen_gemini_grounded(prompt: str, *, max_tokens: int) -> str:
+def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = None) -> str:
     """Gemini with Google Search grounding — live web research with real sources.
 
     Note: the google_search tool can't combine with forced-JSON mime, so the caller must
     ask for JSON in the prompt text and parse it (grounding still makes the model use real,
     current facts + cite genuine sources).
+
+    `model` overrides GEMINI_MODEL for this call. Free-tier quota is metered
+    **per model** (quotaId GenerateRequestsPerDayPerProjectPerModel), so pointing a second
+    grounded consumer at a different model gives it its OWN daily budget instead of competing
+    with ideation and the scriptwriter for one shared 20/day bucket (rule 13).
     """
     from google.genai import types
 
@@ -85,15 +90,17 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int) -> str:
         thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
     resp = _gemini_client().models.generate_content(
-        model=_GEMINI_MODEL, contents=prompt, config=cfg
+        model=model or _GEMINI_MODEL, contents=prompt, config=cfg
     )
     return resp.text or ""
 
 
-def generate_grounded(prompt: str, *, max_tokens: int = 4096) -> str:
+def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None = None) -> str:
     """Generate with live web research (Gemini Google Search grounding). Raises on failure so
-    callers can fall back to plain generate(). Gemini-only — Groq has no grounding."""
-    text = _gen_gemini_grounded(prompt, max_tokens=max_tokens)
+    callers can fall back to plain generate(). Gemini-only — Groq has no grounding.
+
+    Pass `model` to spend a DIFFERENT model's free-tier quota (see _gen_gemini_grounded)."""
+    text = _gen_gemini_grounded(prompt, max_tokens=max_tokens, model=model)
     if not text or not text.strip():
         raise RuntimeError("llm.generate_grounded: empty response")
     return text

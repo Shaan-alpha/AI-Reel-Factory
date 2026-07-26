@@ -73,6 +73,19 @@ def _parse(raw: str) -> dict:
     return json.loads(raw[start : end + 1], strict=False)
 
 
+def _model() -> str | None:
+    """Which model runs the check. None = use GEMINI_MODEL.
+
+    Free-tier quota IS metered per model, which suggests pointing the checker at its own model
+    to avoid competing with ideation and the scriptwriter. Measured 2026-07-27: that does not
+    work on this account. Every alternative returns `limit: 0` — no free allowance at all —
+    while `gemini-2.5-flash` is the only grounded model with a real free budget (20/day). A
+    non-default here therefore makes the gate fail EVERY time, i.e. permanently fail-open, which
+    is worse than no gate. Leave it unset unless the account has paid quota.
+    """
+    return config.get("FACTCHECK_MODEL") or None
+
+
 def enabled() -> bool:
     return config.get_bool("ENABLE_FACT_CHECK", True)
 
@@ -94,7 +107,7 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
     prompt = _PROMPT.format(body=f"{title}\n\n{body}".strip(), sources=src_block)
 
     try:
-        data = _parse(llm.generate_grounded(prompt, max_tokens=2048))
+        data = _parse(llm.generate_grounded(prompt, max_tokens=2048, model=_model()))
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
         # Grounded search shares one free-tier bucket with ideation and the scriptwriter, so a
         # busy day can exhaust it and leave the gate unable to run. FACTCHECK_STRICT decides
