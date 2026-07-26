@@ -99,6 +99,16 @@ jobs:
           ENABLE_GH_MODELS: ${{ vars.ENABLE_GH_MODELS || 'false' }}  # opt-in: middle fallback
           PREFER_GH_MODELS: ${{ vars.PREFER_GH_MODELS || 'false' }}  # opt-in: try it first
           GH_MODEL: ${{ vars.GH_MODEL || 'openai/gpt-4o-mini' }}     # publisher/model form is required
+          # Expressive delivery. Tag support differs per engine: Chirp reads [pause] via markup,
+          # Gemini TTS reads [sarcastic]-style tags, edge/Kokoro read neither.
+          GOOGLE_TTS_SPEAKING_RATE: ${{ vars.GOOGLE_TTS_SPEAKING_RATE }}  # 0.25-2.0, unset = default
+          ENABLE_PAUSE_MARKUP: ${{ vars.ENABLE_PAUSE_MARKUP || 'true' }}  # [pause] -> Chirp markup
+          MAX_PAUSE_TAGS: ${{ vars.MAX_PAUSE_TAGS || '3' }}
+          MAX_STYLE_TAGS: ${{ vars.MAX_STYLE_TAGS || '3' }}
+          VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts' }}  # free tier
+          GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}    # bare name, not the Chirp form
+          GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}       # optional; isolates TTS quota
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
         run: python -m src.production make
