@@ -79,3 +79,91 @@ def test_json_flag_threads_through(monkeypatch):
     out = llm.generate("return JSON", json=True, max_tokens=256)
     assert out == '{"ok": true}'
     assert captured == {"json": True, "max_tokens": 256}
+
+
+def test_github_models_first_when_preferred(monkeypatch):
+    monkeypatch.setenv("GH_MODELS_KEY", "fake_models_token")
+    monkeypatch.setenv("PREFER_GH_MODELS", "true")
+    monkeypatch.setattr(llm, "_gen_github_models", lambda *a, **k: "github-text")
+    monkeypatch.setattr(llm, "_gen_gemini", lambda *a, **k: "gemini-text")
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+    assert llm.generate("hi") == "github-text"
+
+
+def test_github_models_is_opt_in_not_key_presence(monkeypatch):
+    """A token alone must NOT enlist the provider: GITHUB_TOKEN shows up in Actions
+    environments incidentally, and a doomed provider in the chain delays the real failover."""
+    monkeypatch.setenv("GITHUB_TOKEN", "incidental_actions_token")
+    monkeypatch.delenv("ENABLE_GH_MODELS", raising=False)
+    monkeypatch.delenv("PREFER_GH_MODELS", raising=False)
+    called = []
+    monkeypatch.setattr(llm, "_gen_github_models",
+                        lambda *a, **k: called.append(1) or "github-text")
+    monkeypatch.setattr(llm, "_gen_gemini", _raise("gemini down"))
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+
+    assert llm.generate("hi") == "groq-text"  # straight to Groq
+    assert called == [], "GitHub Models was called without being opted in"
+
+
+def test_github_models_enabled_sits_between_gemini_and_groq(monkeypatch):
+    monkeypatch.setenv("GH_MODELS_KEY", "fake_models_token")
+    monkeypatch.setenv("ENABLE_GH_MODELS", "true")
+    monkeypatch.setattr(llm, "_gen_gemini", _raise("gemini down"))
+    monkeypatch.setattr(llm, "_gen_github_models", lambda *a, **k: "github-text")
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+    assert llm.generate("hi") == "github-text"
+
+
+def test_github_models_posts_to_github_host_with_publisher_prefixed_model(monkeypatch):
+    """The retired Azure preview host and a bare model name both fail on this API, so pin both."""
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        seen.update(url=url, headers=headers, payload=json)
+        return _Resp()
+
+    monkeypatch.setenv("GH_MODELS_KEY", "fake_models_token")
+    monkeypatch.delenv("GH_MODEL", raising=False)
+    monkeypatch.setattr(llm.requests, "post", _fake_post)
+
+    assert llm._gen_github_models("hi", json=False, max_tokens=64) == "ok"
+    assert seen["url"] == "https://models.github.ai/inference/chat/completions"
+    assert seen["payload"]["model"] == "openai/gpt-4o-mini"
+    assert seen["headers"]["Authorization"] == "Bearer fake_models_token"
+
+
+def test_github_models_adds_publisher_prefix_to_bare_model(monkeypatch):
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setenv("GH_MODELS_KEY", "k")
+    monkeypatch.setenv("GH_MODEL", "gpt-4o")  # operator forgot the publisher
+    monkeypatch.setattr(llm.requests, "post",
+                        lambda url, **kw: (seen.update(kw["json"]), _Resp())[1])
+    llm._gen_github_models("hi", json=False, max_tokens=8)
+    assert seen["model"] == "openai/gpt-4o"
+
+
+def test_github_models_never_uses_gh_pat(monkeypatch):
+    """GH_PAT is the Telegram bot's Actions read+write token; this repo's Actions hold the
+    YouTube/Supabase/Telegram secrets, so it must never leave for an inference endpoint."""
+    monkeypatch.delenv("GH_MODELS_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("GH_PAT", "ghp_actions_read_write")
+    assert llm._github_key() is None
+    assert llm._github_enabled() is False
+
