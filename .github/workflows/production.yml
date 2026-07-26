@@ -96,6 +96,8 @@ jobs:
           ENABLE_PAUSE_MARKUP: ${{ vars.ENABLE_PAUSE_MARKUP || 'true' }}  # [pause] -> Chirp markup
           MAX_PAUSE_TAGS: ${{ vars.MAX_PAUSE_TAGS || '3' }}
           MAX_STYLE_TAGS: ${{ vars.MAX_STYLE_TAGS || '3' }}
+          SFX_DIR: ${{ vars.SFX_DIR }}                              # where generated SFX wavs cache
+          CAPTION_FONT_FILE: ${{ vars.CAPTION_FONT_FILE }}          # ttf for libass + stat cards
           VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only
           GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts' }}  # free tier
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Zubenelgenubi' }}  # chosen by ear; bare name

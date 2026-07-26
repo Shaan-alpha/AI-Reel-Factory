@@ -661,3 +661,56 @@ def test_chirp_is_still_the_first_fallback(monkeypatch, tmp_path):
                         lambda *a: (order.append("google"), ("chirp.wav", 2.0))[1])
     path, _ = voice.synthesize("hello there", str(tmp_path))
     assert order == ["gemini", "google"] and path == "chirp.wav"
+
+
+# --- audit fixes: pause beats on the primary engine, byte guards -------------------------
+
+def test_pause_tags_become_ellipses_for_gemini():
+    """Pause tags are Chirp's native syntax, but Chirp is only the FALLBACK now. If they were
+    merely stripped, the comic beat would vanish on the primary engine — so they degrade to an
+    ellipsis, which every engine reads as a deliberate pause and none can read aloud."""
+    out = voice._style_text("It happened. [pause long] Here's why it matters.")
+    assert "[pause" not in out
+    assert "..." in out
+    assert out.startswith("It happened.")
+
+
+def test_style_tags_survive_alongside_the_ellipsis():
+    out = voice._style_text("Sure. [sarcastic] Brilliant. [pause] Anyway.")
+    assert "[sarcastic]" in out
+    assert "..." in out
+    assert "[pause]" not in out
+
+
+def test_chirp_still_gets_native_pause_markup():
+    """Chirp's own markup is higher fidelity than an ellipsis, so it keeps the real tag."""
+    out = voice._pause_markup("It happened. [pause long] Here's why.")
+    assert "[pause long]" in out
+    assert "..." not in out
+
+
+def test_gemini_rejects_oversized_input(monkeypatch, tmp_path):
+    """The API caps text and prompt at 4000 bytes each and 8000 combined. Fail before the call
+    with a clear reason rather than eating an opaque 400 and burning a request."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("VOICE_STYLE_PROMPT", "x" * 4100)
+    _fake_genai(monkeypatch, {})
+    with pytest.raises(RuntimeError, match="too long"):
+        voice._synthesize_gemini("hello there", str(tmp_path))
+
+
+def test_gemini_rejects_oversized_script(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.delenv("VOICE_STYLE_PROMPT", raising=False)
+    _fake_genai(monkeypatch, {})
+    with pytest.raises(RuntimeError, match="too long"):
+        voice._synthesize_gemini("word " * 1200, str(tmp_path))
+
+
+def test_gemini_accepts_a_real_length_script(monkeypatch, tmp_path):
+    """A 75-word script plus the default style prompt must sit comfortably inside the limits."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.delenv("VOICE_STYLE_PROMPT", raising=False)
+    _fake_genai(monkeypatch, {})
+    path, _ = voice._synthesize_gemini(" ".join(["word"] * 75), str(tmp_path))
+    assert os.path.exists(path)

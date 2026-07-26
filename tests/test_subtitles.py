@@ -339,3 +339,21 @@ def test_live_caption_burn(monkeypatch, tmp_path):
     ).stdout
     assert "width=1080" in probe and "height=1920" in probe and "codec_type=audio" in probe
     assert abs(assembly.probe_duration(out) - dur) < 1.6
+
+
+def test_burned_text_strips_delivery_tags():
+    """A tag that leaks into the title or a key_point would be BURNED onto the video as
+    literal '[SARCASTIC]'. The scriptwriter is now told to emit tags, so this must be guarded
+    at the render surface, not just hoped away in the prompt."""
+    banner = subtitles._hook_banner_text("[SARCASTIC] Gas Rule Explained")
+    assert "[" not in banner and "SARCASTIC" not in banner
+    assert "GAS" in banner and "EXPLAINED" in banner
+
+    card = subtitles._hook_banner_text("[dry] Rs 2 crore", max_chars=18, max_lines=2)
+    assert "[" not in card and "DRY" not in card
+    assert "RS 2 CRORE" in card
+
+
+def test_burned_text_survives_a_tag_only_string():
+    """All-tag input must yield nothing to draw rather than an empty box."""
+    assert subtitles._hook_banner_text("[sarcastic]") == ""

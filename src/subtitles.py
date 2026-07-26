@@ -33,6 +33,10 @@ log = logging.getLogger(__name__)
 
 # Symbols/emoji libass' default font can't render → tofu boxes. Strip them from the burned
 # banner only (the YouTube *title* keeps its emoji). Non-BMP chars + common symbol/emoji blocks.
+# Inline delivery tags the scriptwriter emits for the TTS engine ([pause], [sarcastic], ...).
+# They are stage direction for the voice and must never be drawn on screen.
+_DELIVERY_TAG = re.compile(r"\[[^\]]{0,24}\]")
+
 _NON_RENDERABLE = re.compile(
     "[^\u0020-\uffff]"   # astral plane (most emoji)
     "|[\u2190-\u27bf]"   # arrows, technical, dingbats, misc emoji
@@ -89,7 +93,11 @@ def _hook_banner_text(title: str, max_chars: int = 16, max_lines: int = 3) -> st
     Returns the ASS-ready string (lines joined with '\\N'), or '' if nothing renderable
     remains. Strips characters the burn font can't draw so the banner never shows tofu boxes.
     """
-    cleaned = _NON_RENDERABLE.sub("", title or "")
+    # Strip inline delivery tags FIRST. The scriptwriter is instructed to emit [pause]/[sarcastic],
+    # and if one leaks into the title or a key point it would be BURNED onto the video as literal
+    # "[SARCASTIC]" — brackets are plain ASCII, so _NON_RENDERABLE does not catch them.
+    cleaned = _DELIVERY_TAG.sub(" ", title or "")
+    cleaned = _NON_RENDERABLE.sub("", cleaned)
     cleaned = _ass_escape(re.sub(r"\s+", " ", cleaned)).upper()
     if not cleaned:
         return ""

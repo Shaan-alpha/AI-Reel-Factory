@@ -62,6 +62,9 @@ _GOOGLE_TTS_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 
 # Gemini Developer API TTS returns raw PCM at this rate (16-bit mono, no container).
 _GEMINI_TTS_RATE = 24000
+# Documented request limits: text and prompt <=4000 bytes each, <=8000 bytes combined.
+_GEMINI_MAX_FIELD_BYTES = 4000
+_GEMINI_MAX_TOTAL_BYTES = 8000
 # Structured per Google's own style-prompt guidance: an audio profile, then director's notes on
 # pacing and inflection, then paralinguistic detail. Their docs are explicit that naming an
 # emotion ("sarcastic") underperforms describing what it SOUNDS like -- and for this channel the
@@ -123,6 +126,10 @@ def _split_sentences(text: str) -> list[str]:
 
 def _synthesize_kokoro(text: str, out_path: str) -> float:
     """Write a WAV via Kokoro; return measured duration (s). Raises if no audio.
+
+    NOTE: Kokoro is the LAST link in the chain now, so ENABLE_DRAMATIC_PACING only takes effect
+    if gemini, Chirp AND edge-tts have all failed. Timing on the primary path comes from the
+    scriptwriter's pause tags and ellipses instead.
 
     With dramatic pacing on (ENABLE_DRAMATIC_PACING, default), each sentence is synthesized
     separately and joined with a short silence — a LONGER beat before the final payoff line — so
@@ -271,8 +278,17 @@ def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
     if not key:
         raise RuntimeError("gemini tts: GEMINI_TTS_API_KEY / GEMINI_API_KEY not set")
 
-    spoken = _style_text(text)  # keep style tags, drop Chirp's pause tags
+    spoken = _style_text(text)  # keep style tags, degrade pause tags to an ellipsis
     style = config.get("VOICE_STYLE_PROMPT", _DEFAULT_STYLE_PROMPT)
+
+    # The API caps text and prompt at 4000 bytes each, 8000 combined. Check before spending a
+    # request: the free tier is only 10/day, so an opaque 400 would cost real quota (rule 13).
+    t_bytes, p_bytes = len(spoken.encode("utf-8")), len(style.encode("utf-8"))
+    if t_bytes > _GEMINI_MAX_FIELD_BYTES or p_bytes > _GEMINI_MAX_FIELD_BYTES \
+            or t_bytes + p_bytes > _GEMINI_MAX_TOTAL_BYTES:
+        raise RuntimeError(
+            f"gemini tts: input too long (script {t_bytes}B, style {p_bytes}B; limits are "
+            f"{_GEMINI_MAX_FIELD_BYTES}B each / {_GEMINI_MAX_TOTAL_BYTES}B combined)")
     model = config.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
     # Zubenelgenubi ("Casual") was chosen by ear over Kore/Schedar/Algenib/Charon — it is the
     # channel's voice identity now, not an incidental default. Re-pick via tools/tune_voice.py.
@@ -380,7 +396,9 @@ def _engine_kokoro(text: str, out_dir: str) -> tuple[str, float]:
 # Everything outside these allow-lists is stripped. An invented tag must never reach an API
 # (it 400s the request) nor the synthesiser (it gets read aloud).
 _PAUSE_TAGS = ("pause short", "pause", "pause long")
-_STYLE_TAGS = ("sarcastic", "deadpan", "dry", "amused", "flat", "sighs", "laughs", "beat")
+# "beat" deliberately excluded: it is a TIMING direction, so it belongs with the pause family,
+# not here. Keeping it in the style list made the two families overlap confusingly.
+_STYLE_TAGS = ("sarcastic", "deadpan", "dry", "amused", "flat", "sighs", "laughs")
 
 _TAG_RE = re.compile(r"\[([^\]]{1,24})\]|<[^>]{1,60}>")
 
@@ -392,11 +410,17 @@ def _tag_limit(key: str, default: int) -> int:
         return default
 
 
-def _filter_tags(text: str, keep: tuple[str, ...], limit: int) -> str:
+def _filter_tags(text: str, keep: tuple[str, ...], limit: int,
+                 pause_as_ellipsis: bool = False) -> str:
     """Keep at most `limit` allow-listed bracket tags; strip every other tag.
 
     The cap is enforced HERE rather than trusted to the prompt: a prompt asks, a guard is what
-    makes it true. Over-tagging a 25-30s Short reads as sluggish."""
+    makes it true. Over-tagging a 25-30s Short reads as sluggish.
+
+    `pause_as_ellipsis` degrades a pause tag to "..." instead of deleting it. Bracket pause
+    syntax is Chirp-only, but Chirp is no longer the primary engine — without this the comic
+    beat would silently vanish on the engine that actually ships. An ellipsis is plain text, so
+    every engine reads it as a deliberate pause and none can read it aloud."""
     kept = 0
 
     def _sub(m: re.Match) -> str:
@@ -407,6 +431,8 @@ def _filter_tags(text: str, keep: tuple[str, ...], limit: int) -> str:
             if token in keep and kept < limit:
                 kept += 1
                 return f"[{token}]"
+            if pause_as_ellipsis and token in _PAUSE_TAGS:
+                return " ... "
         return ""
 
     return re.sub(r"\s+", " ", _TAG_RE.sub(_sub, text)).strip()
@@ -423,8 +449,10 @@ def _pause_markup(text: str) -> str:
 
 
 def _style_text(text: str) -> str:
-    """Gemini TTS input: keep style tags, drop pause tags."""
-    return _filter_tags(text, _STYLE_TAGS, _tag_limit("MAX_STYLE_TAGS", 3))
+    """Gemini TTS input: keep style tags; pause tags degrade to an ellipsis so the beat survives
+    on the primary engine (Chirp's bracket pause syntax means nothing here)."""
+    return _filter_tags(text, _STYLE_TAGS, _tag_limit("MAX_STYLE_TAGS", 3),
+                        pause_as_ellipsis=True)
 
 
 def _has_pause_tag(text: str) -> bool:
