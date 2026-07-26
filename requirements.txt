@@ -21,6 +21,7 @@ edge-tts==7.2.8               # narration fallback (free, no key)
 # install FFmpeg as a system dep (winget Gyan.FFmpeg / apt). On CI, install it onto PATH.
 faster-whisper==1.2.1         # word-level timestamps for karaoke captions
 numpy==2.4.6                  # Kokoro PCM handling (also a transitive dep)
+pillow==12.2.0                # graphics.py stat-card PNGs (ENABLE_GRAPHIC_CARDS overlay path)
 
 # Publishing (Module 9) + analytics (Module 10)
 google-api-python-client==2.197.0  # YouTube Data API v3

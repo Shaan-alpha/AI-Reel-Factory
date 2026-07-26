@@ -88,6 +88,17 @@ jobs:
           PAUSE_BETWEEN: ${{ vars.PAUSE_BETWEEN || '0.18' }}        # inter-sentence silence (s)
           PAUSE_BEFORE_PAYOFF: ${{ vars.PAUSE_BEFORE_PAYOFF || '0.5' }}  # dramatic beat before the last line (s)
           MUSIC_VOLUME: ${{ vars.MUSIC_VOLUME || '0.10' }}          # bgm loudness under narration
+          ENABLE_SFX: ${{ vars.ENABLE_SFX || 'true' }}              # transition stings on clip cuts
+          SFX_VOLUME: ${{ vars.SFX_VOLUME || '0.18' }}              # 0..1; 0 disables. >0.3 fights the narration
+          SFX_EVERY_N_CUTS: ${{ vars.SFX_EVERY_N_CUTS || '2' }}     # sting every Nth cut (1 = every cut, busy)
+          ENABLE_GRAPHIC_CARDS: ${{ vars.ENABLE_GRAPHIC_CARDS || 'false' }}  # PIL stat cards vs ASS text cards
+          ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append core channel tags after SEO tags
+          # Optional 3rd LLM provider. GH_ prefix is REQUIRED: GitHub rejects secret/variable
+          # names starting with GITHUB_. Inert unless ENABLE_GH_MODELS/PREFER_GH_MODELS is true.
+          GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}               # PAT scoped to `models: read` only
+          ENABLE_GH_MODELS: ${{ vars.ENABLE_GH_MODELS || 'false' }}  # opt-in: middle fallback
+          PREFER_GH_MODELS: ${{ vars.PREFER_GH_MODELS || 'false' }}  # opt-in: try it first
+          GH_MODEL: ${{ vars.GH_MODEL || 'openai/gpt-4o-mini' }}     # publisher/model form is required
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
         run: python -m src.production make
