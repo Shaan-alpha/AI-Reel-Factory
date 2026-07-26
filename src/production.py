@@ -27,6 +27,7 @@ from src import (
     assembly,
     config,
     db,
+    factcheck,
     ideation_fallback,
     publish_youtube,
     scriptwriter,
@@ -37,6 +38,14 @@ from src import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("production")
+
+
+class FactCheckFailed(RuntimeError):
+    """A finished script contained a claim the independent check could not support.
+
+    Raised instead of returning quietly so run_production's per-reel handler treats it like any
+    other failure: log it, Telegram-alert the operator, skip that reel, keep the batch alive
+    (rule 14). A distinct type so the alert says WHY rather than 'RuntimeError'."""
 
 
 def _source_domain(sources: list[str] | None) -> str | None:
@@ -118,6 +127,16 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         return existing["external_id"], existing.get("url") or ""
 
     script = scriptwriter.write_script(idea)
+
+    # Independent fact-check BEFORE any render work: this is the cheapest possible place to
+    # abort, and since the channel moved to truth-first commentary (it may now reach a verdict
+    # and assign responsibility) verification is a gate rather than advice. Accuracy is the
+    # monetization gate (rule 6) — a strike costs far more than a skipped reel.
+    check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "")
+    if not check["ok"]:
+        db.set_idea_status(idea_id, "rejected")
+        raise FactCheckFailed(
+            f"idea {idea_id} failed fact check: {factcheck.summary(check)}")
 
     work = os.path.join(work_root, f"idea_{idea_id}")
     os.makedirs(work, exist_ok=True)

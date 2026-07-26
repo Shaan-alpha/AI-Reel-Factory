@@ -44,7 +44,9 @@ REQUIRED = (
 DEFAULTS = {
     "CHANNEL_NAME": "But It Matters",
     "NICHE": "impact-news",
-    "NICHE_LEAN": "soft-positive",
+    # NICHE_LEAN ("soft-positive") removed 2026-07-27: it was read by nothing, and the operator's
+    # policy is now truth-first rather than tone-first. What replaces it is a real gate —
+    # factcheck.verify() re-checks every finished script (rule 6).
     "CONTENT_STYLE": "daily-impact-explainer",
     "DIGEST_HOUR_UTC": "02",
     "ENABLE_FALLBACK_IDEATION": "true",

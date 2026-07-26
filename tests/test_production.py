@@ -22,9 +22,17 @@ SCRIPT = {"script_id": 70, "script_body": "body words " * 20,
           "caption": "cap https://x.example\n#Shorts", "hashtags": ["#ISRO", "#Shorts"]}
 
 
-def _wire_happy(monkeypatch, existing_post=None):
+def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     """Mock the whole chain so produce_one runs without side effects."""
     monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: SCRIPT)
+    # MUST be mocked: factcheck.verify() calls grounded Gemini. Left real, the suite makes live
+    # network calls and burns the shared 20/day grounded quota (rule 13) — and passes for the
+    # wrong reason, because a 429 takes the fail-open path.
+    monkeypatch.setattr(production.factcheck, "verify",
+                        lambda body, sources=None, title="": {
+                            "ok": factcheck_ok,
+                            "unsupported": [] if factcheck_ok else ["the 40% figure is invented"],
+                            "checked": 3, "reason": "pass" if factcheck_ok else "fail"})
     monkeypatch.setattr(production.db, "get_published_post_for_idea",
                         lambda idea_id, plat="youtube": existing_post)
     monkeypatch.setattr(production.voice, "synthesize", lambda body, d: ("a.mp3", 30.0))
@@ -218,3 +226,59 @@ def test_make_on_demand_nothing_approved(monkeypatch):
     monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
     production.make_on_demand()
     assert any("Nothing approved" in n for n in notes)
+
+
+# --- fact-check gate --------------------------------------------------------------------
+
+def test_factcheck_failure_blocks_the_reel_before_any_render(monkeypatch, tmp_path):
+    """The gate sits before voice/visuals/render so a bad script costs one LLM call, not a
+    full render and upload."""
+    produced = _wire_happy(monkeypatch, factcheck_ok=False)
+    rendered = []
+    monkeypatch.setattr(production.voice, "synthesize",
+                        lambda body, d: rendered.append("voice") or ("a.mp3", 30.0))
+
+    with pytest.raises(production.FactCheckFailed, match="40%"):
+        production.produce_one(IDEA, str(tmp_path))
+
+    assert rendered == [], "nothing may render after a failed fact check"
+    assert (7, "rejected") in produced, "the idea must drop out of the queue, not retry forever"
+
+
+def test_factcheck_pass_lets_the_reel_through(monkeypatch, tmp_path):
+    produced = _wire_happy(monkeypatch, factcheck_ok=True)
+    vid, url = production.produce_one(IDEA, str(tmp_path))
+    assert vid == "VID1"
+    assert (7, "produced") in produced
+
+
+def test_factcheck_failure_is_soft_for_the_batch(monkeypatch):
+    """One blocked reel must not take the day's other Shorts with it (rule 14)."""
+    ideas = [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}, {"id": 3, "title": "c"}]
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+
+    def _produce(idea, root):
+        if idea["id"] == 2:
+            raise production.FactCheckFailed("idea 2 failed fact check: invented figure")
+        return f"V{idea['id']}", f"https://youtu.be/V{idea['id']}"
+
+    monkeypatch.setattr(production, "produce_one", _produce)
+    out = production.run_production()
+    assert [p["idea_id"] for p in out["published"]] == [1, 3]
+    assert len(out["failed"]) == 1
+    assert "FactCheckFailed" in out["failed"][0]["error"]
+
+
+def test_factcheck_failure_alerts_the_operator(monkeypatch):
+    """A silently dropped reel is worse than a loud one — the operator must learn WHY."""
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 9, "title": "t"}])
+    alerts = []
+    monkeypatch.setattr(production, "_notify_failure",
+                        lambda idea, e: alerts.append(f"{type(e).__name__}: {e}"))
+    monkeypatch.setattr(production, "produce_one",
+                        lambda i, r: (_ for _ in ()).throw(
+                            production.FactCheckFailed("idea 9 failed fact check: bad date")))
+    production.run_production()
+    assert len(alerts) == 1
+    assert "FactCheckFailed" in alerts[0] and "bad date" in alerts[0]

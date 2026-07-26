@@ -3,8 +3,10 @@
 **Niche:** Daily impact news/info explainers — Indian & international developments that could
 have a big impact on the world or India.
 **Style:** Daily impact explainer (*what happened → why it matters → impact*).
-**Lean:** Soft/positive-impact (science, tech, economy, breakthroughs, policy,
-world-changing-but-less-inflammatory). Mostly avoid partisan/communal politics.
+**Lean:** ~~Soft/positive-impact~~ → **Truth-first** (operator policy, 2026-07-27). There is no
+positivity requirement and no neutrality requirement: the channel may reach a verdict and name
+who is responsible. Politics, government action and court rulings are fully in scope. What
+replaces the old tone filter is a harder evidence bar — see §5.
 
 > ⚠️ News is a **special, higher-risk niche** for a faceless auto-channel. This page exists
 > because the generic faceless playbook will get a news channel **demonetized or struck** in
@@ -89,20 +91,34 @@ Source: [fair-use guide 2026](https://joyspace.ai/copyright-proof-shorts-fair-us
 
 ---
 
-## 5. Sensitivity filter (auto-applied in ideation)
+## 5. What replaced the tone filter: an evidence gate
 
-Given the soft/positive-impact lean, **Claude's ideation auto-excludes**:
-- Active communal/religious flashpoints and inflammatory political conflict.
-- Unverified election claims, deepfake-adjacent political content, impersonation.
-- Graphic violence, tragedy exploitation, medical/financial advice stated as fact.
+**Truth over neutrality (2026-07-27).** The soft/positive lean and the "never take sides" rule
+are both retired. A well-sourced conclusion is not bias, and hedging a clear finding into mush
+is its own kind of dishonesty. The channel may say plainly what the evidence supports.
 
-**Claude leans toward:** breakthroughs, science/space (ISRO, missions), technology & AI,
-economy/business, health & medicine advances, climate/energy, big constructive policy/law
-shifts, India growth & infrastructure, neutral global affairs, "world-first" stories.
+**The trade is strict: the sharper the verdict, the more certain its facts must be.** That is
+enforced in code, not merely requested in a prompt:
 
-When a genuinely huge hard-news story breaks, it can still surface — but framed strictly
-neutrally and factually, and only if it clears the two-source bar. **You make the final call
-at approval.**
+| Stage | Guard |
+|---|---|
+| Ideation | ≥ `MIN_SOURCES` (2) independent real URLs per idea |
+| Scriptwriter | writes web-grounded; every load-bearing claim must be checkable |
+| **Fact check** | [`src/factcheck.py`](../src/factcheck.py) re-checks the FINISHED script against live search **before it is voiced**. Unsupported claim → the reel is **blocked** and the idea marked `rejected`. **"Cannot verify" counts as unsupported.** |
+| Approval | you still make the final call in the Telegram digest |
+
+The fact check is deliberately a **separate, adversarial pass** with its own prompt — the
+scriptwriter grounding its own output is a model marking its own homework. It is told to ignore
+tone entirely: a harsh verdict the evidence supports is fine; a mild claim it cannot source is not.
+
+⚠️ Grounded search shares one free-tier bucket (~20/day) with ideation and the scriptwriter. If
+that is exhausted the gate **cannot run** — by default the reel ships unverified with a loud log
+line; set `FACTCHECK_STRICT=true` to block instead.
+
+**Still auto-excluded** (widened what may be *said*, not what may be *targeted*):
+- Communal/religious incitement or hate; anything that could inflame violence.
+- Unverified claims stated as fact; deepfakes/impersonation.
+- Graphic tragedy exploitation; medical/financial advice stated as fact.
 
 ---
 

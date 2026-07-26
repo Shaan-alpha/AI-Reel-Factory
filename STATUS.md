@@ -5,9 +5,10 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **280 pass, 3 skipped**)
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **311 pass, 4 skipped**)
 **Last updated:** 2026-07-27
 **Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
+**Editorial policy:** **truth over neutrality** — verdicts allowed, every load-bearing claim gated by `factcheck.verify()`
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -94,6 +95,36 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-07-27 — Policy change: truth over neutrality, enforced by a fact-check gate
+**Operator decision.** The "soft-positive" lean and the "strictly neutral / never take political
+sides" rule are both **retired**. The channel may now reach a verdict and name who is
+responsible. Higher demonetization risk accepted knowingly. **311 pass, 4 skipped.**
+- **What was removed:** `NICHE_LEAN="soft-positive"` (read by nothing — a dead label) and the
+  neutrality clause in the ideation + scriptwriter prompts. Politics, government action and court
+  rulings are fully in scope.
+- **What replaced it — a real gate, not a prompt request.** New **[`src/factcheck.py`](src/factcheck.py)**:
+  an **independent, adversarial** grounded pass over the FINISHED script, run **before any render**
+  (cheapest place to abort). Unsupported claim → reel **blocked**, idea marked `rejected` so it
+  can't retry-loop. **"Cannot verify" counts as unsupported.** It is told to ignore tone entirely:
+  a harsh verdict the evidence supports passes; a mild claim it can't source does not.
+  Deliberately separate from the scriptwriter, which was grounding its own output — a model
+  marking its own homework.
+- **Trust the claim list over the verdict word:** a checker that lists problems then says "pass"
+  is exactly the failure this gate exists to catch, so the list wins.
+- ⚠️ **Quota reality, measured today:** the free `gemini-2.5-flash` bucket is **20 requests/day
+  and was already exhausted** during this work. Grounded ideation, the grounded scriptwriter AND
+  the fact check all draw from it (~8+/day at 3 Shorts). If it runs dry the gate **cannot run** —
+  default is ship-unverified-and-log-loudly; **`FACTCHECK_STRICT=true`** blocks instead. Choose
+  which risk you prefer.
+- 🐞 **Found while wiring:** `tests/test_production.py` had started making **real network calls**
+  and passing for the wrong reason (a 429 took the fail-open path). Now mocked — suite time for
+  that file went 4.69s → 0.57s.
+- **CLAUDE.md rule 6 and [docs/08](docs/08-news-niche-playbook.md) §5 rewritten to match** — the
+  code contradicted the written contract, and rule 1 says fix the docs.
+- **Sensitivity filter untouched:** communal/religious incitement, inflaming violence,
+  rumour-as-fact, deepfakes, graphic tragedy exploitation, medical/financial advice as fact all
+  remain excluded. This widened what may be *said*, not what may be *targeted*.
 
 ### 2026-07-27 — Voice chosen by ear: Gemini TTS + Zubenelgenubi is now the channel voice
 - **Operator A/B'd 5 renders and picked `Zubenelgenubi` ("Casual")** over Kore/Schedar/Algenib/

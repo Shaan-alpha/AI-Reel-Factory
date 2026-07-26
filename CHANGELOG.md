@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Truth over neutrality + a fact-check gate
+
+### Changed
+- **Editorial policy: truth over neutrality** (operator decision). The `soft-positive` lean and
+  the "strictly neutral / never take political sides" rule are retired — the channel may reach a
+  verdict and name who is responsible. Politics, government action and court rulings are fully in
+  scope. `NICHE_LEAN` is deleted; it was read by nothing.
+- **CLAUDE.md rule 6 and docs/08 §5 rewritten** to match, rather than leaving the code
+  contradicting the written contract (rule 1).
+- The sensitivity filter is unchanged: communal/religious incitement, inflaming violence,
+  rumour-as-fact, deepfakes, graphic tragedy exploitation and medical/financial advice stated as
+  fact remain excluded. This widened what may be *said*, not what may be *targeted*.
+
+### Added
+- **`src/factcheck.py` — an independent, adversarial verification gate.** Re-checks the FINISHED
+  script against live grounded search before any render, which is the cheapest place to abort. An
+  unsupported claim blocks the reel and marks the idea `rejected` so it cannot retry-loop.
+  "Cannot verify" counts as unsupported. Tone is explicitly out of scope: a harsh verdict the
+  evidence supports passes, a mild claim it cannot source does not. Separate from the scriptwriter
+  by design — grounding its own output was a model marking its own homework.
+- The claim list outranks the verdict word: a checker that lists problems then says "pass" is the
+  exact failure this gate exists to catch.
+- `ENABLE_FACT_CHECK` (default true) and `FACTCHECK_STRICT` (default false). Grounded search
+  shares one ~20/day free-tier bucket with ideation and the scriptwriter, so the gate can be
+  unable to run; strict mode blocks in that case instead of shipping unverified.
+
+### Fixed
+- `tests/test_production.py` had begun making **real network calls** once the gate was wired, and
+  passed for the wrong reason (a 429 took the fail-open path). Now mocked — 4.69s to 0.57s.
+- **311 tests pass, 4 skipped** (was 290, 3).
+
 ## [Unreleased] — Expressive narration
 
 ### Changed

@@ -94,12 +94,14 @@ quotes, or events, and never attribute a claim to a company/person unless it's r
 thing genuinely happened, DO NOT make it up — choose a different real story. When unsure, \
 generalize truthfully rather than invent specifics. Fabricated news = instant demonetization and strikes.
 
-FRAMING RULES (monetization safety): strictly NEUTRAL and factual — explain what happened and \
-why it matters; never take political sides or editorialize. Politics, government actions, and \
-court rulings ARE allowed when covered neutrally and well-sourced. EXCLUDE only: communal/ \
-religious incitement or hate; anything that could inflame violence; unverified rumors/claims \
-stated as fact; deepfakes/impersonation; graphic tragedy exploitation; medical/financial advice \
-stated as fact.
+FRAMING RULES: the standard is TRUTH, not neutrality. Say what the evidence actually supports, \
+even when that is unflattering to a government, company or party — a well-sourced conclusion is \
+not "taking a side". You MAY reach a verdict and say plainly who is responsible, provided every \
+load-bearing fact is verifiable and cited. What you may NOT do is assert anything you cannot \
+source: an unverifiable claim is worthless however satisfying it sounds. Politics, government \
+actions and court rulings are fully in scope. EXCLUDE only: communal/religious incitement or \
+hate; anything that could inflame violence; unverified rumors/claims stated as fact; deepfakes/ \
+impersonation; graphic tragedy exploitation; medical/financial advice stated as fact.
 
 Each idea: a PUNCHY, curiosity-driven title honest to the story (NOT a dry "X explained" search \
 title, NOT a bait title the facts can't back); a story that lands in 25-30 seconds (a single \
@@ -204,7 +206,8 @@ categories (world affairs, economy & business, science & space, technology & AI,
 climate & energy, India infrastructure, government & policy, sports, notable world events).
 - Prefer stories a smart person would actually SEND TO A FRIEND: real stakes, money & power, \
 genuine surprise, big human impact. Apply a SHARE test, not a clickbait test.
-- Compliance (hard line): only real, verifiable developments; neutral framing; exclude \
+- Compliance (hard line): only real, VERIFIABLE developments — a viewpoint is fine, an \
+  unsourceable claim is not; exclude \
 communal/religious incitement, calls to violence, unverified rumour-as-fact, deepfakes, \
 graphic tragedy exploitation, medical/financial advice.
 

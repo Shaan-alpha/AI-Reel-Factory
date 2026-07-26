@@ -62,7 +62,17 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
    - **Originality** — every reel adds analysis ("why it matters"), never a bare summary.
    - **AI disclosure** — set YouTube's synthetic-content flag + a description disclosure line.
    - **Copyright** — CC0 B-roll only (no broadcaster/agency footage); cut every 5–8s; own words + cite.
-   - **Accuracy** — ≥2 independent sources per claim; neutral framing; sensitivity filter applied.
+   - **Accuracy — truth over neutrality** (operator policy, 2026-07-27). ≥2 independent sources
+     per claim. The channel **may reach a verdict and name who is responsible**; a well-sourced
+     conclusion is not "taking a side", and the earlier "neutral framing" requirement is retired.
+     The trade is strict and non-negotiable: **the sharper the verdict, the more certain its
+     facts must be.** Enforced, not merely asked for — [`src/factcheck.py`](src/factcheck.py)
+     re-checks every finished script against live search *before* it is voiced, and an
+     unsupported claim **blocks the reel**. "Cannot verify" counts as unsupported.
+   - **Sensitivity filter still applies** — communal/religious incitement, anything that could
+     inflame violence, rumour-as-fact, deepfakes, graphic tragedy exploitation, and medical or
+     financial advice stated as fact remain excluded. Dropping the neutrality rule widened what
+     may be *said*, not what may be *targeted*.
 
 ### C. How to build
 
