@@ -269,3 +269,49 @@ def test_prompt_json_example_escapes_newlines():
     example = next(ln for ln in prompt.splitlines() if ln.startswith('{"title"'))
     assert example.rstrip().endswith("}"), "the JSON example must be one complete line"
     assert "\\n" in example, "line breaks in the caption must be shown escaped"
+
+
+# --- inline delivery tags + tag-aware length enforcement --------------------------------
+
+def test_visible_words_ignores_tags():
+    assert scriptwriter._visible_words("a [pause long] b [sarcastic] c") == ["a", "b", "c"]
+
+
+def test_word_cap_counts_only_spoken_words():
+    """Tags are stage direction — counting them would silently shrink the 25-30s budget."""
+    body = " ".join(["word"] * 70) + " [pause long] [sarcastic]"
+    assert len(_words(body)) == 73          # naive split sees the tags
+    assert len(scriptwriter._visible_words(body)) == 70
+
+
+def _words(body):
+    return body.split()
+
+
+def test_truncate_preserves_tags_and_cuts_on_a_sentence():
+    body = "One two three. [pause] Four five six. Seven eight nine."
+    out = scriptwriter._truncate_to_words(body, 6)
+    assert out.endswith(".")
+    assert "[pause]" in out
+    assert "Seven" not in out
+
+
+def test_truncate_does_not_count_tags_toward_the_cap():
+    """A tag-heavy script must not be truncated earlier than a tag-free one."""
+    plain = "One two three four five six. Seven eight."
+    tagged = "One two [pause] three four [sarcastic] five six. Seven eight."
+    assert scriptwriter._visible_words(scriptwriter._truncate_to_words(tagged, 6)) == \
+           scriptwriter._visible_words(scriptwriter._truncate_to_words(plain, 6))
+
+
+def test_truncate_noop_when_under_cap_even_with_tags():
+    body = "One two. [pause] Three four."
+    assert scriptwriter._truncate_to_words(body, 50) == body
+
+
+def test_prompt_teaches_pause_and_style_tags():
+    prompt = scriptwriter._build_prompt(IDEA, "N")
+    assert "[pause]" in prompt
+    assert "[sarcastic]" in prompt
+    assert "..." in prompt          # ellipses work on engines with no tag support
+    assert "3" in prompt            # the explicit cap

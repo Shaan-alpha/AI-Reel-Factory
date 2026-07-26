@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **242 pass, 2 skipped**)
-**Last updated:** 2026-07-26
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **280 pass, 3 skipped**)
+**Last updated:** 2026-07-27
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -37,7 +37,7 @@
 | 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
 | 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; honest framing + why-it-matters + **key-point cards**; compliance enforced; **25-30s length enforced** (punch-up no longer lengthens + hard word cap); 20 tests |
-| 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain; 14 tests (incl. live) |
+| 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain + **opt-in Gemini TTS** head (promptable, free Flash model) and **per-engine delivery tags** (`[pause]`→Chirp markup, `[sarcastic]`→Gemini); 47 tests (incl. gated live) |
 | 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) · *Phase B: story-specific* |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel + **premium polish** (crossfade transitions, cinematic grade, vignette/grain) + **retention v2** (music ducking, brand-logo bug, loop-friendly endings), all toggle-gated + fail-soft; 29 tests (incl. live full render) |
 | 7 | Subtitles (faster-whisper) | ✅ Done — **karaoke + frame-1 hook + key-point cards** (Montserrat) + **source lower-third**; 22 tests (incl. live burn) |
@@ -93,6 +93,39 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-07-27 — Expressive narration: sarcasm you can actually hear
+Implements [the expressive-narration spec](docs/superpowers/specs/2026-07-26-expressive-narration-design.md).
+**280 pass, 3 skipped.** Ships **inert** — `VOICE_ENGINE` stays `google`, so nothing changes until
+the operator flips it.
+- **Root cause of the no-op sanitiser:** `synthesize()` stripped every tag *before* dispatching, so
+  no tag could ever reach an engine — and emotion tags aren't a Chirp feature anyway. The operator's
+  instinct was right but aimed at the wrong engine: **inline audio tags are a documented Gemini
+  Developer API feature**, and Chirp separately supports `[pause]` via its `markup` input field.
+- **Tag handling is now per-engine** (`voice._filter_tags` + two allow-lists), because the control
+  signals aren't portable: `[pause]`→Chirp `markup`, `[sarcastic]`→Gemini, both stripped for
+  edge-tts/Kokoro. Caps enforced **in code** (`MAX_PAUSE_TAGS`/`MAX_STYLE_TAGS`, default 3) — a
+  prompt asks, a guard is what makes it true. Invented tags are stripped, never forwarded.
+- **New `gemini` engine** on the existing `GEMINI_API_KEY` + already-pinned `google-genai` — **no
+  new dependency, no new credential.** Default `gemini-2.5-flash-preview-tts` is **free on input
+  and output**; `gemini-2.5-pro-preview-tts` has **no free tier** (~**$1.27/mo at 3 Shorts/day**,
+  25% of the cap). Deliberately **absent from `_ENGINE_ORDER`**: the chain is `[primary] + the rest`,
+  so it's prepended only when selected and never enters the fallback path on its own.
+- **Gemini TTS returns raw 24 kHz PCM, not WAV** — wrapped before use, or ffprobe/whisper can't
+  read it.
+- **Chirp:** `input.markup` when the voice is Chirp *and* a pause tag survived; `GOOGLE_TTS_SPEAKING_RATE`
+  clamped to [0.25, 2.0]; a markup rejection **retries once as plain text** so a syntax surprise
+  costs the timing, never the voice.
+- **Length-guard bug fixed:** `[pause long]` contains a space, so whitespace splitting yielded
+  `[pause` + `long]` and counted **both as spoken words** at all three cap sites — silently
+  shrinking the 25–30s budget. `_visible_words` now matches tags against the whole string.
+- **`tools/compare_voices.py`** renders Chirp / Flash / Pro side by side — the Flash-vs-Pro call is
+  a judgement about how the sarcasm lands, so it's made by ear, not asserted.
+- ⚙️ **Operator follow-ups:** (1) run `python tools/compare_voices.py`, then set `VOICE_ENGINE=gemini`
+  (+ `GEMINI_TTS_MODEL` if Pro wins); (2) check the **free-tier TTS rate limits in the AI Studio
+  dashboard** — unpublished in the docs, and grounded ideation has blown Gemini RPD before, so set
+  `GEMINI_TTS_API_KEY` to a second key if the pools are shared (rule 13); (3) set `DAILY_REEL_CAP`
+  and `APPROVAL_CAP` to **3** to match the new volume (both still default to 5).
 
 ### 2026-07-26 — Audit of the Content-Engine overhaul: 3 blockers fixed, SFX retuned, cards wired
 Full audit of the same-day overhaul (below). Everything green: **242 pass, 2 skipped**.
