@@ -14,6 +14,10 @@ the Gemini engines, [pause long] only on Chirp. Each engine strips what it canno
 import os
 import sys
 
+# Running "python tools/compare_voices.py" puts tools/ on sys.path, not the project root, so
+# `src` would not import. Add the repo root explicitly so the documented invocation works.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 try:  # load local .env on the dev machine (CI sets env directly)
     from dotenv import load_dotenv
 
@@ -21,7 +25,7 @@ try:  # load local .env on the dev machine (CI sets env directly)
 except ImportError:
     pass
 
-from src import voice
+from src import voice  # noqa: E402 — must follow the sys.path fix above
 
 SCRIPT = ("Another committee has been formed. [sarcastic] Groundbreaking. "
           "[pause long] Here's why it actually matters: the rules change in April, "
