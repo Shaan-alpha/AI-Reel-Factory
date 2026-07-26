@@ -136,7 +136,7 @@ def process_responses(max_seconds: int = 600, poll_timeout: int = 25, cap: int |
 
     Stops early once no pending ideas remain (everything decided), else after max_seconds.
     """
-    cap = cap if cap is not None else int(config.get("APPROVAL_CAP", "5"))
+    cap = cap if cap is not None else int(config.get("APPROVAL_CAP", "3"))
     deadline = time.monotonic() + max_seconds
     offset = None
     approved = 0

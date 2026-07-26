@@ -100,4 +100,6 @@ jobs:
           GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts' }}  # free tier
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}    # bare name, not the Chirp form
           GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}       # optional; isolates TTS quota
+          DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
+          APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it
         run: python -m src.production

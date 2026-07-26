@@ -151,7 +151,7 @@ def _notify_failure(idea: dict, error: Exception) -> None:
 
 def run_production(limit: int | None = None) -> dict:
     """Produce the approved queue (capped). One failure is logged + skipped (rule 14)."""
-    cap = limit if limit is not None else int(config.get("DAILY_REEL_CAP", "5"))
+    cap = limit if limit is not None else int(config.get("DAILY_REEL_CAP", "3"))
     approved = db.get_approved_ideas()[:cap]
     if not approved:
         log.info("production: no approved ideas to produce.")
