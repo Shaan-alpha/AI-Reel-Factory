@@ -59,8 +59,18 @@ _GOOGLE_TTS_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 
 # Gemini Developer API TTS returns raw PCM at this rate (16-bit mono, no container).
 _GEMINI_TTS_RATE = 24000
-_DEFAULT_STYLE_PROMPT = ("Deliver with dry, deadpan sarcasm - amused, never zany. "
-                         "Keep it conversational and quick. Land the final line straight.")
+# Structured per Google's own style-prompt guidance: an audio profile, then director's notes on
+# pacing and inflection, then paralinguistic detail. Their docs are explicit that naming an
+# emotion ("sarcastic") underperforms describing what it SOUNDS like -- and for this channel the
+# failure mode is a narrator who announces the joke, so most of this prompt is restraint.
+_DEFAULT_STYLE_PROMPT = (
+    "You are a sharp, faintly unimpressed news explainer talking to one friend, not an audience. "
+    "Read at a brisk clip with crisp consonants and very little warmth. "
+    "Deliver the setup flat and factual; let the dry amusement sit UNDER the words rather than on "
+    "top of them, and never announce the joke. Understate the punchline instead of leaning into "
+    "it, with a slight downward inflection at the end of each sentence. "
+    "Read the final line completely straight, as though it plainly matters."
+)
 
 
 def _audio_filename(script_body: str, ext: str = ".mp3") -> str:
