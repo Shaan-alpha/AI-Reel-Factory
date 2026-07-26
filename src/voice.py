@@ -143,6 +143,23 @@ def _synthesize_kokoro(text: str, out_path: str) -> float:
     return len(samples) / float(sr)
 
 
+def _is_chirp_voice(name: str) -> bool:
+    """`markup` is Chirp 3 HD-only — sending it with any other voice is an API error."""
+    return "chirp3-hd" in (name or "").lower()
+
+
+def _speaking_rate() -> float | None:
+    """audioConfig.speakingRate, clamped to the documented [0.25, 2.0]. None = leave unset."""
+    raw = (config.get("GOOGLE_TTS_SPEAKING_RATE", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.25, min(float(raw), 2.0))
+    except (TypeError, ValueError):
+        log.warning("voice: GOOGLE_TTS_SPEAKING_RATE=%r is not a number; ignoring", raw)
+        return None
+
+
 def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     """Synthesize via Google Cloud TTS Chirp 3 HD (REST + API key). Returns (wav_path, seconds).
 
@@ -157,12 +174,35 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
         raise RuntimeError("google tts: GOOGLE_TTS_API_KEY / GOOGLE_TTS_VOICE not set")
 
     lang = config.get("GOOGLE_TTS_LANGUAGE", "en-IN")
-    body = {
-        "input": {"text": text},
-        "voice": {"languageCode": lang, "name": voice_name},
-        "audioConfig": {"audioEncoding": "LINEAR16"},
-    }
-    r = requests.post(_GOOGLE_TTS_URL, params={"key": api_key}, json=body, timeout=60)
+
+    # Chirp 3 HD reads pause tags — but only via the dedicated `markup` input field, and only on
+    # Chirp voices (the API rejects `markup` for anything else). Style tags are Gemini's and are
+    # stripped here so they can't be read aloud.
+    clean = _clean_tts_text(text)
+    markup = _pause_markup(text) if config.get_bool("ENABLE_PAUSE_MARKUP", True) else ""
+    use_markup = _is_chirp_voice(voice_name) and _has_pause_tag(markup)
+
+    audio_cfg: dict = {"audioEncoding": "LINEAR16"}
+    rate = _speaking_rate()
+    if rate is not None:
+        audio_cfg["speakingRate"] = rate
+
+    def _post(payload_input: dict):
+        return requests.post(
+            _GOOGLE_TTS_URL,
+            params={"key": api_key},
+            json={"input": payload_input,
+                  "voice": {"languageCode": lang, "name": voice_name},
+                  "audioConfig": audio_cfg},
+            timeout=60,
+        )
+
+    r = _post({"markup": markup} if use_markup else {"text": clean})
+    if r.status_code != 200 and use_markup:
+        # Fail-soft (rules 11, 14): an unexpected markup rejection should cost us the comic
+        # timing, never the good voice — retry the request the plain way before failing over.
+        log.warning("voice: Chirp rejected markup (HTTP %d); retrying as plain text.", r.status_code)
+        r = _post({"text": clean})
     if r.status_code != 200:
         # Surface Google's actual reason (invalid/blocked key, byte limit, etc.) so the chain's
         # fallback warning is actionable instead of an opaque "400 Client Error".
@@ -171,7 +211,7 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     if not b64:
         raise RuntimeError("google tts: empty audioContent")
 
-    out_path = os.path.join(out_dir, _audio_filename(text, ".wav"))
+    out_path = os.path.join(out_dir, _audio_filename(clean, ".wav"))
     with open(out_path, "wb") as f:
         f.write(base64.b64decode(b64))
     with wave.open(out_path, "rb") as w:

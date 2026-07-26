@@ -294,3 +294,138 @@ def test_tags_only_body_is_treated_as_empty(tmp_path):
     """Tags are stage direction, not narration — a body of only tags has nothing to say."""
     with pytest.raises(ValueError, match="empty script_body"):
         voice.synthesize("[pause] [sarcastic]", str(tmp_path))
+
+
+# --- Chirp 3 HD markup + speaking rate --------------------------------------------------
+
+def _google_ok(monkeypatch, captured, seconds: float = 0.5):
+    """Patch requests.post to a 200 with a real tiny WAV, capturing the request body."""
+    resp = mock.Mock()
+    resp.status_code = 200
+    resp.json = mock.Mock(return_value={"audioContent": _fake_wav_b64(seconds)})
+
+    def _post(url, params=None, json=None, timeout=None):
+        captured["body"] = json
+        return resp
+
+    monkeypatch.setattr(voice.requests, "post", _post)
+
+
+def test_chirp_uses_markup_when_pause_tags_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    cap = {}
+    _google_ok(monkeypatch, cap)
+    voice._synthesize_google("It worked. [pause long] Somehow.", str(tmp_path))
+    assert "markup" in cap["body"]["input"]
+    assert "[pause long]" in cap["body"]["input"]["markup"]
+
+
+def test_chirp_uses_plain_text_without_pause_tags(monkeypatch, tmp_path):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    cap = {}
+    _google_ok(monkeypatch, cap)
+    voice._synthesize_google("It worked. Somehow.", str(tmp_path))
+    assert cap["body"]["input"] == {"text": "It worked. Somehow."}
+
+
+def test_chirp_strips_style_tags_from_markup(monkeypatch, tmp_path):
+    """Style tags are Gemini's; sending them to Chirp would have them read aloud."""
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    cap = {}
+    _google_ok(monkeypatch, cap)
+    voice._synthesize_google("Sure. [sarcastic] [pause] Great.", str(tmp_path))
+    assert "[sarcastic]" not in cap["body"]["input"]["markup"]
+    assert "[pause]" in cap["body"]["input"]["markup"]
+
+
+def test_non_chirp_voice_never_gets_markup(monkeypatch, tmp_path):
+    """`markup` may not be used with any voice other than Chirp 3 HD."""
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Neural2-A")
+    cap = {}
+    _google_ok(monkeypatch, cap)
+    voice._synthesize_google("It worked. [pause long] Somehow.", str(tmp_path))
+    assert "text" in cap["body"]["input"]
+    assert "markup" not in cap["body"]["input"]
+
+
+def test_pause_markup_can_be_disabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    monkeypatch.setenv("ENABLE_PAUSE_MARKUP", "false")
+    cap = {}
+    _google_ok(monkeypatch, cap)
+    voice._synthesize_google("It worked. [pause long] Somehow.", str(tmp_path))
+    assert "text" in cap["body"]["input"]
+
+
+def test_speaking_rate_clamped_and_validated(monkeypatch):
+    monkeypatch.setenv("GOOGLE_TTS_SPEAKING_RATE", "9")
+    assert voice._speaking_rate() == 2.0
+    monkeypatch.setenv("GOOGLE_TTS_SPEAKING_RATE", "0.01")
+    assert voice._speaking_rate() == 0.25
+    monkeypatch.setenv("GOOGLE_TTS_SPEAKING_RATE", "1.1")
+    assert voice._speaking_rate() == pytest.approx(1.1)
+    monkeypatch.setenv("GOOGLE_TTS_SPEAKING_RATE", "junk")
+    assert voice._speaking_rate() is None
+    monkeypatch.setenv("GOOGLE_TTS_SPEAKING_RATE", "")
+    assert voice._speaking_rate() is None
+
+
+def test_speaking_rate_included_only_when_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    monkeypatch.delenv("GOOGLE_TTS_SPEAKING_RATE", raising=False)
+    cap = {}
+    _google_ok(monkeypatch, cap)
+    voice._synthesize_google("Hello.", str(tmp_path))
+    assert "speakingRate" not in cap["body"]["audioConfig"]
+
+    monkeypatch.setenv("GOOGLE_TTS_SPEAKING_RATE", "1.15")
+    voice._synthesize_google("Hello.", str(tmp_path))
+    assert cap["body"]["audioConfig"]["speakingRate"] == pytest.approx(1.15)
+
+
+def test_markup_rejection_retries_as_plain_text(monkeypatch, tmp_path):
+    """A markup surprise must cost us the timing, never the voice."""
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    calls = []
+    good = mock.Mock()
+    good.status_code = 200
+    good.json = mock.Mock(return_value={"audioContent": _fake_wav_b64(0.5)})
+    bad = mock.Mock()
+    bad.status_code = 400
+    bad.text = "markup not supported for this voice"
+
+    def _post(url, params=None, json=None, timeout=None):
+        calls.append(json["input"])
+        return bad if "markup" in json["input"] else good
+
+    monkeypatch.setattr(voice.requests, "post", _post)
+    path, dur = voice._synthesize_google("It worked. [pause long] Somehow.", str(tmp_path))
+    assert os.path.exists(path) and dur > 0
+    assert len(calls) == 2
+    assert "markup" in calls[0] and "text" in calls[1]
+
+
+def test_plain_text_failure_does_not_double_post(monkeypatch, tmp_path):
+    """Without markup there is nothing to retry — one attempt, then fail over (rule 13)."""
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Kore")
+    calls = []
+    bad = mock.Mock()
+    bad.status_code = 403
+    bad.text = "blocked"
+
+    def _post(url, params=None, json=None, timeout=None):
+        calls.append(json["input"])
+        return bad
+
+    monkeypatch.setattr(voice.requests, "post", _post)
+    with pytest.raises(RuntimeError, match="403"):
+        voice._synthesize_google("No tags here.", str(tmp_path))
+    assert len(calls) == 1
