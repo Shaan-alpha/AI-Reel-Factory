@@ -35,22 +35,35 @@ the operator confirmed the intent was real expressive delivery, not a no-op sani
 | `prompt` (Cloud TTS) | promptable models only (Cloud Gemini-TTS) | free-text Style Instructions |
 | **inline audio tags + director's notes** | **Gemini Developer API TTS** | `[sarcastic]`-style tags, style/accent/pace/tone control, 30 voices incl. `Kore` |
 
-### Cost (rule 2) — the free path wins
+### Cost (rule 2) — free by default, Pro affordable at this volume
 
-Gemini Developer API TTS pricing, free tier:
+**Operator volume: 3 Shorts/day** (revised down from 5), with a stated preference to spend more
+per Short on quality.
 
-| Model | Free tier | Paid |
-|---|---|---|
-| **`gemini-2.5-flash-preview-tts`** | **input free, output free** | $0.50/1M in · $10/1M audio out |
-| `gemini-3.1-flash-tts-preview` | input free, output free | $1/1M in · $20/1M audio out |
-| `gemini-2.5-pro-preview-tts` | **none** | $1/1M in · $20/1M audio out |
+```
+3 reels/day x 30 days = 90 reels/month x 28 s = 2,520 s
+2,520 s x 25 audio-tokens/s = 63,000 audio tokens/month
+```
 
-For reference, the Cloud TTS route would have cost ~$1.05/mo (Flash) or ~$2.10/mo (Pro) at
-150 reels × 28 s × 25 audio-tokens/s = 105,000 audio tokens/month.
+| Model | Free tier | Paid rate | Cost at 90 reels/mo |
+|---|---|---|---|
+| **`gemini-2.5-flash-preview-tts`** | **input + output free** | $0.50/1M in · $10/1M out | **$0** |
+| `gemini-3.1-flash-tts-preview` | input + output free | $1/1M in · $20/1M out | $0 |
+| `gemini-2.5-pro-preview-tts` | **none** | $1/1M in · $20/1M out | **~$1.27** (25% of cap) |
 
-**The chosen route costs $0** and reuses the existing `GEMINI_API_KEY` and the already-pinned
-`google-genai==2.8.0` — no new credential, no new dependency, no billing account, no rule-2
-stop-and-flag. Rule 4 is untouched: this is the Gemini developer API, never Claude.
+Input text is ~140 tokens/reel including the style prompt → ~$0.01/month. Negligible either way.
+
+**Default stays `gemini-2.5-flash-preview-tts` ($0)**, because the safe default should be the free
+one and because nothing should start spending as a side effect of flipping a single knob. **Pro is
+a one-variable upgrade** (`GEMINI_TTS_MODEL`) at ~$1.27/month, well inside the cap, and
+`tools/compare_voices.py` renders both so the choice is made by ear rather than by assumption.
+
+The route reuses the existing `GEMINI_API_KEY` and the already-pinned `google-genai==2.8.0` — no
+new credential, no new dependency, no billing account. Rule 4 is untouched: this is the Gemini
+developer API, never Claude.
+
+> **Related config, not part of this spec:** `DAILY_REEL_CAP` and `APPROVAL_CAP` both default to
+> 5. At 3 Shorts/day they should be set to 3 so the system's own guardrails match intent.
 
 > Note for the operator: **Google One AI Pro / Gemini Advanced is a consumer subscription and does
 > not pay for Google Cloud Platform API usage.** GCP trial credits do. This design avoids the
@@ -64,8 +77,12 @@ stop-and-flag. Rule 4 is untouched: this is the Gemini developer API, never Clau
 - **Layer 3 uses the Gemini Developer API, not Cloud TTS Gemini-TTS.** Same capability, better:
   free, existing key, existing SDK, and it supports the inline emotion tags the operator wanted.
   Cloud TTS Gemini-TTS is documented below as the paid upgrade path if free limits bind.
-- **Default `gemini-2.5-flash-preview-tts`** — the only TTS model that is free on both input and
-  output. `gemini-2.5-pro-preview-tts` has **no free tier**, so it is opt-in only.
+- **Default `gemini-2.5-flash-preview-tts`** (free); **`gemini-2.5-pro-preview-tts` is the
+  recommended upgrade** at ~$1.27/month for 3 Shorts/day. Pro has no free tier, so it stays a
+  deliberate one-variable change rather than a default that starts spending silently (rule 2).
+- **Quality budget goes to delivery, not length.** The operator's "more tokens per Short" is spent
+  on the better TTS model and on style/pause tags, not on a longer script — the 25–30 s format and
+  its word cap are retention constraints and stay exactly as they are.
 - **Style is a tuned constant plus sparse inline tags**, not per-script LLM-generated style
   (YAGNI): one well-written `VOICE_STYLE_PROMPT` beats a generated one and costs no extra call.
 
