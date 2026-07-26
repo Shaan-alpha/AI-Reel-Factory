@@ -3,10 +3,14 @@
 Contract:
     what it does : one entry point for free-tier text generation; transparent failover.
     how to use   : `from src.llm import generate; text = generate(prompt, json=True)`
-    depends on   : google-genai, groq, src.config (GEMINI_API_KEY, GROQ_API_KEY).
+    depends on   : google-genai, groq, requests, src.config (GEMINI_API_KEY, GROQ_API_KEY).
 
 Used by the scriptwriter (Module 3) and the ideation fallback. NOT used for Claude —
 Claude ideation runs only in the Routine (rule 4). Respect free-tier quotas (rule 13).
+
+Optional third provider: **GitHub Models** (free with a GitHub plan, OpenAI-family catalog).
+It is OPT-IN via ENABLE_GH_MODELS / PREFER_GH_MODELS so an incidentally-present GITHUB_TOKEN
+can't wedge an unconfigured provider into the failover chain.
 
 SDK note: uses the current **google-genai** SDK (`from google import genai`), not the
 deprecated `google-generativeai`. Models are overridable via env (GEMINI_MODEL/GROQ_MODEL)
@@ -17,6 +21,8 @@ from __future__ import annotations
 import logging
 
 from functools import lru_cache
+
+import requests
 
 from src import config
 
@@ -107,22 +113,101 @@ def _gen_groq(prompt: str, *, json: bool, max_tokens: int) -> str:
     return resp.choices[0].message.content or ""
 
 
+def _github_key() -> str | None:
+    """The GitHub Models credential.
+
+    Named GH_MODELS_KEY, not GITHUB_MODELS_KEY: GitHub rejects secret/variable names starting
+    with the `GITHUB_` prefix, so the latter could never be created as an Actions secret.
+    `GITHUB_TOKEN` is still read because it is the built-in Actions token (usable with
+    `permissions: models: read`).
+
+    Deliberately does NOT fall back to GH_PAT: that is the Telegram bot's Actions read+write
+    PAT, and this repo's Actions hold the YouTube/Supabase/Telegram secrets — sending it to a
+    third-party inference endpoint would widen its blast radius for nothing (rule 5). Use a
+    token whose ONLY scope is `models: read`."""
+    return config.get("GH_MODELS_KEY") or config.get("GITHUB_TOKEN")
+
+
+def _github_enabled() -> bool:
+    """GitHub Models is OPT-IN, not "on whenever a token exists".
+
+    `GITHUB_TOKEN` shows up in environments incidentally (any Actions job that forwards it), and
+    an unconfigured provider silently inserted into the chain costs a doomed HTTP round-trip on
+    every call — which delays the Groq failover on exactly the Gemini-quota outages it's there
+    to survive (rules 11, 13)."""
+    if not _github_key():
+        return False
+    return (config.get_bool("PREFER_GH_MODELS", False)
+            or config.get_bool("ENABLE_GH_MODELS", False))
+
+
+def _gen_github_models(prompt: str, *, json: bool, max_tokens: int) -> str:
+    """GitHub Models inference (OpenAI-compatible chat completions).
+
+    Endpoint + model naming per GitHub's REST docs: the host is `models.github.ai/inference`
+    (the old `models.inference.ai.azure.com` preview host is retired) and `model` MUST carry its
+    publisher prefix, e.g. `openai/gpt-4o-mini`. The token needs the **`models: read`** scope; in
+    Actions the job also needs `permissions: models: read`.
+
+    Catalog is OpenAI/DeepSeek/Microsoft/Llama/Mistral/xAI — there is no Anthropic model here,
+    so this never becomes a back door around rule 4."""
+    key = _github_key()
+    if not key:
+        raise RuntimeError("github models: GH_MODELS_KEY / GITHUB_TOKEN not set")
+    model = config.get("GH_MODEL", "openai/gpt-4o-mini")
+    if "/" not in model:  # a bare name 400s on this endpoint; assume the OpenAI publisher
+        model = f"openai/{model}"
+    payload: dict = {
+        "messages": [{"role": "user", "content": prompt}],
+        "model": model,
+        "max_tokens": max_tokens,
+    }
+    if json:
+        payload["response_format"] = {"type": "json_object"}
+    r = requests.post(
+        "https://models.github.ai/inference/chat/completions",
+        headers={"Authorization": f"Bearer {key}",
+                 "Accept": "application/vnd.github+json",
+                 "Content-Type": "application/json"},
+        json=payload,
+        timeout=60,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"github models HTTP {r.status_code}: {r.text[:300]}")
+    choices = (r.json() or {}).get("choices") or []
+    if not choices:
+        raise RuntimeError("github models returned no choices")
+    return choices[0].get("message", {}).get("content") or ""
+
+
 def generate(prompt: str, *, json: bool = False, max_tokens: int = 1024,
              prefer_groq: bool = False) -> str:
     """Generate text via Gemini; on error/quota/empty, fail over to Groq. Return raw text.
 
-    Set json=True when the prompt asks for a JSON object (callers parse the result); both
-    providers are put into JSON mode. Raises RuntimeError only if *every* provider fails —
+    Set json=True when the prompt asks for a JSON object (callers parse the result); every
+    provider is put into JSON mode. Raises RuntimeError only if *every* provider fails —
     a single upstream failure never propagates (rule 11). This is the runtime-soft path
     (rule 14): providers are tried in order and failures are logged, not fatal.
 
     prefer_groq=True tries Groq FIRST (Gemini second). Use it for no-web text tasks (hook
     punch-up, keyword extraction) so Gemini's scarce free RPD (rule 13) is reserved for the
     grounded web research that only Gemini can do — quality on the accuracy-critical path stays.
+
+    GitHub Models joins the chain only when explicitly opted in (see `_github_enabled`):
+    ENABLE_GH_MODELS inserts it as a middle fallback, PREFER_GH_MODELS puts it first.
     """
     gemini = ("gemini", _gen_gemini)
     groq = ("groq", _gen_groq)
-    order = (groq, gemini) if prefer_groq else (gemini, groq)
+    github = ("github", _gen_github_models)
+
+    use_github = _github_enabled()
+    if prefer_groq:
+        order = (groq, github, gemini) if use_github else (groq, gemini)
+    elif use_github and config.get_bool("PREFER_GH_MODELS", False):
+        order = (github, gemini, groq)
+    else:
+        order = (gemini, github, groq) if use_github else (gemini, groq)
+
     errors: list[str] = []
     for name, fn in order:
         try:

@@ -165,8 +165,9 @@ def test_burn_captions_writes_ass_and_calls_burn(monkeypatch, tmp_path):
                         lambda p: [(0.0, 0.3, "Reusable"), (0.3, 0.7, "rockets")])
     burned = {}
 
-    def fake_burn(video_path, ass_path, out_path):
+    def fake_burn(video_path, ass_path, out_path, cards=None):
         burned["ass"] = ass_path
+        burned["cards"] = cards
         with open(out_path, "wb") as f:
             f.write(b"\x00" * 5000)  # pretend ffmpeg wrote the captioned reel
     monkeypatch.setattr(subtitles, "_burn", fake_burn)
@@ -191,6 +192,120 @@ def test_burn_captions_missing_inputs_raise(tmp_path):
     with pytest.raises(ValueError, match="video not found"):
         subtitles.burn_captions(str(tmp_path / "no.mp4"), str(tmp_path / "no.mp3"),
                                 str(tmp_path / "o.mp4"))
+
+
+# --- PIL graphic stat cards (optional, ENABLE_GRAPHIC_CARDS) ---------------------------
+
+def test_graphic_cards_off_by_default(monkeypatch, tmp_path):
+    """Default OFF: the ASS text cards already ship, so this is an opt-in look change."""
+    monkeypatch.delenv("ENABLE_GRAPHIC_CARDS", raising=False)
+    assert subtitles._render_graphic_cards(["Rs 2 crore"], 20.0, str(tmp_path)) == []
+
+
+def test_graphic_cards_render_pngs_when_enabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("CARD_SECONDS", "1.8")
+    monkeypatch.setenv("HOOK_SECONDS", "1.8")
+    cards = subtitles._render_graphic_cards(["First in Asia", "30% cheaper"], 20.0, str(tmp_path))
+    assert len(cards) == 2
+    for start, end, png in cards:
+        assert os.path.isfile(png) and os.path.getsize(png) > 500
+        assert 1.8 <= start < end <= 20.0
+
+
+def test_graphic_cards_fall_back_when_render_fails(monkeypatch, tmp_path):
+    """A card renderer breaking must cost us the cards, never the captions (rules 11, 14)."""
+    monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    from src import graphics
+    monkeypatch.setattr(graphics, "create_stat_card",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no font")))
+    assert subtitles._render_graphic_cards(["boom"], 20.0, str(tmp_path)) == []
+
+
+def test_ass_omits_text_cards_when_png_cards_are_used(monkeypatch, tmp_path):
+    """Both treatments at once would double-draw, so exactly one must own the key points."""
+    monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
+    monkeypatch.setattr(subtitles, "_transcribe_words",
+                        lambda p: [(0.0, 4.0, "hi"), (4.0, 9.0, "there")])
+    seen = {}
+
+    def fake_burn(video_path, ass_path, out_path, cards=None):
+        seen["cards"] = cards
+        seen["ass"] = open(ass_path, encoding="utf-8").read()
+        open(out_path, "wb").write(b"\x00" * 5000)
+    monkeypatch.setattr(subtitles, "_burn", fake_burn)
+
+    subtitles.burn_captions(str(video), str(audio), str(tmp_path / "o.mp4"),
+                            key_points=["Rs 2 crore"])
+    assert seen["cards"], "PNG cards should have been rendered"
+    assert ",Card,," not in seen["ass"], "ASS must not also draw the key-point cards"
+
+
+def test_burn_captions_retries_with_text_cards_when_overlay_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
+    monkeypatch.setattr(subtitles, "_transcribe_words",
+                        lambda p: [(0.0, 4.0, "hi"), (4.0, 9.0, "there")])
+    calls = []
+
+    def flaky_burn(video_path, ass_path, out_path, cards=None):
+        calls.append(cards)
+        if cards:
+            raise RuntimeError("overlay filtergraph failed")
+        open(out_path, "wb").write(b"\x00" * 5000)
+    monkeypatch.setattr(subtitles, "_burn", flaky_burn)
+
+    out = subtitles.burn_captions(str(video), str(audio), str(tmp_path / "o.mp4"),
+                                  key_points=["Rs 2 crore"])
+    assert os.path.exists(out)
+    assert len(calls) == 2 and calls[0] and calls[1] is None
+    # the retry's ASS carries the cards back as text, so the fallback is not feature-poorer
+    fallback_ass = [p for p in os.listdir(tmp_path) if p.endswith("_text.ass")]
+    assert fallback_ass, "expected a text-card fallback ASS to have been written"
+    assert ",Card,," in open(os.path.join(tmp_path, fallback_ass[0]), encoding="utf-8").read()
+
+
+def test_burn_builds_overlay_filtergraph_for_cards(monkeypatch, tmp_path):
+    ass = tmp_path / "c.ass"; ass.write_text("[Events]\n", encoding="utf-8")
+    video = tmp_path / "v.mp4"; video.write_bytes(b"\x00")
+    png = tmp_path / "card_0.png"; png.write_bytes(b"\x89PNG")
+    captured = {}
+
+    class _P:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(subtitles.subprocess, "run",
+                        lambda cmd, **kw: (captured.update(cmd=cmd), _P())[1])
+    subtitles._burn(str(video), str(ass), str(tmp_path / "o.mp4"),
+                    cards=[(2.0, 3.8, str(png))])
+    cmd = captured["cmd"]
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "-loop" in cmd and "card_0.png" in cmd  # basename: no Windows path escaping
+    assert "ass=c.ass:fontsdir=." in graph
+    assert "overlay=(W-w)/2:(H-h)/2:enable='between(t,2.000,3.800)'" in graph
+    assert "-shortest" in cmd, "looped stills would otherwise extend the reel"
+
+
+def test_burn_uses_plain_vf_when_no_cards(monkeypatch, tmp_path):
+    """The shipping path must stay a simple -vf ass burn."""
+    ass = tmp_path / "c.ass"; ass.write_text("[Events]\n", encoding="utf-8")
+    video = tmp_path / "v.mp4"; video.write_bytes(b"\x00")
+    captured = {}
+
+    class _P:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(subtitles.subprocess, "run",
+                        lambda cmd, **kw: (captured.update(cmd=cmd), _P())[1])
+    subtitles._burn(str(video), str(ass), str(tmp_path / "o.mp4"))
+    cmd = captured["cmd"]
+    assert "-filter_complex" not in cmd and "-shortest" not in cmd
+    assert cmd[cmd.index("-vf") + 1] == "ass=c.ass:fontsdir=."
 
 
 # --- live: real whisper + real burn ----------------------------------------------------

@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.4.3 (**PUBLIC**) · _Unreleased:_ ideation diversity & virality (two-stage news-anchored ideation, share_score ranking + calibration, trends noise filter; 205 tests pass)
-**Last updated:** 2026-06-29
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **242 pass, 2 skipped**)
+**Last updated:** 2026-07-26
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -93,6 +93,64 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-07-26 — Audit of the Content-Engine overhaul: 3 blockers fixed, SFX retuned, cards wired
+Full audit of the same-day overhaul (below). Everything green: **242 pass, 2 skipped**.
+- **🔴 GitHub Models was dead code** — wrong host (`models.inference.ai.azure.com` is the retired
+  Azure preview; correct is `https://models.github.ai/inference/chat/completions`) and a bare
+  `gpt-4o-mini` where the API requires a **publisher prefix** (`openai/gpt-4o-mini`). Verified
+  against GitHub's REST docs. Also: the token needs scope **`models: read`** (in Actions,
+  `permissions: models: read`). Corrected the log claim below — **Anthropic is not in the GitHub
+  Models catalog**, so this was never a route to Claude (and never a rule-4 question).
+- **🔴 Renamed every knob to `GH_*`** (`GH_MODELS_KEY`/`ENABLE_GH_MODELS`/`PREFER_GH_MODELS`/
+  `GH_MODEL`): GitHub **rejects secret and variable names starting with `GITHUB_`**, so the
+  original names could never have been created as Actions secrets.
+- **🔴 Dropped `GH_PAT` from the credential chain** (rule 5). That is the Telegram bot's Actions
+  read+write PAT and this repo's Actions hold the YouTube/Supabase/Telegram secrets — it must
+  never be sent to a third-party inference endpoint. Now `GH_MODELS_KEY` → `GITHUB_TOKEN` only.
+- **GitHub Models is now OPT-IN** (`ENABLE_GH_MODELS`/`PREFER_GH_MODELS`), not "on whenever a
+  token exists". An unconfigured provider silently in the chain burns a doomed round-trip per call
+  and *delays the Groq failover* on exactly the Gemini-RPD outages it exists to survive (rules 11/13).
+- **🔴 `pillow` was missing from `requirements.txt`** while `graphics.py` imported it — green
+  locally, `ImportError` in CI. Pinned `pillow==12.2.0` (rule 10).
+- **SFX retuned — it would have sounded cheap and clipped the voice.** Was: a sting on *every*
+  cut (~9 per reel) at volume 0.5–0.6, plus a whoosh at **t=0 over the hook**. Now: every **2nd**
+  cut, volume **0.18**, and a **1.5s lead-in** so nothing competes with the hook. Measured live:
+  4 events across 28s at 6.3/12.6/18.9/25.2s.
+- **Added a limiter after the mix.** `amix ... normalize=0` sums without headroom. **Proven with
+  real FFmpeg:** narration 0.95 + SFX 0.30 summed → peak **+0.0003 dB (hard-clipped)**; with
+  `alimiter=limit=0.95:level=0` → **−0.445 dB, no clipping**. Narration is not attenuated.
+- **Scriptwriter JSON example fixed**: the caption template contained **raw newlines** inside a
+  JSON string (invalid JSON) and taught the model to emit the same. Now escaped `\\n`, plus an
+  explicit instruction. `_parse_llm_json`'s `strict=False` was masking this on the grounded path.
+- **`graphics.py` was dead code** — nothing imported it, yet the log claimed shipped stat cards.
+  Now wired into `subtitles.py` behind **`ENABLE_GRAPHIC_CARDS` (default OFF)**: shares
+  `_card_events` with the ASS path (one timing rule, no double-draw), overlays each PNG via
+  `-loop 1` + `enable='between(t,…)'` + `-shortest`, and **falls back to a full-featured ASS
+  text-card burn** on any failure. **Verified with a real 1080×1920 render** — card visible in
+  its window, absent outside it, duration unchanged.
+- **`audio_sfx` hardening**: seeded RNG **per generator** so assets are byte-identical across
+  runs (a shared module-level `Random` made output depend on call order — caught by a new test);
+  bulk `array` PCM write (measured **0.42s → 0.19s**, byte-identical); per-effect decode cache;
+  bad/out-of-range events skipped instead of raising. Dropped dead `_SFX_NAMES` + `extra_events`.
+- **Every new knob wired** into `.env.example` **and both workflows** — `ENABLE_SFX`, `SFX_VOLUME`,
+  `SFX_EVERY_N_CUTS`, `SFX_DIR`, `ENABLE_GRAPHIC_CARDS`, `ENABLE_CHANNEL_TAGS`, `CAPTION_FONT_FILE`,
+  and the four `GH_*` keys. `ENABLE_SFX` defaults true, so it previously would have shipped on the
+  next cloud run **with no repo-variable kill switch**.
+- **+27 tests (215 → 242).** ⚠️ Note `_clean_tts_text` strips `[sarcastic]`/`<sfx:…>` tags that
+  **nothing in the pipeline emits** — it is purely defensive, not an active feature.
+
+### 2026-07-26 — Content Creation Engine Overhaul & GitHub Models Integration
+> ⚠️ Superseded in part by the audit entry above — read it first. The GitHub Models endpoint,
+> model naming, env-var names and Claude-availability claim below were all wrong; SFX levels and
+> the "PIL stat card overlays" feature were not production-ready as written.
+- **Witty Roasting Scriptwriter (`src/scriptwriter.py`)**: Upgraded `_PROMPT_N` to adopt a Daily Show / Phil DeFranco edutainment roasting style. Enforced disorienting opening hooks (0–2s), sarcastic witty commentary, retention bridges ("Here's why it actually matters..."), and seamless loop-back endings.
+- **Expressive Voice Sanitizer (`src/voice.py`)**: Added `_clean_tts_text()` to strip embedded emotion tags (`[sarcastic]`, `[sigh]`) and SFX markers (`<sfx:...>`) before TTS synthesis, preserving natural dramatic sentence pacing.
+- **Procedural SFX Audio Generator (`src/audio_sfx.py` [NEW])**: Added wave synthesis generators for 5 core sound effects (`whoosh`, `pop`, `ding`, `boom`, `click`) and audio track mixing.
+- **Multi-Track Audio & Video Assembly (`src/assembly.py`)**: Updated `src/assembly.py` to automatically mix SFX transition sweeps (`whoosh`, `click`) at clip cut boundaries along with narration and ducked background music.
+- **Free GitHub Models API Integration (`src/llm.py`)**: Added support for GitHub Models API using a GitHub token — see the audit entry for the corrected endpoint, model naming, and env vars.
+- **PIL Graphic Stat Cards (`src/graphics.py` [NEW])**: Added `src/graphics.py` for rendering high-contrast RGBA stat cards with rounded corners, drop shadows, and Montserrat typography.
+- **+4 new tests.**
 
 ### 2026-06-29 — Ideation diversity & virality (two-stage, news-anchored)
 - **Root-caused the "similar + not viral/trendy" complaint** with live evidence: ideation made the

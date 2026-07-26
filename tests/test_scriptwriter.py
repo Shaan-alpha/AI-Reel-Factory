@@ -260,3 +260,12 @@ def test_prompt_targets_25_30s_sarcastic():
     assert "65-75 words" in prompt           # word budget for ~25-30s
     assert "sarcastic" in prompt             # tone
     assert "12-20 second" not in prompt      # old short-form target gone
+
+
+def test_prompt_json_example_escapes_newlines():
+    """A RAW newline inside the JSON example teaches the model to emit invalid JSON. The
+    multi-line caption must be shown with the two-character \\n escape instead."""
+    prompt = scriptwriter._build_prompt(IDEA, "N")
+    example = next(ln for ln in prompt.splitlines() if ln.startswith('{"title"'))
+    assert example.rstrip().endswith("}"), "the JSON example must be one complete line"
+    assert "\\n" in example, "line breaks in the caption must be shown escaped"

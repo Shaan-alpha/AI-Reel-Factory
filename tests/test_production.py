@@ -150,14 +150,18 @@ def test_build_metadata_prefers_seo_title_and_merges_tags():
     idea = {"title": "fallback title"}
     script = {"title": "SEO Title", "caption": "desc",
               "hashtags": ["#ISRO", "#Shorts"], "tags": ["isro", "space mission", "rocket"]}
-    meta = production._build_metadata(idea, script)
+    meta = production._build_metadata(idea, script, include_channel_tags=False)
     assert meta["title"] == "SEO Title"
     # hashtags(#-stripped) + tags, case-insensitively de-duped, order preserved
     assert meta["tags"] == ["ISRO", "Shorts", "space mission", "rocket"]
 
+    # With channel tags included
+    meta_full = production._build_metadata(idea, script, include_channel_tags=True)
+    assert "But It Matters" in meta_full["tags"]
+
 
 def test_build_metadata_falls_back_to_idea_title():
-    meta = production._build_metadata({"title": "Idea T"}, {"caption": "d", "hashtags": []})
+    meta = production._build_metadata({"title": "Idea T"}, {"caption": "d", "hashtags": []}, include_channel_tags=False)
     assert meta["title"] == "Idea T" and meta["tags"] == []
 
 
