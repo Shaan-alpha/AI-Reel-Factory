@@ -4,12 +4,23 @@ Contract:
     what it does : synthesizes narration audio from a script body.
     input        : script_body (str); output dir.
     output       : (audio_path, duration_seconds).
-    depends on   : Kokoro (primary, humanized) → edge-tts (fallback) (rule 11).
+    depends on   : Google Cloud TTS (Chirp 3 HD) → edge-tts → Kokoro, plus an opt-in Gemini
+                   Developer API TTS engine (rule 11: every engine has a fallback).
 
-Default engine is **Kokoro** (open-weight, Apache-2.0, runs on CPU via kokoro-onnx) for a
-far more natural/human voice; edge-tts is the always-available fallback. Pick via VOICE_ENGINE
-(kokoro|edge-tts). Kokoro voice/speed via KOKORO_VOICE/KOKORO_SPEED; edge-tts via VOICE/VOICE_RATE.
-Kokoro's int8 model (~120 MB) auto-downloads once to KOKORO_CACHE.
+Default engine is **Google Chirp 3 HD** (near-human en-IN); the chain falls through to edge-tts
+then Kokoro, resolved by name at call time so a missing key just advances a link. Pick the
+primary via VOICE_ENGINE (google|edge|kokoro|gemini).
+
+**Expressive delivery is per-engine**, because the control signals are not portable:
+  · `gemini`  — promptable: honours VOICE_STYLE_PROMPT *and* inline style tags ([sarcastic]).
+                Opt-in via VOICE_ENGINE=gemini; the default model is the free one.
+  · `google`  — Chirp 3 HD reads `[pause]` tags, but only through its `markup` input field,
+                and supports GOOGLE_TTS_SPEAKING_RATE.
+  · `edge`/`kokoro` — no tag support at all; every tag is stripped before synthesis.
+So each engine filters the script body itself rather than being handed pre-stripped text.
+
+Kokoro's int8 model (~120 MB) auto-downloads once to KOKORO_CACHE; its voice/speed come from
+KOKORO_VOICE/KOKORO_SPEED, edge-tts from VOICE/VOICE_RATE.
 
 The local file is a render artifact: produce it here, let assembly/publish consume it, then
 delete it (rule 15 — never store video/audio in Supabase).
@@ -45,6 +56,11 @@ _KOKORO_VOICES = "voices-v1.0.bin"
 
 # Google Cloud TTS (primary engine) — Chirp 3 HD via the v1 REST endpoint + API key (headless).
 _GOOGLE_TTS_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+# Gemini Developer API TTS returns raw PCM at this rate (16-bit mono, no container).
+_GEMINI_TTS_RATE = 24000
+_DEFAULT_STYLE_PROMPT = ("Deliver with dry, deadpan sarcasm - amused, never zany. "
+                         "Keep it conversational and quick. Land the final line straight.")
 
 
 def _audio_filename(script_body: str, ext: str = ".mp3") -> str:
@@ -219,6 +235,67 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     return out_path, duration
 
 
+def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
+    """Synthesize via the Gemini Developer API TTS models. Returns (wav_path, seconds).
+
+    Uses the already-pinned google-genai SDK and the existing GEMINI_API_KEY, so this adds no
+    dependency and no new credential. Style comes from VOICE_STYLE_PROMPT plus the inline style
+    tags the scriptwriter emits — both are features of this API, unlike Chirp, which is why
+    the emotion tags finally do something here.
+
+    GEMINI_TTS_API_KEY (optional) isolates TTS onto a second free key so it cannot starve the
+    grounded ideation/scriptwriting that only Gemini can do (rule 13).
+
+    Default model is the FREE one. gemini-2.5-pro-preview-tts has no free tier, so selecting it
+    is a deliberate act, not a default.
+    """
+    import wave
+
+    from google import genai
+    from google.genai import types
+
+    key = (config.get("GEMINI_TTS_API_KEY") or config.get("GEMINI_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError("gemini tts: GEMINI_TTS_API_KEY / GEMINI_API_KEY not set")
+
+    spoken = _style_text(text)  # keep style tags, drop Chirp's pause tags
+    style = config.get("VOICE_STYLE_PROMPT", _DEFAULT_STYLE_PROMPT)
+    model = config.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+    voice_name = config.get("GEMINI_TTS_VOICE", "Kore")
+
+    client = genai.Client(api_key=key)
+    resp = client.models.generate_content(
+        model=model,
+        contents=f"{style}\n\n{spoken}",
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                )
+            ),
+        ),
+    )
+    try:
+        pcm = resp.candidates[0].content.parts[0].inline_data.data
+    except (AttributeError, IndexError, TypeError) as e:
+        raise RuntimeError(f"gemini tts: unexpected response shape ({e})") from e
+    if not pcm:
+        raise RuntimeError("gemini tts: empty audio")
+
+    # The response is RAW PCM, not a WAV container — without this wrapper nothing downstream
+    # (ffprobe, assembly, whisper) can read the file.
+    out_path = os.path.join(out_dir, _audio_filename(spoken, ".wav"))
+    with wave.open(out_path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(_GEMINI_TTS_RATE)
+        w.writeframes(pcm)
+    with wave.open(out_path, "rb") as w:
+        duration = w.getnframes() / float(w.getframerate())
+    return out_path, duration
+
+
 def _stream_chunks(text: str, voice: str, rate: str):
     """Yield edge-tts stream chunks (audio + WordBoundary). Isolated for testability."""
     import edge_tts
@@ -244,9 +321,20 @@ def _synthesize_edge_tts(text: str, out_path: str, voice: str, rate: str) -> flo
     return last_end_ticks / _TICKS_PER_SECOND
 
 
+# "gemini" is deliberately ABSENT from this tuple. synthesize() builds the chain as
+# [primary] + [the rest], so leaving it out means the Gemini engine is prepended only when it is
+# explicitly selected, and does not appear at all under the default VOICE_ENGINE=google. Adding
+# it here would silently put it in the fallback path for every Chirp failure.
 _ENGINE_ORDER = ("google", "edge", "kokoro")
 # Accept friendly/legacy values for VOICE_ENGINE.
-_ENGINE_ALIASES = {"edge-tts": "edge", "chirp": "google", "google-tts": "google"}
+_ENGINE_ALIASES = {"edge-tts": "edge", "chirp": "google", "google-tts": "google",
+                   "gemini-tts": "gemini"}
+
+
+def _engine_gemini(text: str, out_dir: str) -> tuple[str, float]:
+    path, dur = _synthesize_gemini(text, out_dir)
+    _log_done(path, dur, f"gemini:{config.get('GEMINI_TTS_MODEL', 'gemini-2.5-flash-preview-tts')}")
+    return path, dur
 
 
 def _engine_google(text: str, out_dir: str) -> tuple[str, float]:

@@ -429,3 +429,194 @@ def test_plain_text_failure_does_not_double_post(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="403"):
         voice._synthesize_google("No tags here.", str(tmp_path))
     assert len(calls) == 1
+
+
+# --- Gemini Developer API TTS engine ----------------------------------------------------
+
+def _fake_genai(monkeypatch, captured, pcm: bytes | None = None):
+    """Patch google.genai.Client with a stub, capturing generate_content kwargs.
+
+    `_synthesize_gemini` imports genai inside the function, so patching the module attribute
+    is what the call actually resolves.
+    """
+    if pcm is None:
+        pcm = b"\x00\x00" * 24000  # 1.0s of silence at 24 kHz, 16-bit mono
+
+    inline = type("Inline", (), {"data": pcm})()
+    part = type("Part", (), {"inline_data": inline})()
+    content = type("Content", (), {"parts": [part]})()
+    candidate = type("Candidate", (), {"content": content})()
+    resp = type("Resp", (), {"candidates": [candidate]})()
+
+    class _Models:
+        def generate_content(self, **kw):
+            captured.update(kw)
+            return resp
+
+    class _Client:
+        def __init__(self, api_key=None):
+            captured["api_key"] = api_key
+            self.models = _Models()
+
+    import google.genai as genai
+    monkeypatch.setattr(genai, "Client", _Client)
+
+
+def test_gemini_tts_writes_wav_and_measures_duration(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    path, dur = voice._synthesize_gemini("Sure. [sarcastic] That'll work.", str(tmp_path))
+    assert path.endswith(".wav") and os.path.getsize(path) > 44
+    assert dur == pytest.approx(1.0, abs=0.05)
+    with wave.open(path, "rb") as w:
+        assert w.getframerate() == 24000
+        assert w.getnchannels() == 1
+        assert w.getsampwidth() == 2
+
+
+def test_gemini_tts_wraps_raw_pcm_so_it_is_readable(monkeypatch, tmp_path):
+    """The API returns raw PCM, not a WAV container — unwrapped it is unreadable."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    _fake_genai(monkeypatch, {})
+    path, _ = voice._synthesize_gemini("hi there", str(tmp_path))
+    with open(path, "rb") as f:
+        assert f.read(4) == b"RIFF"  # a real container, not bare samples
+
+
+def test_gemini_tts_passes_style_prompt_and_keeps_style_tags(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("VOICE_STYLE_PROMPT", "Dry and deadpan.")
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice._synthesize_gemini("Sure. [sarcastic] That'll work. [pause] Really.", str(tmp_path))
+    assert "Dry and deadpan." in cap["contents"]
+    assert "[sarcastic]" in cap["contents"]
+    assert "[pause]" not in cap["contents"]  # pause tags belong to Chirp
+
+
+def test_gemini_tts_uses_configured_model_and_voice(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("GEMINI_TTS_MODEL", "gemini-2.5-pro-preview-tts")
+    monkeypatch.setenv("GEMINI_TTS_VOICE", "Puck")
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["model"] == "gemini-2.5-pro-preview-tts"
+    vc = cap["config"].speech_config.voice_config.prebuilt_voice_config
+    assert vc.voice_name == "Puck"
+
+
+def test_gemini_tts_defaults_to_the_free_flash_model(monkeypatch, tmp_path):
+    """Pro has no free tier; the default must not start spending on its own."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.delenv("GEMINI_TTS_MODEL", raising=False)
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["model"] == "gemini-2.5-flash-preview-tts"
+
+
+def test_gemini_tts_requests_audio_modality(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice._synthesize_gemini("hi there", str(tmp_path))
+    assert "AUDIO" in cap["config"].response_modalities
+
+
+def test_gemini_tts_prefers_dedicated_key(monkeypatch, tmp_path):
+    """A separate key lets TTS avoid starving grounded ideation's RPD (rule 13)."""
+    monkeypatch.setenv("GEMINI_API_KEY", "shared")
+    monkeypatch.setenv("GEMINI_TTS_API_KEY", "dedicated")
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["api_key"] == "dedicated"
+
+
+def test_gemini_tts_falls_back_to_shared_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "shared")
+    monkeypatch.delenv("GEMINI_TTS_API_KEY", raising=False)
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["api_key"] == "shared"
+
+
+def test_gemini_tts_missing_key_raises(monkeypatch, tmp_path):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_TTS_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="not set"):
+        voice._synthesize_gemini("hi there", str(tmp_path))
+
+
+def test_gemini_tts_raises_on_empty_audio(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    _fake_genai(monkeypatch, {}, pcm=b"")
+    with pytest.raises(RuntimeError, match="empty audio"):
+        voice._synthesize_gemini("hi there", str(tmp_path))
+
+
+def test_gemini_tts_raises_on_unexpected_response_shape(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+
+    class _Models:
+        def generate_content(self, **kw):
+            return type("Resp", (), {"candidates": []})()
+
+    class _Client:
+        def __init__(self, api_key=None):
+            self.models = _Models()
+
+    import google.genai as genai
+    monkeypatch.setattr(genai, "Client", _Client)
+    with pytest.raises(RuntimeError, match="unexpected response shape"):
+        voice._synthesize_gemini("hi there", str(tmp_path))
+
+
+def test_gemini_absent_from_chain_by_default(monkeypatch, tmp_path):
+    """Ships inert: the default VOICE_ENGINE must not reach the new engine at all."""
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+    called = []
+    monkeypatch.setattr(voice, "_engine_gemini", lambda *a: called.append(1) or ("x.wav", 1.0))
+    monkeypatch.setattr(voice, "_engine_google", lambda *a: ("ok.wav", 2.0))
+    voice.synthesize("hello there", str(tmp_path))
+    assert called == []
+
+
+def test_gemini_selected_heads_the_chain_and_falls_soft(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOICE_ENGINE", "gemini")
+    order = []
+
+    def _boom(*_a):
+        order.append("gemini")
+        raise RuntimeError("quota exhausted")
+
+    monkeypatch.setattr(voice, "_engine_gemini", _boom)
+    monkeypatch.setattr(voice, "_engine_google",
+                        lambda *a: (order.append("google"), ("ok.wav", 2.0))[1])
+    path, dur = voice.synthesize("hello there", str(tmp_path))
+    assert order == ["gemini", "google"]
+    assert path == "ok.wav"
+
+
+def test_gemini_tts_alias_resolves(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOICE_ENGINE", "gemini-tts")
+    order = []
+    monkeypatch.setattr(voice, "_engine_gemini",
+                        lambda *a: (order.append("gemini"), ("ok.wav", 2.0))[1])
+    voice.synthesize("hello there", str(tmp_path))
+    assert order == ["gemini"]
+
+
+def test_live_gemini_tts(tmp_path):
+    """Real Gemini TTS. Gated by its own flag: the Pro model has NO free tier, so this must
+    never run unattended in CI."""
+    if os.environ.get("GEMINI_TTS_LIVE_TEST") != "1":
+        pytest.skip("set GEMINI_TTS_LIVE_TEST=1 to run (may bill on non-free models)")
+    path, dur = voice._synthesize_gemini(
+        "Another committee. [sarcastic] Groundbreaking. Here's why it actually matters.",
+        str(tmp_path))
+    assert os.path.getsize(path) > 10_000
+    assert 1.0 < dur < 30.0
