@@ -69,6 +69,15 @@ like a sharp, sarcastic friend who finds the absurdity in the news but means the
 not an essay. No hateful or personal attacks; roast situations and irony, not people \
 (harassment = demonetization).
 
+DELIVERY DIRECTION (this is how it will be READ ALOUD):
+Write for the ear first. Short punchy sentences, contractions, natural rhythm. Use "..." for a \
+deliberate beat or hesitation — it changes the timing on every voice engine.
+Then add AT MOST 3 delivery tags total, only where they genuinely land:
+- [pause] or [pause long] for a comic beat before a punchline or the "why it matters" turn.
+- [sarcastic], [deadpan] or [dry] immediately before the line whose TONE flips.
+Tags are stage direction, never narration — never write a tag the sentence already says out \
+loud, and never open the script with one. Fewer is better: a tag on every line reads as noise.
+
 ACCURACY (THE ONE HARD LINE): VERIFY the development actually \
 happened (use the sources + web search). State ONLY facts you can support. NEVER invent product \
 names, version numbers, figures, dates, quotes, or events. Sharpen the FRAMING, never fabricate the \
@@ -191,20 +200,46 @@ def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
     new_body = (data.get("script_body") or "").strip()
     new_title = (data.get("title") or "").strip()
     max_words = int(config.get("SCRIPT_MAX_WORDS", "80"))
-    if new_body and 40 <= len(new_body.split()) <= max_words:  # accept only if it stayed short
+    if new_body and 40 <= len(_visible_words(new_body)) <= max_words:  # accept only if it stayed short
         log.info("scriptwriter: punched up a weak hook (score %d).", score)
         return (new_title or title), new_body
     log.info("scriptwriter: punch-up rewrite unusable (score %d); keeping original.", score)
     return title, body
 
 
+# Delivery tags must be matched against the WHOLE string, not token-by-token: "[pause long]"
+# contains a space, so splitting on whitespace yields "[pause" and "long]" and a per-token test
+# counts BOTH as spoken words.
+_TAG_IN_TEXT_RE = re.compile(r"\[[^\]]*\]")
+# A tag, or a run of non-space that does not start a tag (so "three.[pause]" splits cleanly).
+_PIECE_RE = re.compile(r"\[[^\]]*\]|[^\s\[]+")
+
+
+def _visible_words(body: str) -> list[str]:
+    """Words the narrator actually SAYS — inline delivery tags ([pause], [sarcastic]) are stage
+    direction for the TTS engine, not narration. Counting them would silently shrink the
+    25-30s script budget every time the model added one."""
+    return _TAG_IN_TEXT_RE.sub(" ", body).split()
+
+
 def _truncate_to_words(body: str, max_words: int) -> str:
     """Hard length backstop: if the body exceeds max_words, cut to the last full sentence
-    at or under the cap (so we never end mid-thought). Deterministic."""
-    words = body.split()
-    if len(words) <= max_words:
+    at or under the cap (so we never end mid-thought). Deterministic.
+
+    Delivery tags are carried through and do not count toward the cap."""
+    if len(_visible_words(body)) <= max_words:
         return body
-    truncated = " ".join(words[:max_words])
+    kept, spoken = [], 0
+    for m in _PIECE_RE.finditer(body):
+        piece = m.group(0)
+        if piece.startswith("[") and piece.endswith("]"):
+            kept.append(piece)
+            continue
+        if spoken >= max_words:
+            break
+        kept.append(piece)
+        spoken += 1
+    truncated = " ".join(kept)
     ends = list(re.finditer(r"[.!?]", truncated))
     return (truncated[: ends[-1].end()] if ends else truncated).strip()
 
@@ -273,12 +308,13 @@ def write_script(idea: dict, template: str = "N") -> dict:
                   if isinstance(kp, list) else [])
 
     max_words = int(config.get("SCRIPT_MAX_WORDS", "80"))
-    if len(body.split()) > max_words:
+    if len(_visible_words(body)) > max_words:
         log.warning("scriptwriter: idea %s script %d words > %d cap; truncating to a sentence.",
-                    idea_id, len(body.split()), max_words)
+                    idea_id, len(_visible_words(body)), max_words)
         body = _truncate_to_words(body, max_words)
-    if len(body.split()) < 50:
-        log.warning("scriptwriter: idea %s script is short (%d words)", idea_id, len(body.split()))
+    if len(_visible_words(body)) < 50:
+        log.warning("scriptwriter: idea %s script is short (%d words)",
+                    idea_id, len(_visible_words(body)))
 
     # Persist the published title too, so the analytics loop can learn which title STYLE wins
     # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.
