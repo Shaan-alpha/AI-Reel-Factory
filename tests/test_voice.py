@@ -221,3 +221,76 @@ def test_live_edge_tts(monkeypatch, tmp_path):
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"edge-tts unreachable: {e}")
     assert os.path.exists(path) and os.path.getsize(path) > 1000 and 0 < duration < 60
+
+
+# --- inline delivery tags (per-engine filtering) ----------------------------------------
+
+def test_clean_tts_text_strips_every_tag():
+    assert voice._clean_tts_text("A [sarcastic] b <sfx:whoosh> c") == "A b c"
+
+
+def test_pause_markup_keeps_only_pause_tags():
+    out = voice._pause_markup("Well [sarcastic] that worked. [pause long] Sure it did.")
+    assert "[pause long]" in out
+    assert "[sarcastic]" not in out
+
+
+def test_style_text_keeps_only_style_tags():
+    out = voice._style_text("Well [sarcastic] that worked. [pause long] Sure.")
+    assert "[sarcastic]" in out
+    assert "[pause long]" not in out
+
+
+def test_invented_tags_are_stripped_not_forwarded():
+    """An LLM inventing a tag must never reach an API (400) or be read aloud."""
+    assert voice._pause_markup("a [explodes] b") == "a b"
+    assert voice._style_text("a [explodes] b") == "a b"
+
+
+def test_tag_counts_are_capped(monkeypatch):
+    monkeypatch.setenv("MAX_PAUSE_TAGS", "2")
+    text = "a [pause] b [pause] c [pause] d [pause] e"
+    assert voice._pause_markup(text).count("[pause]") == 2
+
+
+def test_has_pause_tag():
+    assert voice._has_pause_tag("a [pause long] b") is True
+    assert voice._has_pause_tag("a [sarcastic] b") is False
+
+
+def test_tags_never_reach_edge_tts(monkeypatch, tmp_path):
+    """edge-tts has no tag support, so a tag reaching it would be read aloud."""
+    monkeypatch.setenv("VOICE_ENGINE", "edge")
+    seen = {}
+
+    def _fake_edge(text, out_path, voice_name, rate):
+        seen["text"] = text
+        with open(out_path, "wb") as f:
+            f.write(b"\x00")
+        return 2.0
+
+    monkeypatch.setattr(voice, "_synthesize_edge_tts", _fake_edge)
+    voice.synthesize("Well [sarcastic] that worked. [pause long] Sure.", str(tmp_path))
+    assert "[" not in seen["text"]
+    assert seen["text"] == "Well that worked. Sure."
+
+
+def test_tags_never_reach_kokoro(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
+    seen = {}
+
+    def _fake_kokoro(text, out_path):
+        seen["text"] = text
+        with open(out_path, "wb") as f:
+            f.write(b"\x00")
+        return 2.0
+
+    monkeypatch.setattr(voice, "_synthesize_kokoro", _fake_kokoro)
+    voice.synthesize("Sure. [sarcastic] Brilliant.", str(tmp_path))
+    assert "[" not in seen["text"]
+
+
+def test_tags_only_body_is_treated_as_empty(tmp_path):
+    """Tags are stage direction, not narration — a body of only tags has nothing to say."""
+    with pytest.raises(ValueError, match="empty script_body"):
+        voice.synthesize("[pause] [sarcastic]", str(tmp_path))

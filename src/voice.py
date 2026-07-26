@@ -216,26 +216,76 @@ def _engine_google(text: str, out_dir: str) -> tuple[str, float]:
 
 
 def _engine_edge(text: str, out_dir: str) -> tuple[str, float]:
-    out_path = os.path.join(out_dir, _audio_filename(text, ".mp3"))
-    dur = _synthesize_edge_tts(text, out_path, _VOICE, _RATE)
+    clean = _clean_tts_text(text)  # no tag support: a tag here would be read aloud
+    out_path = os.path.join(out_dir, _audio_filename(clean, ".mp3"))
+    dur = _synthesize_edge_tts(clean, out_path, _VOICE, _RATE)
     _log_done(out_path, dur, f"edge-tts:{_VOICE}")
     return out_path, dur
 
 
 def _engine_kokoro(text: str, out_dir: str) -> tuple[str, float]:
-    out_path = os.path.join(out_dir, _audio_filename(text, ".wav"))
-    dur = _synthesize_kokoro(text, out_path)
+    clean = _clean_tts_text(text)  # no tag support
+    out_path = os.path.join(out_dir, _audio_filename(clean, ".wav"))
+    dur = _synthesize_kokoro(clean, out_path)
     _log_done(out_path, dur, "kokoro")
     return out_path, dur
 
 
-_TAG_RE = re.compile(r"\[[^\]]+\]|<[^>]+>")
+# Inline bracket tags the scriptwriter may emit, in two families consumed by different engines:
+#   pause tags -> Chirp 3 HD's `markup` input field
+#   style tags -> Gemini TTS inline audio tags
+# Everything outside these allow-lists is stripped. An invented tag must never reach an API
+# (it 400s the request) nor the synthesiser (it gets read aloud).
+_PAUSE_TAGS = ("pause short", "pause", "pause long")
+_STYLE_TAGS = ("sarcastic", "deadpan", "dry", "amused", "flat", "sighs", "laughs", "beat")
+
+_TAG_RE = re.compile(r"\[([^\]]{1,24})\]|<[^>]{1,60}>")
+
+
+def _tag_limit(key: str, default: int) -> int:
+    try:
+        return max(0, int(config.get(key, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _filter_tags(text: str, keep: tuple[str, ...], limit: int) -> str:
+    """Keep at most `limit` allow-listed bracket tags; strip every other tag.
+
+    The cap is enforced HERE rather than trusted to the prompt: a prompt asks, a guard is what
+    makes it true. Over-tagging a 25-30s Short reads as sluggish."""
+    kept = 0
+
+    def _sub(m: re.Match) -> str:
+        nonlocal kept
+        inner = m.group(1)
+        if inner is not None:
+            token = inner.strip().lower()
+            if token in keep and kept < limit:
+                kept += 1
+                return f"[{token}]"
+        return ""
+
+    return re.sub(r"\s+", " ", _TAG_RE.sub(_sub, text)).strip()
 
 
 def _clean_tts_text(text: str) -> str:
-    """Strip bracketed emotion/tone tags ([sarcastic], [sigh]) and SFX tags (<sfx:...>) for clean TTS synthesis."""
-    cleaned = _TAG_RE.sub("", text)
-    return re.sub(r"\s+", " ", cleaned).strip()
+    """Strip every tag — for engines with no tag support (edge-tts, Kokoro)."""
+    return _filter_tags(text, (), 0)
+
+
+def _pause_markup(text: str) -> str:
+    """Chirp 3 HD `markup`: keep pause tags, drop style tags."""
+    return _filter_tags(text, _PAUSE_TAGS, _tag_limit("MAX_PAUSE_TAGS", 3))
+
+
+def _style_text(text: str) -> str:
+    """Gemini TTS input: keep style tags, drop pause tags."""
+    return _filter_tags(text, _STYLE_TAGS, _tag_limit("MAX_STYLE_TAGS", 3))
+
+
+def _has_pause_tag(text: str) -> bool:
+    return bool(re.search(r"\[(?:pause short|pause long|pause)\]", text))
 
 
 def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
@@ -247,8 +297,11 @@ def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
     Raises ValueError on empty input, RuntimeError only if EVERY engine fails — the orchestrator
     skips that one reel and keeps the batch going (rule 14: soft on runtime).
     """
-    text = _clean_tts_text(script_body or "")
-    if not text:
+    # Tags are NOT stripped here: each engine filters for itself, because which tags are
+    # meaningful depends on the engine (Chirp reads pause tags, Gemini reads style tags, edge-tts
+    # and Kokoro read neither). Stripping up front is what made the tags a no-op before.
+    raw = (script_body or "").strip()
+    if not _clean_tts_text(raw):  # tags alone are stage direction, not narration
         raise ValueError("voice.synthesize: empty script_body.")
     os.makedirs(out_dir, exist_ok=True)
 
@@ -262,7 +315,7 @@ def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
         if fn is None:
             continue
         try:
-            return fn(text, out_dir)
+            return fn(raw, out_dir)
         except Exception as e:  # noqa: BLE001 — try the next engine in the chain (rule 11)
             log.warning("voice: engine %s failed (%s); trying next", name, e)
             errors.append(f"{name}: {e}")
