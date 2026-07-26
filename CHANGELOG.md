@@ -5,6 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Expressive narration
+
+### Added
+- **Per-engine delivery tags** (`voice._filter_tags`): the scriptwriter emits two tag families and
+  each engine keeps only what it understands — `[pause]`/`[pause long]` become Chirp 3 HD `markup`,
+  `[sarcastic]`/`[deadpan]`/`[dry]` pass through to Gemini TTS, and both are stripped for edge-tts
+  and Kokoro. Allow-listed, with counts capped in code (`MAX_PAUSE_TAGS`/`MAX_STYLE_TAGS`, default
+  3) rather than trusted to the prompt.
+- **`gemini` TTS engine** — promptable narration via the Gemini Developer API, using the existing
+  `GEMINI_API_KEY` and the already-pinned `google-genai`: no new dependency, no new credential.
+  Default `gemini-2.5-flash-preview-tts` is free on input and output; `gemini-2.5-pro-preview-tts`
+  has no free tier (~$1.27/month at 3 Shorts/day). Opt-in via `VOICE_ENGINE=gemini` and absent from
+  the fallback chain otherwise. `VOICE_STYLE_PROMPT` sets the style; optional `GEMINI_TTS_API_KEY`
+  isolates TTS from the grounded-ideation quota (rule 13).
+- **`GOOGLE_TTS_SPEAKING_RATE`** (clamped 0.25–2.0) on the Chirp path.
+- **`tools/compare_voices.py`** renders one script through Chirp, Gemini Flash and Gemini Pro so
+  the model choice is made by ear.
+
+### Fixed
+- **Delivery tags were a no-op.** `synthesize()` stripped every tag before dispatching, so none
+  could reach an engine — and emotion tags are not a Chirp feature regardless. Inline audio tags
+  are a Gemini Developer API feature; Chirp reads pause tags only via `markup`.
+- **The length guard miscounted tags as speech.** `[pause long]` contains a space, so whitespace
+  splitting produced `[pause` and `long]` and counted both as spoken words at all three cap sites,
+  silently shrinking the 25–30s budget. `_visible_words` now matches tags against the whole string,
+  and truncation carries tags through while still cutting on a sentence boundary.
+- **Gemini TTS returns raw 24 kHz PCM, not a WAV container** — it is wrapped before use; unwrapped,
+  ffprobe and whisper cannot read the file.
+- A Chirp **markup rejection now retries once as plain text** before failing over, so an unexpected
+  syntax error costs the comic timing rather than the voice.
+- The `voice` module docstring still described Kokoro as the primary engine long after Chirp took
+  over.
+
+### Changed
+- **280 tests pass, 3 skipped** (was 242, 2).
+
 ## [Unreleased] — Content-engine audit: provider fixes, SFX retune, opt-in stat cards
 
 ### Fixed
