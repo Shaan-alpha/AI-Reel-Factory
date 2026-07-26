@@ -5,7 +5,8 @@ Contract:
                    captions into the reel.
     input        : video_path, audio_path, output path.
     output       : path to the final captioned .mp4.
-    depends on   : faster-whisper (WhisperX is the Phase-2 upgrade) + FFmpeg.
+    depends on   : faster-whisper (WhisperX is the Phase-2 upgrade) + FFmpeg;
+                   src.graphics (Pillow) only on the optional ENABLE_GRAPHIC_CARDS path.
 
 Captions are pixel-baked so they survive re-uploads. Style: large, centered/lower-third,
 bold, high-contrast with a thick outline — this is a retention driver, in the MVP on purpose.
@@ -196,6 +197,38 @@ def _card_events(key_points: list[str], total_dur: float, start_after: float,
     return out
 
 
+def _graphic_cards_enabled() -> bool:
+    """PIL stat cards instead of ASS text cards. Default OFF: the ASS cards already ship and
+    work, so this is a look change the operator opts into for a run and judges, not a silent
+    switch on a live channel."""
+    return config.get_bool("ENABLE_GRAPHIC_CARDS", False)
+
+
+def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
+                          work_dir: str) -> list[tuple[float, float, str]]:
+    """Render each key point as a PIL stat-card PNG. Returns [(start_s, end_s, png_path)].
+
+    Shares `_card_events` with the ASS path so both treatments use ONE timing rule. Returns []
+    when disabled or on any failure, and the caller then falls back to the ASS text cards —
+    a card renderer breaking must never cost us the captions (rules 11, 14)."""
+    if not (key_points and config.get_bool("ENABLE_TEXT_CARDS", True) and _graphic_cards_enabled()):
+        return []
+    try:
+        from src import graphics
+
+        start_after = float(config.get("HOOK_SECONDS", "1.8"))
+        card_dur = float(config.get("CARD_SECONDS", "1.8"))
+        out: list[tuple[float, float, str]] = []
+        for i, (cs, ce, text) in enumerate(_card_events(key_points, total_dur, start_after, card_dur)):
+            png = os.path.join(work_dir, f"card_{i}.png")
+            graphics.create_stat_card(text, png)
+            out.append((cs, ce, png))
+        return out
+    except Exception as e:  # noqa: BLE001 — fall back to the ASS text cards
+        log.warning("subtitles: graphic cards failed (%s); using ASS text cards instead", e)
+        return []
+
+
 def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None,
                key_points: list[str] | None = None, total_dur: float | None = None,
                source_label: str | None = None) -> str:
@@ -258,15 +291,35 @@ def _stage_font(dest_dir: str) -> None:
         log.warning("subtitles: could not stage caption font %s (%s)", src, e)
 
 
-def _burn(video_path: str, ass_path: str, out_path: str) -> None:
+def _burn(video_path: str, ass_path: str, out_path: str,
+          cards: list[tuple[float, float, str]] | None = None) -> None:
     """Burn the .ass onto the video with FFmpeg. Runs in the subtitle's dir so the filter
-    arg is a bare filename — avoids Windows drive-colon/backslash escaping in libass."""
+    arg is a bare filename — avoids Windows drive-colon/backslash escaping in libass.
+
+    `cards` are PIL stat-card PNGs composited centre-frame for their window. Each is a `-loop 1`
+    still (so it exists at its timestamps, mirroring assembly's brand-bug pattern) gated by
+    `enable='between(t,...)'`; `-shortest` keeps those infinite inputs from extending the reel."""
     work_dir = os.path.dirname(os.path.abspath(ass_path))
     _stage_font(work_dir)  # so libass resolves CAPTION_FONT via a relative fontsdir
-    cmd = [
-        _ffmpeg(), "-y",
-        "-i", os.path.abspath(video_path),
-        "-vf", f"ass={os.path.basename(ass_path)}:fontsdir=.",
+    cards = cards or []
+
+    cmd = [_ffmpeg(), "-y", "-i", os.path.abspath(video_path)]
+    for _cs, _ce, png in cards:
+        cmd += ["-loop", "1", "-i", os.path.basename(png)]  # basename + cwd: no path escaping
+
+    if not cards:
+        cmd += ["-vf", f"ass={os.path.basename(ass_path)}:fontsdir=."]
+    else:
+        parts = [f"[0:v]ass={os.path.basename(ass_path)}:fontsdir=.[base]"]
+        label = "[base]"
+        for i, (cs, ce, _png) in enumerate(cards, start=1):
+            nxt = f"[c{i}]"
+            parts.append(f"{label}[{i}:v]overlay=(W-w)/2:(H-h)/2"
+                         f":enable='between(t,{cs:.3f},{ce:.3f})'{nxt}")
+            label = nxt
+        cmd += ["-filter_complex", ";".join(parts), "-map", label, "-map", "0:a?", "-shortest"]
+
+    cmd += [
         "-c:a", "copy",
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
@@ -285,6 +338,10 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
     is the in-feed thumbnail, so this is the biggest free CTR lever. `key_points` are short
     phrases burned as sparse mid-frame cards (story-specific text). Both optional/back-compatible.
+
+    With ENABLE_GRAPHIC_CARDS the key points render as PIL stat-card PNGs overlaid on the video
+    instead of ASS text; if that render or its filtergraph fails we fall back to the ASS cards,
+    so the styled-card path can never cost us a reel (rules 11, 14).
     """
     if not os.path.exists(video_path):
         raise ValueError(f"subtitles: video not found: {video_path}")
@@ -298,13 +355,31 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     out_dir = os.path.dirname(os.path.abspath(out_path))
     os.makedirs(out_dir, exist_ok=True)
     digest = hashlib.sha1(os.path.abspath(audio_path).encode("utf-8")).hexdigest()[:12]
-    ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
     total_dur = words[-1][1] if words else None
-    with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_build_ass(words, hook_text, key_points, total_dur, source_label))
 
-    log.info("subtitles: burning %d word events into %s", len(words), out_path)
-    _burn(video_path, ass_path, out_path)
+    cards = _render_graphic_cards(key_points, total_dur or 0.0, out_dir)
+
+    # The ASS omits text cards only when PNG cards will draw them, so they never double up.
+    ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
+    with open(ass_path, "w", encoding="utf-8") as f:
+        f.write(_build_ass(words, hook_text, None if cards else key_points, total_dur, source_label))
+
+    fallback_ass = None
+    if cards:  # a full-featured fallback: same captions, cards back as ASS text
+        fallback_ass = os.path.join(out_dir, f"captions_{digest}_text.ass")
+        with open(fallback_ass, "w", encoding="utf-8") as f:
+            f.write(_build_ass(words, hook_text, key_points, total_dur, source_label))
+
+    log.info("subtitles: burning %d word events into %s (graphic cards=%d)",
+             len(words), out_path, len(cards))
+    try:
+        _burn(video_path, ass_path, out_path, cards=cards)
+    except RuntimeError:
+        if not fallback_ass:
+            raise
+        log.warning("subtitles: card-overlay burn failed; retrying with ASS text cards.")
+        _burn(video_path, fallback_ass, out_path, cards=None)
+
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
     return out_path
