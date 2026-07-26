@@ -84,14 +84,19 @@ def _work_root() -> str:
     return root
 
 
-def _build_metadata(idea: dict, script: dict) -> dict:
+_CORE_CHANNEL_TAGS = ("But It Matters", "News Shorts", "Why It Matters", "India News Explainer", "Trending News")
+
+
+def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True) -> dict:
     """Map an idea + its script into YouTube upload metadata (publish enforces disclosure/#Shorts).
 
-    Prefers the scriptwriter's SEO title; merges hashtags + SEO tags (de-duped) for discoverability.
+    Prefers the scriptwriter's SEO title; merges hashtags + SEO tags + core channel tags (de-duped)
+    for maximum Shorts discoverability and search indexing.
     """
     title = (script.get("title") or idea.get("title") or "").strip()
     seen, tags = set(), []
-    for t in [*script.get("hashtags", []), *script.get("tags", [])]:
+    extra_tags = _CORE_CHANNEL_TAGS if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True) else ()
+    for t in [*script.get("hashtags", []), *script.get("tags", []), *extra_tags]:
         t = str(t).lstrip("#").strip()
         if t and t.lower() not in seen:
             seen.add(t.lower())
