@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **311 pass, 4 skipped**)
-**Last updated:** 2026-07-27
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **313 pass, 5 skipped** — re-measured 2026-08-05)
+**Last updated:** 2026-08-05
 **Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
 **Editorial policy:** **truth over neutrality** — verdicts allowed, every load-bearing claim gated by `factcheck.verify()`
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
@@ -95,6 +95,12 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-08-05 — Stale test count corrected in both docs
+🔴 **README and STATUS disagreed with reality and with each other.** Ran the full suite:
+**313 passed, 5 skipped** (209s). README claimed 199, STATUS claimed 311. Both corrected
+(rule 1). No code changed — this is a docs-only fix. Found while sourcing a figure for a
+public post, which is the cheap way to find it; the expensive way is publishing it.
 
 ### 2026-07-27 — Policy change: truth over neutrality, enforced by a fact-check gate
 **Operator decision.** The "soft-positive" lean and the "strictly neutral / never take political
