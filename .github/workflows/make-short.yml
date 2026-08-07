@@ -107,6 +107,7 @@ jobs:
           ENABLE_PAUSE_MARKUP: ${{ vars.ENABLE_PAUSE_MARKUP || 'true' }}  # [pause] -> Chirp markup
           MAX_PAUSE_TAGS: ${{ vars.MAX_PAUSE_TAGS || '3' }}
           MAX_STYLE_TAGS: ${{ vars.MAX_STYLE_TAGS || '3' }}
+          ENABLE_TAG_FLOOR: ${{ vars.ENABLE_TAG_FLOOR || 'true' }}     # >=1 tag: [serious] on the payoff turn
           SFX_DIR: ${{ vars.SFX_DIR }}                              # where generated SFX wavs cache
           CAPTION_FONT_FILE: ${{ vars.CAPTION_FONT_FILE }}          # ttf for libass + stat cards
           VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only

@@ -72,7 +72,9 @@ not an essay. No hateful or personal attacks; roast situations and irony, not pe
 DELIVERY DIRECTION (this is how it will be READ ALOUD):
 Write for the ear first. Short punchy sentences, contractions, natural rhythm. Use "..." for a \
 deliberate beat or hesitation — it changes the timing on every voice engine.
-Then add AT MOST 3 delivery tags total, only where they genuinely land:
+Then add AT LEAST 1 and AT MOST 3 delivery tags. The one that is REQUIRED is a tone tag on the \
+"why it matters" turn — that line is the whole point of the video, and read in the same dry \
+register as the joke before it, it lands as one more punchline. The rest are optional:
 - [pause] or [pause long] for a comic beat before a punchline or the "why it matters" turn.
 - [sarcastic], [deadpan] or [dry] immediately before the line whose TONE flips.
 - [serious] for the "why it matters" turn when the subject deserves it — this is the one that \
@@ -273,6 +275,50 @@ def _ensure_disclosure(caption: str) -> str:
     return f"{caption.rstrip()}\n{DISCLOSURE_LINE}" if caption.strip() else DISCLOSURE_LINE
 
 
+# The retention bridge the prompt asks for ("Here's why it actually matters…"). Matching it is
+# how the floor knows WHERE the payoff starts — the tag is worthless in the wrong place.
+_WHY_IT_MATTERS_RE = re.compile(
+    r"(?i)\b(here'?s why\b|why (?:it|this)(?: actually)? matters\b"
+    r"|(?:it|this) (?:actually )?matters because\b|the real (?:point|issue) (?:here )?is\b)")
+# Sentence boundary: terminator + whitespace. Used to walk BACK to the start of the sentence the
+# bridge lives in, so the tag lands on the whole payoff rather than mid-clause.
+_SENTENCE_END_RE = re.compile(r"[.!?…](?:[\"')\]]*)\s+")
+
+
+def _ensure_delivery_tag(body: str) -> str:
+    """Guarantee the script carries at least one delivery tag, on the 'why it matters' turn.
+
+    Measured 2026-08-07 against the last 5 produced scripts: two of them shipped with NO tags at
+    all. The prompt says "AT MOST 3 … fewer is better", which permits zero — so on a channel whose
+    whole premise is the delivery, ~40% of reels went out with no direction on the read.
+
+    A prompt asks; a guard is what makes it true (the same reasoning as MAX_STYLE_TAGS in voice).
+    [serious] is the one worth guaranteeing: the payoff line is both the emotional turn and the
+    originality signal that carries the monetization gate (docs/08 §1), and it is the line most
+    damaged by being read in the same dry register as the joke before it.
+
+    Fail-soft and conservative: if the script already has any style tag, or the bridge cannot be
+    located confidently, the body is returned UNCHANGED. A tag guessed into the wrong sentence
+    would be worse than no tag.
+    """
+    from src import voice  # local import: keeps the tag allow-list in ONE module (rule 7)
+
+    if not config.get_bool("ENABLE_TAG_FLOOR", True) or voice.has_style_tag(body):
+        return body
+
+    m = _WHY_IT_MATTERS_RE.search(body)
+    if not m:
+        log.info("scriptwriter: no delivery tag and no 'why it matters' bridge found; "
+                 "leaving the script untagged rather than guessing a placement.")
+        return body
+
+    # Walk back to the start of the sentence containing the bridge.
+    starts = [e.end() for e in _SENTENCE_END_RE.finditer(body, 0, m.start())]
+    at = starts[-1] if starts else 0
+    log.info("scriptwriter: script had no delivery tag; inserted [serious] on the payoff turn.")
+    return f"{body[:at]}[serious] {body[at:]}".strip()
+
+
 def _ensure_shorts(hashtags: list[str]) -> list[str]:
     """Guarantee #Shorts is present (YouTube classifies the upload as a Short)."""
     if any(h.lower() == "#shorts" for h in hashtags):
@@ -328,6 +374,10 @@ def write_script(idea: dict, template: str = "N") -> dict:
     if len(_visible_words(body)) < 50:
         log.warning("scriptwriter: idea %s script is short (%d words)",
                     idea_id, len(_visible_words(body)))
+
+    # After the word cap, so truncation can never cut the tag back off. Tags are not spoken
+    # words (_visible_words ignores them), so this cannot push the script over the cap.
+    body = _ensure_delivery_tag(body)
 
     # Persist the published title too, so the analytics loop can learn which title STYLE wins
     # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.

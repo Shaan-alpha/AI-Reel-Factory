@@ -315,3 +315,60 @@ def test_prompt_teaches_pause_and_style_tags():
     assert "[sarcastic]" in prompt
     assert "..." in prompt          # ellipses work on engines with no tag support
     assert "3" in prompt            # the explicit cap
+
+
+def test_prompt_requires_a_tag_on_the_payoff():
+    """The cap used to be the only instruction, and 'AT MOST 3' permits zero."""
+    prompt = scriptwriter._build_prompt(IDEA, "N")
+    assert "AT LEAST 1" in prompt
+    assert "[serious]" in prompt
+
+
+# --- delivery-tag floor (2026-08-07) ---------------------------------------------------------
+# Measured against the last 5 produced scripts: 2 shipped with NO delivery tags at all.
+
+def test_untagged_script_gets_serious_on_the_payoff_turn():
+    body = ("Fifteen of twenty-two firms had ties to the panel. So much for deep-tech. "
+            "Here's why it actually matters: the money was public.")
+    out = scriptwriter._ensure_delivery_tag(body)
+    assert "[serious] Here's why it actually matters" in out
+    assert out.count("[serious]") == 1
+
+
+def test_floor_leaves_an_already_tagged_script_alone():
+    body = "A thing happened. [sarcastic] Shocking. Here's why it matters: it costs you money."
+    assert scriptwriter._ensure_delivery_tag(body) == body
+
+
+def test_floor_does_not_guess_when_there_is_no_bridge():
+    """A tag in the wrong sentence is worse than no tag, so this must no-op, not approximate."""
+    body = "A thing happened. Another thing happened. Then it stopped."
+    assert scriptwriter._ensure_delivery_tag(body) == body
+
+
+def test_floor_tag_is_one_the_voice_module_will_actually_forward():
+    """The bug this whole thread started from: a tag emitted but silently stripped downstream."""
+    from src import voice
+    out = scriptwriter._ensure_delivery_tag("Stuff happened. Here's why it matters: cost.")
+    assert voice.has_style_tag(out)
+    assert "[serious]" in voice._style_text(out)
+
+
+def test_floor_inserts_at_the_sentence_start_not_mid_clause():
+    body = "The rule changed in April. It matters because your bill moves."
+    out = scriptwriter._ensure_delivery_tag(body)
+    assert out == "The rule changed in April. [serious] It matters because your bill moves."
+
+
+def test_floor_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_TAG_FLOOR", "false")
+    body = "Stuff happened. Here's why it matters: cost."
+    assert scriptwriter._ensure_delivery_tag(body) == body
+
+
+def test_floor_does_not_add_spoken_words():
+    """Tags are stage direction — the floor must not eat into the 25-30s word budget."""
+    body = "Stuff happened here. Here's why it matters: it costs money."
+    before = len(scriptwriter._visible_words(body))
+    after = len(scriptwriter._visible_words(scriptwriter._ensure_delivery_tag(body)))
+    assert before == after

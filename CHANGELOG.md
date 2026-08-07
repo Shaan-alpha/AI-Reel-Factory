@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Guarantee the payoff line is read like it matters
+
+### Added
+- **`scriptwriter._ensure_delivery_tag` — a floor of one delivery tag**, `[serious]` on the "why
+  it matters" turn, plus a prompt that now requires it. The prompt previously said "AT MOST 3 …
+  fewer is better", which permits zero: measured against the last 5 produced scripts, **2 shipped
+  with no delivery tags at all**. The payoff line is both the emotional turn and the originality
+  signal carrying the monetization gate (docs/08 §1), and it is the line most damaged by being
+  read in the same dry register as the joke before it. A prompt asks; a guard makes it true.
+- `ENABLE_TAG_FLOOR` (default true), wired into `.env.example` and both workflows.
+- **`voice.has_style_tag()` is now public** so the scriptwriter asks the voice module rather than
+  keeping a second copy of the allow-list — two lists drifting is exactly how `[curious]` came to
+  be emitted but silently stripped.
+- +8 tests (349 pass, 4 skipped).
+
+### Notes
+- Deliberately fail-soft: if the payoff sentence cannot be located confidently the body is
+  returned **unchanged**, because a tag in the wrong sentence is worse than no tag. Replayed over
+  the last 10 real scripts — 8 already-tagged untouched, 1 fixed with the tag landing exactly on
+  the bridge, 1 left alone. No regressions.
+- The floor runs **after** the word cap, so truncation cannot cut the tag back off; tags are not
+  spoken words, so it cannot push a script over the 25–30s budget.
+
 ## [Unreleased] — Wider expressive range, and a voice that survives a preview-model blip
 
 ### Added

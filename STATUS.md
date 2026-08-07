@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **341 pass, 4 skipped** — re-measured 2026-08-07)
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **349 pass, 4 skipped** — re-measured 2026-08-07)
 **Last updated:** 2026-08-07
 **Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -95,6 +95,35 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-08-07 — Delivery-tag floor: ~40% of reels were shipping with no direction on the read
+Operator observed the latest video "already had sarcastic and curious voice". **Checked the DB
+instead of agreeing** — half right, and the other half was the useful part. **349 pass, 4 skipped.**
+- **`[sarcastic]` was real** (present in scripts 159/157/156, with `[dry]`/`[deadpan]`/`[pause]`).
+  **`[curious]` was not, and could not have been** — it wasn't allow-listed until earlier today, so
+  `voice._style_text` stripped it before the engine. The curiosity was the style prompt plus the
+  writer's conversational openers ("Alright, so in Jharkhand…") — curiosity in the WORDS, not a
+  delivery instruction. So the widened tags don't add a missing quality, they let the writer
+  **place** it deliberately.
+- 🔴 **The real gap: 2 of the last 5 scripts (158, 154) carried NO delivery tags at all.** The
+  prompt said "AT MOST 3 … fewer is better", which permits zero — on a channel whose whole premise
+  is the delivery.
+- **Fix — `_ensure_delivery_tag` + prompt now requires ≥1.** Guarantees `[serious]` on the "why it
+  matters" turn: that line is both the emotional turn and the originality signal carrying the
+  monetization gate (docs/08 §1), and it is the line most damaged by being read in the same dry
+  register as the joke before it. A prompt asks; a guard makes it true (same reasoning as
+  `MAX_STYLE_TAGS`). Toggle **`ENABLE_TAG_FLOOR`**, wired into both workflows.
+- **Fail-soft by design:** if the payoff sentence can't be located confidently the script is left
+  **unchanged** — a tag in the wrong sentence is worse than no tag. **Replayed over the last 10
+  real scripts: 8 already-tagged untouched, 1 fixed (tag landed exactly on the bridge), 1 left
+  alone.** Zero regressions.
+- `voice.has_style_tag()` is now public so the scriptwriter asks **this** module rather than
+  keeping its own copy of the allow-list — two lists drifting is exactly how `[curious]` came to
+  be emitted-but-silently-stripped.
+- ⚙️ **Separate finding, not fixed:** script 158 has no "why it matters" bridge **at all**. That is
+  a content gap, not a tag gap — the template requires that turn and originality is the
+  monetization gate. Worth watching whether the new "AT LEAST 1 tag on the payoff" instruction
+  fixes it indirectly by forcing the turn to exist.
 
 ### 2026-08-07 — Expressive range widened; the Gemini voice now survives a preview blip
 Follow-through on the model audit below. **341 pass, 4 skipped.**

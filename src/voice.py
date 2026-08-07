@@ -490,6 +490,17 @@ def _filter_tags(text: str, keep: tuple[str, ...], limit: int,
     return re.sub(r"\s+", " ", _TAG_RE.sub(_sub, text)).strip()
 
 
+def has_style_tag(text: str) -> bool:
+    """True if `text` carries at least one style tag this module would actually forward.
+
+    Public because the scriptwriter needs to know whether a finished script has any delivery
+    direction, and it must ask THIS module rather than keep its own copy of the allow-list — two
+    lists that drift is precisely how [curious] came to be emitted-but-silently-stripped.
+    """
+    return any(m.group(1) and m.group(1).strip().lower() in _STYLE_TAGS
+               for m in _TAG_RE.finditer(text or ""))
+
+
 def _clean_tts_text(text: str) -> str:
     """Strip every tag — for engines with no tag support (edge-tts, Kokoro)."""
     return _filter_tags(text, (), 0)
