@@ -104,12 +104,39 @@ enforced in code, not merely requested in a prompt:
 |---|---|
 | Ideation | ≥ `MIN_SOURCES` (2) independent real URLs per idea |
 | Scriptwriter | writes web-grounded; every load-bearing claim must be checkable |
-| **Fact check** | [`src/factcheck.py`](../src/factcheck.py) re-checks the FINISHED script against live search **before it is voiced**. Unsupported claim → the reel is **blocked** and the idea marked `rejected`. **"Cannot verify" counts as unsupported.** |
+| **Fact check** | [`src/factcheck.py`](../src/factcheck.py) re-checks the FINISHED script against live search **before it is voiced**. A **fabricated** claim → the reel is **blocked** and the idea marked `rejected`. |
 | Approval | you still make the final call in the Telegram digest |
 
 The fact check is deliberately a **separate, adversarial pass** with its own prompt — the
 scriptwriter grounding its own output is a model marking its own homework. It is told to ignore
 tone entirely: a harsh verdict the evidence supports is fine; a mild claim it cannot source is not.
+
+### What blocks, and what doesn't (severity grading, 2026-08-07)
+
+The first version of the gate treated **every** discrepancy as fatal, including rounding, a date
+off by a day, a figure two sources count differently, and anything one search pass simply failed
+to surface ("absence of evidence is failure"). It blocked most ideas over differences that changed
+nothing — which is its own failure mode: **a gate that stops everything protects nothing, it just
+stops the channel.** Findings are now sorted, and only the first bucket blocks.
+
+| Bucket | Meaning | Examples | Result |
+|---|---|---|---|
+| **Blocking** | the story is **false** | the event/ruling didn't happen; a named party blamed for something they didn't do; an invented quote, law, product, report or statistic; a number off by an order of magnitude, the wrong direction, or >~25%; a blame claim **no** source supports | reel **blocked**, idea `rejected` |
+| **Minor** | the story is **true but imprecise** | rounding; a figure that differs because sources count differently; a date off by a few days; wording, emphasis or over-confidence; a claim nothing contradicts but this pass couldn't confirm; sources disagreeing with each other | **logged loudly, reel ships** |
+
+Two rules decide most cases:
+
+- **Contradiction blocks; non-confirmation does not.** "I could not find this" is minor. "I found
+  that this is false" is blocking. One grounded pass missing a real story is common, and is not
+  evidence that the story is false.
+- **Two sources disagreeing does not make the script wrong.** Both can be wrong, both can be right,
+  or they can be measuring different things. Only the **weight** of the evidence blocks.
+
+This loosens **precision, not the anti-fabrication spine** — the rule-6 trade ("the sharper the
+verdict, the more certain its facts must be") is about invented facts and misplaced blame, and
+those still block. Escape hatch: **`FACTCHECK_SEVERITY=any`** restores block-on-everything. If the
+minor-issue count in the run logs starts climbing, that is the scriptwriter drifting — fix it
+there, not by re-tightening the gate.
 
 ⚠️ Grounded search shares one free-tier bucket (~20/day) with ideation and the scriptwriter. If
 that is exhausted the gate **cannot run** — by default the reel ships unverified with a loud log

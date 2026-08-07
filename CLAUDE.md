@@ -67,8 +67,15 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
      conclusion is not "taking a side", and the earlier "neutral framing" requirement is retired.
      The trade is strict and non-negotiable: **the sharper the verdict, the more certain its
      facts must be.** Enforced, not merely asked for — [`src/factcheck.py`](src/factcheck.py)
-     re-checks every finished script against live search *before* it is voiced, and an
-     unsupported claim **blocks the reel**. "Cannot verify" counts as unsupported.
+     re-checks every finished script against live search *before* it is voiced.
+     **The gate stops fabrication, not imprecision** (severity grading, operator directive
+     2026-08-07): the event not happening, the wrong party blamed, an invented quote/law/statistic,
+     or a number wrong enough to flip the conclusion **blocks the reel**; rounding, a slightly
+     different figure, a date off by a day, wording, and "couldn't confirm but nothing contradicts
+     it" are logged and waived. **Contradiction blocks; non-confirmation does not** — one search
+     pass missing a real story is routine, and two sources disagreeing is not proof the script is
+     wrong (both can be wrong, both can be right, or they measure different things).
+     `FACTCHECK_SEVERITY=any` restores block-on-every-discrepancy.
    - **Sensitivity filter still applies** — communal/religious incitement, anything that could
      inflame violence, rumour-as-fact, deepfakes, graphic tragedy exploitation, and medical or
      financial advice stated as fact remain excluded. Dropping the neutrality rule widened what

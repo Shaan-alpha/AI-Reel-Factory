@@ -132,7 +132,12 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     # abort, and since the channel moved to truth-first commentary (it may now reach a verdict
     # and assign responsibility) verification is a gate rather than advice. Accuracy is the
     # monetization gate (rule 6) — a strike costs far more than a skipped reel.
+    # Only FABRICATION-grade findings block (2026-08-07): imprecision is waived and logged, so
+    # the gate stops false stories rather than stopping the channel. See src/factcheck.py.
     check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "")
+    if check.get("minor"):
+        log.warning("produce: idea %s shipped with %d waived minor fact issue(s): %s",
+                    idea_id, len(check["minor"]), " | ".join(check["minor"][:3]))
     if not check["ok"]:
         db.set_idea_status(idea_id, "rejected")
         raise FactCheckFailed(

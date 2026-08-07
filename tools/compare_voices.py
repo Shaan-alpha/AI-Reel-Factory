@@ -27,8 +27,10 @@ except ImportError:
 
 from src import voice  # noqa: E402 — must follow the sys.path fix above
 
-SCRIPT = ("Another committee has been formed. [sarcastic] Groundbreaking. "
-          "[pause long] Here's why it actually matters: the rules change in April, "
+# Carries one tag from each family plus two of the tags added on 2026-08-07, so the A/B actually
+# exercises the widened expressive range rather than only the sarcasm that already worked.
+SCRIPT = ("[curious] Another committee has been formed. [sarcastic] Groundbreaking. "
+          "[pause long] [serious] Here's why it actually matters: the rules change in April, "
           "and your electricity bill is the one that moves.")
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "voice_ab"
@@ -38,6 +40,11 @@ os.makedirs(OUT, exist_ok=True)
 CANDIDATES = [
     ("chirp", None),
     ("gemini-flash", "gemini-2.5-flash-preview-tts"),
+    # Newest TTS model (launched 2026-04-15): far wider expressive tag vocabulary and 70+
+    # languages. Measured 2026-08-07: it 503'd "high demand" on three attempts across ~40
+    # minutes, so treat a FAIL here as "try again later", not "the model is wrong for us".
+    # _synthesize_gemini falls back to the stable flash model on a 503, keeping the same voice.
+    ("gemini-3.1-flash", "gemini-3.1-flash-tts-preview"),
     ("gemini-pro", "gemini-2.5-pro-preview-tts"),
 ]
 
@@ -63,4 +70,6 @@ if not results:
 
 print("\nListen to each, then set:")
 print("  VOICE_ENGINE=gemini            (or leave 'google' to keep Chirp)")
-print("  GEMINI_TTS_MODEL=<model>       (flash is free; pro is ~$1.27/mo at 3 Shorts/day)")
+print("  GEMINI_TTS_MODEL=<model>       (both flash models are free; pro is ~$1.27/mo at 3/day)")
+print("\nJudge the TAGS, not just the timbre: [curious] on the open, [sarcastic] on the turn,")
+print("[serious] on the payoff. The model that makes the payoff sound MEANT is the one to pick.")

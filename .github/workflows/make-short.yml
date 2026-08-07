@@ -50,6 +50,8 @@ jobs:
       - name: Make a Short (on demand)
         env:                     # secrets configured in repo Settings -> Secrets (rule 5)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.6-flash' }}              # ungrounded text; own per-model free budget
+          GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-2.5-flash' }} # ONLY model with free grounded search — do not bump
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -105,6 +107,7 @@ jobs:
           ENABLE_PAUSE_MARKUP: ${{ vars.ENABLE_PAUSE_MARKUP || 'true' }}  # [pause] -> Chirp markup
           MAX_PAUSE_TAGS: ${{ vars.MAX_PAUSE_TAGS || '3' }}
           MAX_STYLE_TAGS: ${{ vars.MAX_STYLE_TAGS || '3' }}
+          ENABLE_TAG_FLOOR: ${{ vars.ENABLE_TAG_FLOOR || 'true' }}     # >=1 tag: [serious] on the payoff turn
           SFX_DIR: ${{ vars.SFX_DIR }}                              # where generated SFX wavs cache
           CAPTION_FONT_FILE: ${{ vars.CAPTION_FONT_FILE }}          # ttf for libass + stat cards
           VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only
@@ -114,6 +117,7 @@ jobs:
           DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
           APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it
           ENABLE_FACT_CHECK: ${{ vars.ENABLE_FACT_CHECK || 'true' }}   # re-verify every script pre-render
+          FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
