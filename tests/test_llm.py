@@ -180,4 +180,51 @@ def test_generate_grounded_passes_a_model_override(monkeypatch):
     llm.generate_grounded("x", model="gemini-2.5-pro")
     assert seen["model"] == "gemini-2.5-pro"
     llm.generate_grounded("x")
-    assert seen["model"] is None   # None = fall through to GEMINI_MODEL
+    assert seen["model"] is None   # None = fall through to GEMINI_GROUNDED_MODEL
+
+
+# --- model routing (2026-08-07): ungrounded and grounded are NOT the same model -------------
+
+def test_grounded_defaults_to_the_grounded_model_not_the_text_model(monkeypatch):
+    """Measured 2026-08-07: gemini-2.5-flash is the ONLY model with free grounded search — every
+    3.x model 429s the google_search tool. If grounding followed GEMINI_MODEL, moving the text
+    model forward would silently kill grounded ideation, the scriptwriter AND the fact-check gate.
+    """
+    seen = {}
+
+    class _Resp:
+        text = "ok"
+
+    class _Models:
+        @staticmethod
+        def generate_content(*, model, contents, config):
+            seen["model"] = model
+            return _Resp()
+
+    monkeypatch.setattr(llm, "_gemini_client", lambda: type("C", (), {"models": _Models})())
+    monkeypatch.setattr(llm, "_GEMINI_MODEL", "gemini-3.6-flash")
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
+
+    llm._gen_gemini_grounded("x", max_tokens=64)
+    assert seen["model"] == "gemini-2.5-flash", "grounding must not follow the text model"
+
+
+def test_thinking_config_is_picked_per_model_generation():
+    """`thinking_budget` is REJECTED by Gemini 3.x (400 INVALID_ARGUMENT, verified live) — it was
+    replaced by `thinking_level`. Sending the wrong field 400s every Gemini call, which the Groq
+    failover then HIDES, so this needs a test rather than a code comment.
+
+    The only test here that needs the SDK — it asserts on real SDK enum values, and faking those
+    would assert nothing. Skipped rather than dropped so the rest of the file keeps its
+    no-SDK-required property."""
+    types = pytest.importorskip("google.genai.types")
+
+    for name in ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"):
+        cfg = llm._thinking_cfg(name)
+        assert cfg.thinking_level == types.ThinkingLevel.MINIMAL, name
+        assert cfg.thinking_budget is None, f"{name}: 3.x rejects thinking_budget"
+
+    for name in ("gemini-2.5-flash", "gemini-2.0-flash"):
+        cfg = llm._thinking_cfg(name)
+        assert cfg.thinking_budget == 0, name
+        assert cfg.thinking_level is None, f"{name}: 2.x uses thinking_budget"

@@ -28,9 +28,23 @@ from src import config
 
 log = logging.getLogger(__name__)
 
-# Free-tier defaults (override via env). gemini-2.5-flash + llama-3.3-70b are both on the
-# free tiers as of 2026-06; bump here or via env when limits/models change (rule 13).
-_GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Free-tier defaults (override via env). Two SEPARATE Gemini models on purpose — measured on this
+# account 2026-08-07 (rule 13):
+#
+#   · plain text  — gemini-3.5/3.6-flash, 3.5/3.1-flash-lite and 3-flash-preview all answered fine
+#     while gemini-2.5-flash was returning `limit: 20 ... model: gemini-2.5-flash`. Free quota is
+#     metered PER MODEL, so each newer model carries its own untouched daily budget, and 3.6 Flash
+#     is a straight quality upgrade over 2.5 Flash for scripts and hooks.
+#   · grounded    — Google Search grounding 429s on EVERY 3.x model with an empty quota-violation
+#     list (the signature of no free allowance), while gemini-2.5-flash 429s with an explicit
+#     `limit: 20`, i.e. a real budget that was merely spent. **gemini-2.5-flash is still the only
+#     model with free grounded search**, so grounding stays pinned to it.
+#
+# Keeping these on one knob was a live footgun: `_gen_gemini_grounded` defaulted to GEMINI_MODEL,
+# so "bump GEMINI_MODEL if RPD gets tight" — which .env.example actively advised — would have
+# silently killed grounded ideation, the grounded scriptwriter AND the fact-check gate at once.
+_GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.6-flash")
+_GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
 _GROQ_MODEL = config.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
@@ -50,14 +64,35 @@ def _groq_client():
     return Groq(api_key=config.require("GROQ_API_KEY"))
 
 
+def _thinking_cfg(model: str):
+    """Least-thinking config for `model` — the knob is NOT the same across generations.
+
+    Thinking is on by default and eats `max_output_tokens`, which is what truncated grounded
+    JSON mid-script back in 2026-06. Suppressing it needs a different field per generation:
+
+      · Gemini 2.x — `thinking_budget=0` (0 = DISABLED).
+      · Gemini 3.x — `thinking_budget` is REJECTED (400 INVALID_ARGUMENT, verified 2026-08-07 on
+        gemini-3.6-flash); it was replaced by `thinking_level`, whose floor is MINIMAL. Thinking
+        cannot be switched off entirely on these models, only minimised.
+
+    Sending the 2.x field to a 3.x model 400s every call, which silently drains the whole Gemini
+    leg of the fallback chain into Groq (rule 11) — the failover hides it, so it looks like it
+    still works. Hence: pick by model, don't assume.
+    """
+    from google.genai import types
+
+    head = model.split("-")[1] if "-" in model else ""
+    if head.startswith("3"):
+        return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+    return types.ThinkingConfig(thinking_budget=0)
+
+
 def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
     from google.genai import types
 
-    # Disable "thinking" — on gemini-2.5-flash it's on by default and eats max_output_tokens,
-    # which truncated JSON replies. We want the whole budget for the actual output.
     cfg = types.GenerateContentConfig(
         max_output_tokens=max_tokens,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        thinking_config=_thinking_cfg(_GEMINI_MODEL),
     )
     if json:
         cfg.response_mime_type = "application/json"
@@ -74,23 +109,28 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = No
     ask for JSON in the prompt text and parse it (grounding still makes the model use real,
     current facts + cite genuine sources).
 
-    `model` overrides GEMINI_MODEL for this call. Free-tier quota is metered
-    **per model** (quotaId GenerateRequestsPerDayPerProjectPerModel), so pointing a second
-    grounded consumer at a different model gives it its OWN daily budget instead of competing
-    with ideation and the scriptwriter for one shared 20/day bucket (rule 13).
+    Defaults to GEMINI_GROUNDED_MODEL, NOT GEMINI_MODEL: free grounded search exists only on
+    gemini-2.5-flash on this account (measured 2026-08-07 — every 3.x model 429s the google_search
+    tool with no allowance), so the ungrounded model must be free to move ahead without dragging
+    grounding onto a model that cannot do it.
+
+    Free-tier quota is metered **per model** (quotaId GenerateRequestsPerDayPerProjectPerModel),
+    so pointing a second grounded consumer at a different model would give it its OWN daily budget
+    instead of competing for the shared 20/day bucket (rule 13) — but only among models that HAVE
+    a grounded allowance, which today is just the default. See factcheck._model().
     """
     from google.genai import types
 
+    chosen = model or _GEMINI_GROUNDED_MODEL
     cfg = types.GenerateContentConfig(
         max_output_tokens=max_tokens,
         tools=[types.Tool(google_search=types.GoogleSearch())],
-        # Disable "thinking" (on by default for 2.5-flash) — it eats max_output_tokens and was
-        # truncating the grounded JSON reply mid-script, forcing the ungrounded fallback. Keep
-        # the whole budget for the actual output (mirrors _gen_gemini).
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        # Minimise "thinking" — it eats max_output_tokens and was truncating the grounded JSON
+        # reply mid-script, forcing the ungrounded fallback. Per-generation field (_thinking_cfg).
+        thinking_config=_thinking_cfg(chosen),
     )
     resp = _gemini_client().models.generate_content(
-        model=model or _GEMINI_MODEL, contents=prompt, config=cfg
+        model=chosen, contents=prompt, config=cfg
     )
     return resp.text or ""
 
