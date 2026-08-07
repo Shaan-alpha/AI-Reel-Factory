@@ -18,7 +18,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 - **`voice.has_style_tag()` is now public** so the scriptwriter asks the voice module rather than
   keeping a second copy of the allow-list — two lists drifting is exactly how `[curious]` came to
   be emitted but silently stripped.
-- +8 tests (349 pass, 4 skipped).
+- **A loud warning when a script has no "why it matters" turn at all.** Found live on script 158,
+  where it shipped because nothing checked. That is an originality problem, not a style nit: a
+  script without the turn is a bare summary, which is what YouTube's inauthentic-content policy
+  demotes and what the monetization gate gates (docs/08 §1). Warns rather than blocks — accuracy
+  already has a hard gate, and stacking a second blocking gate on a *soft* quality judgement would
+  cost reels for something a human should eyeball (rule 14).
+- +10 tests (351 pass, 4 skipped).
 
 ### Notes
 - Deliberately fail-soft: if the payoff sentence cannot be located confidently the body is

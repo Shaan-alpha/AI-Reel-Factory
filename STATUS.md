@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **349 pass, 4 skipped** — re-measured 2026-08-07)
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **351 pass, 4 skipped** — re-measured 2026-08-07)
 **Last updated:** 2026-08-07
 **Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -120,10 +120,13 @@ instead of agreeing** — half right, and the other half was the useful part. **
 - `voice.has_style_tag()` is now public so the scriptwriter asks **this** module rather than
   keeping its own copy of the allow-list — two lists drifting is exactly how `[curious]` came to
   be emitted-but-silently-stripped.
-- ⚙️ **Separate finding, not fixed:** script 158 has no "why it matters" bridge **at all**. That is
-  a content gap, not a tag gap — the template requires that turn and originality is the
-  monetization gate. Worth watching whether the new "AT LEAST 1 tag on the payoff" instruction
-  fixes it indirectly by forcing the turn to exist.
+- **Separate finding, now visible:** script 158 has no "why it matters" bridge **at all** — a
+  content gap, not a tag gap, and it shipped because nothing checked. `write_script` now logs a
+  loud warning when the turn is missing: a script without it is a bare **summary**, which is what
+  YouTube's inauthentic-content policy demotes and what the monetization gate turns on (docs/08 §1).
+  **Warns, does not block** — accuracy already has a hard gate, and stacking a second blocking gate
+  on a *soft* quality judgement would cost reels for something a human should eyeball (rule 14),
+  especially right after deliberately loosening the other one.
 
 ### 2026-08-07 — Expressive range widened; the Gemini voice now survives a preview blip
 Follow-through on the model audit below. **341 pass, 4 skipped.**

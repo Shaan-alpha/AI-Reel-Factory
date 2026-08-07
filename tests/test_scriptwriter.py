@@ -366,6 +366,37 @@ def test_floor_can_be_disabled(monkeypatch):
     assert scriptwriter._ensure_delivery_tag(body) == body
 
 
+def test_missing_why_it_matters_turn_is_warned_about(monkeypatch, caplog):
+    """A script with no payoff turn is a bare SUMMARY — the originality/monetization risk in
+    docs/08 §1. Found live on script 158, where it shipped because nothing checked."""
+    import logging
+    monkeypatch.setattr(scriptwriter, "_generate_script_json", lambda _p: {
+        "title": "T",
+        "script_body": "A thing happened today. Another thing happened. Then it stopped. " * 6,
+        "caption": "c", "hashtags": ["#x"]})
+    monkeypatch.setattr(scriptwriter, "_punch_up_hook", lambda t, b: (t, b))
+    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a, **k: 1)
+
+    with caplog.at_level(logging.WARNING):
+        scriptwriter.write_script({"id": 1, "title": "t", "sources": ["https://a.example"]})
+    assert "NO 'why it matters' turn" in caplog.text
+
+
+def test_present_why_it_matters_turn_is_not_warned_about(monkeypatch, caplog):
+    import logging
+    monkeypatch.setattr(scriptwriter, "_generate_script_json", lambda _p: {
+        "title": "T",
+        "script_body": ("A thing happened today and it was quite something to behold. " * 5
+                        + "Here's why it actually matters: the money was public."),
+        "caption": "c", "hashtags": ["#x"]})
+    monkeypatch.setattr(scriptwriter, "_punch_up_hook", lambda t, b: (t, b))
+    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a, **k: 1)
+
+    with caplog.at_level(logging.WARNING):
+        scriptwriter.write_script({"id": 1, "title": "t", "sources": ["https://a.example"]})
+    assert "NO 'why it matters' turn" not in caplog.text
+
+
 def test_floor_does_not_add_spoken_words():
     """Tags are stage direction — the floor must not eat into the 25-30s word budget."""
     body = "Stuff happened here. Here's why it matters: it costs money."

@@ -375,6 +375,17 @@ def write_script(idea: dict, template: str = "N") -> dict:
         log.warning("scriptwriter: idea %s script is short (%d words)",
                     idea_id, len(_visible_words(body)))
 
+    # ORIGINALITY SIGNAL, not a style nit (docs/08 §1). A script with no "why it matters" turn is
+    # a bare summary, which is exactly what YouTube's inauthentic-content policy demotes and what
+    # the monetization gate turns on. Found live on script 158 (2026-08-07), where it was
+    # invisible because nothing checked. Warn rather than block: accuracy already has a hard gate
+    # (factcheck), and stacking a second blocking gate on a SOFT quality judgement would cost
+    # reels for something a human should eyeball (rule 14 — soft on runtime).
+    if not _WHY_IT_MATTERS_RE.search(body):
+        log.warning("scriptwriter: idea %s has NO 'why it matters' turn — that makes it a bare "
+                    "summary, which is the originality/monetization risk (docs/08 §1). Review it.",
+                    idea_id)
+
     # After the word cap, so truncation can never cut the tag back off. Tags are not spoken
     # words (_visible_words ignores them), so this cannot push the script over the cap.
     body = _ensure_delivery_tag(body)
