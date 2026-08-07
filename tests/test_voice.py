@@ -571,9 +571,14 @@ def test_gemini_tts_does_not_retry_a_non_transient_error(monkeypatch, tmp_path):
 
 
 def test_gemini_tts_does_not_double_call_when_already_on_the_stable_model(monkeypatch, tmp_path):
-    """The default IS the stable model — no free-tier request may be spent twice on it."""
+    """No free-tier request may be spent twice on the same model.
+
+    Only reachable when the operator has pinned GEMINI_TTS_MODEL to the fallback itself — the
+    default is the 3.1 preview — but that is exactly the config where a naive retry would burn
+    two of a 10/day budget to ask an unavailable model the same question twice.
+    """
     monkeypatch.setenv("GEMINI_API_KEY", "gk")
-    monkeypatch.delenv("GEMINI_TTS_MODEL", raising=False)
+    monkeypatch.setenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
     cap = {}
     _fake_genai_failing(monkeypatch, cap, {
         "gemini-2.5-flash-preview-tts": RuntimeError("503 UNAVAILABLE")})
@@ -603,14 +608,24 @@ def test_gemini_tts_uses_configured_model_and_voice(monkeypatch, tmp_path):
     assert vc.voice_name == "Puck"
 
 
-def test_gemini_tts_defaults_to_the_free_flash_model(monkeypatch, tmp_path):
-    """Pro has no free tier; the default must not start spending on its own."""
+def test_gemini_tts_defaults_to_the_chosen_free_model(monkeypatch, tmp_path):
+    """The channel voice, picked by ear 2026-08-07 (3.1-flash > 2.5-flash > Chirp).
+
+    Also a cost guard: Pro has no free tier, so the default must never drift onto it (rule 2).
+    """
     monkeypatch.setenv("GEMINI_API_KEY", "gk")
     monkeypatch.delenv("GEMINI_TTS_MODEL", raising=False)
     cap = {}
     _fake_genai(monkeypatch, cap)
     voice._synthesize_gemini("hi there", str(tmp_path))
-    assert cap["model"] == "gemini-2.5-flash-preview-tts"
+    assert cap["model"] == "gemini-3.1-flash-tts-preview"
+    assert "pro" not in cap["model"], "the default must never be the paid model"
+
+
+def test_the_stable_fallback_is_not_the_primary(monkeypatch, tmp_path):
+    """The safety net is only a safety net if it is a DIFFERENT model — otherwise a 503 on the
+    primary just retries the same unavailable thing and burns a second free-tier request."""
+    assert voice._GEMINI_TTS_STABLE != voice._GEMINI_TTS_PRIMARY
 
 
 def test_gemini_tts_requests_audio_modality(monkeypatch, tmp_path):
@@ -740,7 +755,7 @@ def test_default_engine_and_voice_are_the_chosen_ones(monkeypatch, tmp_path):
     assert order == ["gemini"], "Gemini must be the primary engine, not a fallback"
     vc = cap["config"].speech_config.voice_config.prebuilt_voice_config
     assert vc.voice_name == "Zubenelgenubi"
-    assert cap["model"] == "gemini-2.5-flash-preview-tts"  # the free one
+    assert cap["model"] == "gemini-3.1-flash-tts-preview"  # free, and the one picked by ear
 
 
 def test_chirp_is_still_the_first_fallback(monkeypatch, tmp_path):

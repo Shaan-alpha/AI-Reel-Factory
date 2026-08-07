@@ -7,11 +7,14 @@ Contract:
     depends on   : Gemini Developer API TTS → Google Cloud TTS (Chirp 3 HD) → edge-tts → Kokoro
                    (rule 11: every engine has a fallback behind it).
 
-Default engine is **Gemini TTS** on the free `gemini-2.5-flash-preview-tts` model, voice
+Default engine is **Gemini TTS** on the free `gemini-3.1-flash-tts-preview` model, voice
 **Zubenelgenubi** ("Casual") — chosen by ear because it carries dry sarcasm, which is the
-channel's whole register. The chain falls through to Chirp 3 HD, then edge-tts, then Kokoro,
-resolved by name at call time so a missing key or a withdrawn preview model just advances a
-link. Pick the primary via VOICE_ENGINE (gemini|google|edge|kokoro).
+channel's whole register. The model was picked the same way on 2026-08-07: the operator ranked
+3.1-flash > 2.5-flash > Chirp on an identical script. That ranking is also the order this module
+degrades in, which is the only reason a *preview* model is safe as the default — a 503 lands on
+the second-favourite sound, not on a surprise. The chain then falls through to Chirp 3 HD,
+edge-tts and Kokoro, resolved by name at call time so a missing key or a withdrawn preview model
+just advances a link. Pick the primary via VOICE_ENGINE (gemini|google|edge|kokoro).
 
 **Expressive delivery is per-engine**, because the control signals are not portable:
   · `gemini`  — promptable: honours VOICE_STYLE_PROMPT *and* inline style tags ([sarcastic]).
@@ -65,9 +68,16 @@ _GEMINI_TTS_RATE = 24000
 # Documented request limits: text and prompt <=4000 bytes each, <=8000 bytes combined.
 _GEMINI_MAX_FIELD_BYTES = 4000
 _GEMINI_MAX_TOTAL_BYTES = 8000
-# The in-engine safety net for GEMINI_TTS_MODEL. Every Gemini TTS model is still labelled
-# preview, so the configured one can be transiently unavailable; this is the one measured to be
-# reliably up and free on both input and output. Only used when it is not already the choice.
+# The channel voice, chosen by ear 2026-08-07: the operator A/B'd all three and ranked
+# 3.1-flash > 2.5-flash > Chirp. That ranking happens to BE the fallback order, which is what
+# makes promoting a preview model safe here — every way this degrades lands on the next-preferred
+# sound, never on a worse-than-expected one.
+_GEMINI_TTS_PRIMARY = "gemini-3.1-flash-tts-preview"
+# The in-engine safety net for GEMINI_TTS_MODEL. Every Gemini TTS model is still labelled preview,
+# so the configured one can be transiently unavailable — and the primary above genuinely is:
+# measured 2026-08-07 it returned 503 "high demand" on 3 of 4 attempts. This one is the model
+# measured reliably up and free on both input and output. Only used when it is not already the
+# choice, so the default path costs exactly one request, not two.
 _GEMINI_TTS_STABLE = "gemini-2.5-flash-preview-tts"
 # Retryable upstream states: capacity/outage, not "your request is wrong". A 429 is deliberately
 # NOT here — out of quota means the next model shares the same daily reset, so re-asking just
@@ -302,7 +312,7 @@ def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
         raise RuntimeError(
             f"gemini tts: input too long (script {t_bytes}B, style {p_bytes}B; limits are "
             f"{_GEMINI_MAX_FIELD_BYTES}B each / {_GEMINI_MAX_TOTAL_BYTES}B combined)")
-    model = config.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+    model = config.get("GEMINI_TTS_MODEL", _GEMINI_TTS_PRIMARY)
     # Zubenelgenubi ("Casual") was chosen by ear over Kore/Schedar/Algenib/Charon — it is the
     # channel's voice identity now, not an incidental default. Re-pick via tools/tune_voice.py.
     voice_name = config.get("GEMINI_TTS_VOICE", "Zubenelgenubi")
@@ -397,7 +407,7 @@ _ENGINE_ALIASES = {"edge-tts": "edge", "chirp": "google", "google-tts": "google"
 
 def _engine_gemini(text: str, out_dir: str) -> tuple[str, float]:
     path, dur = _synthesize_gemini(text, out_dir)
-    _log_done(path, dur, f"gemini:{config.get('GEMINI_TTS_MODEL', 'gemini-2.5-flash-preview-tts')}")
+    _log_done(path, dur, f"gemini:{config.get('GEMINI_TTS_MODEL', _GEMINI_TTS_PRIMARY)}")
     return path, dur
 
 

@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — New channel voice model, chosen by ear
+
+### Changed
+- **`GEMINI_TTS_MODEL` now defaults to `gemini-3.1-flash-tts-preview`** (was
+  `gemini-2.5-flash-preview-tts`), in code and both workflows. The operator A/B'd all three
+  renders on an identical script and ranked **3.1-flash > 2.5-flash > Chirp**. Free on input and
+  output; the voice stays **Zubenelgenubi**.
+- Promoting a *preview* model to default is safe here for one specific reason: **the preference
+  order is the same as the fallback order.** A 503 drops to `gemini-2.5-flash-preview-tts` with
+  the same voice — the second-favourite sound — and only then to Chirp. The in-engine fallback
+  added earlier stops being a nicety and becomes load-bearing.
+- ⚠️ The model is genuinely flaky — 503 "high demand" on 3 of 4 attempts on 2026-08-07 — so expect
+  some reels voiced by 2.5-flash. Both are free, so this costs consistency, not money.
+- A test now pins that the fallback is a **different** model from the primary; otherwise a 503
+  would re-ask the same unavailable model and burn two of a 10/day free budget.
+- +1 test (352 pass, 4 skipped).
+
 ## [Unreleased] — Guarantee the payoff line is read like it matters
 
 ### Added

@@ -5,9 +5,10 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **351 pass, 4 skipped** — re-measured 2026-08-07)
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **352 pass, 4 skipped** — re-measured 2026-08-07)
 **Last updated:** 2026-08-07
-**Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
+**Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
+  ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -95,6 +96,23 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-08-07 — Voice model chosen by ear: `gemini-3.1-flash-tts-preview` is now the default
+Operator A/B'd all three renders from `tools/compare_voices.py` on an identical script and ranked
+**3.1-flash > 2.5-flash > Chirp**. **352 pass, 4 skipped.**
+- **`GEMINI_TTS_MODEL` now defaults to `gemini-3.1-flash-tts-preview`** in code and both workflows.
+  Free on input and output; voice stays **Zubenelgenubi**.
+- **Why promoting a *preview* model is safe here:** the operator's preference order is exactly the
+  order the engine already degrades in. A 503 drops to `gemini-2.5-flash-preview-tts` **with the
+  same voice** — the second-favourite sound, never a surprise — and only then to Chirp. That is
+  the in-engine fallback added earlier today; it stops being a nicety and becomes load-bearing.
+- ⚠️ **It is genuinely flaky:** 503 "high demand" on **3 of 4** attempts on 2026-08-07. Expect some
+  reels to be voiced by 2.5-flash. Both are free, so this costs nothing but consistency.
+- **`gemini-2.5-pro-preview-tts` 429s** on this key — no free tier and no billing quota. It stays
+  the only paid option (~$1.27/mo at 3/day) and is not used.
+- Verified end to end with nothing set: resolves to 3.1 + Zubenelgenubi and renders (8.44s).
+  A test now pins that the fallback is a *different* model from the primary — otherwise a 503
+  would just re-ask the same unavailable model and burn two of a 10/day budget.
 
 ### 2026-08-07 — Delivery-tag floor: ~40% of reels were shipping with no direction on the read
 Operator observed the latest video "already had sarcastic and curious voice". **Checked the DB

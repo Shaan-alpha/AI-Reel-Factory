@@ -102,7 +102,7 @@ jobs:
           SFX_DIR: ${{ vars.SFX_DIR }}                              # where generated SFX wavs cache
           CAPTION_FONT_FILE: ${{ vars.CAPTION_FONT_FILE }}          # ttf for libass + stat cards
           VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only
-          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts' }}  # free tier
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}  # free; 503 falls back to 2.5-flash, same voice
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Zubenelgenubi' }}  # chosen by ear; bare name
           GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}       # optional; isolates TTS quota
           DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
