@@ -1,8 +1,11 @@
 """Tests for src/factcheck.py — the independent post-write verification gate.
 
 The grounded LLM call is mocked throughout, so these need no key and no network. What they pin
-is the GATE's behaviour, which is where the risk lives: an unsupported claim must block, and a
-broken checker must not.
+is the GATE's behaviour, which is where the risk lives: a FABRICATED claim must block, a merely
+imprecise one must not, and a broken checker must not block either.
+
+The severity split (2026-08-07) is the load-bearing part — before it, every discrepancy blocked
+and most ideas died over differences that changed nothing.
 """
 from __future__ import annotations
 
@@ -23,22 +26,107 @@ def test_clean_script_passes(monkeypatch):
 
 
 def test_unsupported_claim_blocks_the_reel(monkeypatch):
-    _mock_grounded(monkeypatch, '{"checked": 3, "unsupported": ["the 40% figure is invented"],'
-                                ' "verdict": "fail"}')
+    _mock_grounded(monkeypatch, '{"checked": 3, "blocking": ["the 40% figure is invented"],'
+                                ' "minor": [], "verdict": "fail"}')
     r = factcheck.verify("Prices fell 40 percent.", ["https://example.com"])
     assert r["ok"] is False
     assert "40%" in r["unsupported"][0] or "40" in r["unsupported"][0]
 
 
 def test_claim_list_overrides_a_contradictory_pass_verdict(monkeypatch):
-    """A model that lists problems then says 'pass' is exactly what this gate exists to catch."""
-    _mock_grounded(monkeypatch, '{"checked": 2, "unsupported": ["the date is wrong"],'
+    """A model that lists a BLOCKING problem then says 'pass' is what this gate exists to catch."""
+    _mock_grounded(monkeypatch, '{"checked": 2, "blocking": ["the ruling never happened"],'
+                                ' "minor": [], "verdict": "pass"}')
+    assert factcheck.verify("The court struck it down in March.", [])["ok"] is False
+
+
+# --- severity grading (2026-08-07): imprecision must not kill a true story ------------------
+
+def test_minor_findings_are_waived_not_blocked(monkeypatch):
+    """The operator's complaint: reels died over 'very minute differences'. They now ship."""
+    _mock_grounded(monkeypatch, '{"checked": 6, "blocking": [],'
+                                ' "minor": ["script says 12,000; the filing says 12,400"],'
                                 ' "verdict": "pass"}')
-    assert factcheck.verify("It happened in March.", [])["ok"] is False
+    r = factcheck.verify("About 12,000 homes lost power.", ["https://example.com"])
+    assert r["ok"] is True
+    assert r["unsupported"] == []
+    assert len(r["minor"]) == 1
 
 
-def test_fail_verdict_blocks_even_with_an_empty_list(monkeypatch):
-    _mock_grounded(monkeypatch, '{"checked": 2, "unsupported": [], "verdict": "fail"}')
+def test_a_fail_verdict_over_only_minor_findings_still_ships(monkeypatch):
+    """Grading outranks the verdict WORD in both directions — this is the over-blocking case.
+
+    A checker that finds nothing but rounding and then reflexively stamps 'fail' is exactly the
+    behaviour that was killing most ideas.
+    """
+    _mock_grounded(monkeypatch, '{"checked": 4, "blocking": [],'
+                                ' "minor": ["figure rounded", "date off by one day"],'
+                                ' "verdict": "fail"}')
+    r = factcheck.verify("Roughly 5 lakh people voted on Tuesday.", [])
+    assert r["ok"] is True, "rounding and a one-day date slip must not kill a true story"
+    assert len(r["minor"]) == 2
+
+
+def test_one_blocking_finding_beats_any_number_of_minor_ones(monkeypatch):
+    _mock_grounded(monkeypatch, '{"checked": 9, "blocking": ["the CEO never said this"],'
+                                ' "minor": ["a", "b", "c"], "verdict": "pass"}')
+    r = factcheck.verify("The CEO said the plant would close.", [])
+    assert r["ok"] is False
+    assert r["unsupported"] == ["the CEO never said this"]
+
+
+def test_ungraded_legacy_shape_is_treated_as_blocking(monkeypatch):
+    """If the checker ignores the two-bucket schema it has graded nothing.
+
+    Degrade toward the strict behaviour: an ungraded finding blocks. Waving it through would
+    fail-open on a real fabrication, which is the one outcome this gate cannot have.
+    """
+    _mock_grounded(monkeypatch, '{"checked": 3, "unsupported": ["the launch was invented"],'
+                                ' "verdict": "fail"}')
+    r = factcheck.verify("They launched it yesterday.", [])
+    assert r["ok"] is False
+    assert r["unsupported"] == ["the launch was invented"]
+
+
+def test_severity_any_restores_block_on_everything(monkeypatch):
+    """Escape hatch: if grading ever waves through something it shouldn't, this is the undo."""
+    monkeypatch.setenv("FACTCHECK_SEVERITY", "any")
+    _mock_grounded(monkeypatch, '{"checked": 3, "blocking": [], "minor": ["rounded a figure"],'
+                                ' "verdict": "pass"}')
+    r = factcheck.verify("About 12,000 homes.", [])
+    assert r["ok"] is False
+    assert r["unsupported"] == ["rounded a figure"]
+    assert r["minor"] == []
+
+
+def test_critical_only_is_the_default(monkeypatch):
+    monkeypatch.delenv("FACTCHECK_SEVERITY", raising=False)
+    assert factcheck.severity_gate() == "critical"
+
+
+def test_findings_tolerate_objects_and_bare_strings(monkeypatch):
+    """A checker that phrases its answer slightly differently must not crash the gate (rule 14) —
+    an exception here takes the fail-open path, i.e. no gate at all."""
+    _mock_grounded(monkeypatch, '{"checked": 2, "blocking": {"claim": "no such law",'
+                                ' "why": "no bill exists"}, "minor": "a rounding nit",'
+                                ' "verdict": "fail"}')
+    r = factcheck.verify("Parliament passed it.", [])
+    assert r["ok"] is False
+    assert "no such law" in r["unsupported"][0] and "no bill exists" in r["unsupported"][0]
+    assert r["minor"] == ["a rounding nit"]
+
+
+def test_duplicate_findings_are_collapsed(monkeypatch):
+    _mock_grounded(monkeypatch, '{"checked": 2, "blocking": ["same thing", "same thing"],'
+                                ' "minor": ["same thing"], "verdict": "fail"}')
+    r = factcheck.verify("Body.", [])
+    assert r["unsupported"] == ["same thing"]
+    assert r["minor"] == [], "a finding already blocking must not also be listed as waived"
+
+
+def test_fail_verdict_naming_nothing_still_blocks(monkeypatch):
+    """Nothing to grade and the checker plainly saw something — the one case the word wins."""
+    _mock_grounded(monkeypatch, '{"checked": 2, "blocking": [], "minor": [], "verdict": "fail"}')
     assert factcheck.verify("Something.", [])["ok"] is False
 
 
@@ -82,20 +170,22 @@ def test_enabled_by_default(monkeypatch):
     assert factcheck.enabled() is True
 
 
-def test_prompt_sends_the_sources_and_treats_unverifiable_as_failure(monkeypatch):
+def test_prompt_sends_the_sources_and_asks_for_graded_findings(monkeypatch):
     seen = {}
 
     def _capture(prompt, **_k):
         seen["prompt"] = prompt
-        return '{"checked": 1, "unsupported": [], "verdict": "pass"}'
+        return '{"checked": 1, "blocking": [], "minor": [], "verdict": "pass"}'
 
     monkeypatch.setattr(factcheck.llm, "generate_grounded", _capture)
     factcheck.verify("Body text.", ["https://a.example", "https://b.example"], title="A Title")
     p = seen["prompt"]
     assert "https://a.example" in p and "https://b.example" in p
     assert "A Title" in p and "Body text." in p
-    assert "UNSUPPORTED" in p            # absence of evidence must be failure
-    assert "tone" in p.lower()           # and tone/opinion explicitly out of scope
+    assert "BLOCKING" in p and "MINOR" in p          # the two buckets it must sort into
+    assert "NON-CONFIRMATION does not" in p          # not-found is minor, not fatal
+    assert "disagreeing does not make the script wrong" in p   # the operator's own reasoning
+    assert "tone" in p.lower()                       # tone/opinion explicitly out of scope
 
 
 def test_tolerates_json_in_markdown_fences(monkeypatch):
