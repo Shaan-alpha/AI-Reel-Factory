@@ -5,10 +5,10 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **313 pass, 5 skipped** — re-measured 2026-08-05)
-**Last updated:** 2026-08-05
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **341 pass, 4 skipped** — re-measured 2026-08-07)
+**Last updated:** 2026-08-07
 **Voice:** Gemini TTS `gemini-2.5-flash-preview-tts` · **Zubenelgenubi** ("Casual", picked by ear) · free tier
-**Editorial policy:** **truth over neutrality** — verdicts allowed, every load-bearing claim gated by `factcheck.verify()`
+**Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
 ---
@@ -95,6 +95,85 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-08-07 — Expressive range widened; the Gemini voice now survives a preview blip
+Follow-through on the model audit below. **341 pass, 4 skipped.**
+- **Tag vocabulary 7 → 12**, taken from Google's *documented* audio-tag list (not invented) —
+  `[serious]`, `[curious]`, `[whispers]`, `[tired]`, `[mischievously]` join the existing set.
+  **Both** TTS models accept audio tags, so this lands on the engine already in production; it is
+  not gated on adopting the new model. Scriptwriter prompt teaches each tag's purpose; 3-tag cap
+  unchanged, because the channel's failure mode is a narrator who announces the joke.
+- **Excluded on purpose, now pinned by tests:** `[excited]`/`[amazed]`/`[giggles]` (hype vs the
+  deadpan register) and `[crying]`/`[panicked]`/`[trembling]`/`[gasp]`/`[shouting]` (melodrama
+  over real events → the tragedy-exploitation line in rule 6). All documented; all would work.
+- 🐞 **A 503 used to cost the channel its voice.** `Zubenelgenubi` exists only on the Gemini
+  engine, so a blip fell through to Chirp and silently changed how that reel sounded. Now retries
+  once on the stable free model with the same voice before leaving the engine. 429 is explicitly
+  NOT transient — same daily reset across models, so retrying just burns the reel's time.
+- ⚠️ **`gemini-3.1-flash-tts-preview` is not usable as a primary right now** — 503 "high demand"
+  on **3 of 3** attempts across ~40 minutes. Verified it DOES render when it answers (12.29s WAV
+  through the real `voice.py` path). Safe to set `GEMINI_TTS_MODEL` to it: a 503 degrades to
+  today's sound, not to Chirp. ⚙️ Operator: `python tools/compare_voices.py` and judge by ear.
+
+### 2026-08-07 — Model audit: Gemini 3.6 Flash for scripts, grounding pinned to 2.5
+Asked "what new tech can upgrade content/video quality". **Measured this account's real quota
+rather than trusting listicles** — the useful answer was mostly "the model lineup moved under us".
+**324 pass, 4 skipped.**
+- ✅ **Ungrounded text → `gemini-3.6-flash`** (was 2.5-flash). Free quota is metered **per model**:
+  3.6-flash, 3.5-flash, 3.5/3.1-flash-lite and 3-flash-preview all answered fine **while
+  2.5-flash was returning `limit: 20`**. Better scripts *and* a second daily budget that stops
+  competing with grounding.
+- 🔴 **Grounding is NOT free on any 3.x model** — `google_search` 429s on all of them with an
+  **empty quota-violation list** (no allowance), while 2.5-flash 429s with an explicit
+  `limit: 20` (a real budget, just spent). New **`GEMINI_GROUNDED_MODEL`** knob pins it there.
+- 🐞 **Footgun fixed:** grounding used to default to `GEMINI_MODEL`, and `.env.example` told the
+  operator to *"bump it if RPD gets tight"* — that would have silently killed grounded ideation,
+  the grounded scriptwriter **and** the fact-check gate in one edit.
+- 🐞 **`thinking_budget=0` is rejected by Gemini 3.x** (400, verified live); replaced by
+  `thinking_level=MINIMAL`. The Groq failover was **swallowing** the 400, so every Gemini call
+  would have quietly become a Groq call while still looking healthy. Now picked per generation
+  (`llm._thinking_cfg`) with a test.
+- ❌ **Not viable at ≤$5/mo — measured, not assumed** (all 429 with no free allowance on this key):
+  **Veo video gen** (docs list free tier as "Not available"; $0.03–0.40/sec ⇒ **$80–1000/mo** at
+  3×30s/day), **image gen** (Nano Banana 2 / `gemini-3.1-flash-image`), **Lyria music gen**.
+  Stock B-roll + the existing CC0 music beds stay.
+- ⚙️ **Operator lever, free, not yet flipped:** `gemini-3.1-flash-tts-preview` (launched
+  2026-04-15) is reachable on this key — **200+ inline audio tags** vs the 7 in `voice._STYLE_TAGS`.
+  It 503'd ("high demand", transient — not a quota error) when probed. Set
+  `GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview` to A/B it; the engine chain already falls back.
+
+### 2026-08-07 — Fact-check gate retuned: it stops fabrication, not imprecision
+🔴 **Operator report: the gate was failing most content ideas over "very minute differences".**
+Root-caused and fixed. **322 pass, 4 skipped** (was 313, 5).
+- **Why it over-blocked.** The gate was all-or-nothing (*any* item in `unsupported` → reel dead,
+  idea `rejected`) sitting on top of a prompt that actively invited nitpicking: it listed "the real
+  figure, date or name differs" and "overstates its scale or certainty" as failures, and declared
+  **"absence of evidence is failure, not a pass"** — so a true story that one grounded search pass
+  happened not to surface was killed. **A gate that stops everything protects nothing; it just
+  stops the channel.**
+- **Fix — severity grading.** The checker now sorts findings into two buckets and only the first
+  blocks. **Blocking:** the event/ruling didn't happen · a named party blamed for something they
+  didn't do · an invented quote/law/product/report/statistic · a number off by an order of
+  magnitude, the wrong direction, or >~25% · a blame claim **no** source supports. **Minor
+  (logged, reel ships):** rounding · a figure sources count differently · a date off by a few days ·
+  wording/emphasis/over-confidence · a claim nothing contradicts but this pass couldn't confirm ·
+  sources disagreeing with each other.
+- **Two rules do most of the work**, both from the operator's own reasoning: **contradiction blocks,
+  non-confirmation does not** ("I couldn't find it" ≠ "it's false"), and **two sources disagreeing
+  is not proof the script is wrong** — both can be wrong, both can be right, or they measure
+  different things. Only the *weight* of evidence blocks.
+- **This loosens precision, NOT the anti-fabrication spine.** Rule 6's trade — the sharper the
+  verdict, the more certain its facts — is about invented facts and misplaced blame. Those still
+  block, and the live fabrication test still blocks.
+- **Grading outranks the verdict word in both directions now:** "pass" + a blocking finding still
+  blocks; "fail" + only nitpicks now ships. A `fail` naming *nothing* still blocks (nothing to grade).
+- 🐞 **Fail-open found by a new test:** a checker returning one finding as a bare object
+  (`"blocking": {...}` instead of a list) had it **silently dropped** — a real fabrication would
+  have shipped. Bare strings and bare objects are both wrapped now.
+- **New knob `FACTCHECK_SEVERITY`** (`critical` default | `any` = old block-on-everything), wired
+  into `.env.example` **and both workflows**. `production.produce_one` logs waived issues per reel —
+  ⚙️ **if that count climbs, the scriptwriter is drifting; fix it there, not by re-tightening the gate.**
+- CLAUDE.md rule 6, [docs/08](docs/08-news-niche-playbook.md) §5 and CHANGELOG updated to match (rule 1).
 
 ### 2026-08-05 — Stale test count corrected in both docs
 🔴 **README and STATUS disagreed with reality and with each other.** Ran the full suite:

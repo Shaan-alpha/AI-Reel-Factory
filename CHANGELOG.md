@@ -5,6 +5,100 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Wider expressive range, and a voice that survives a preview-model blip
+
+### Added
+- **Expressive tag vocabulary widened 7 → 12** against Google's documented audio-tag list, which
+  both `gemini-2.5-flash-preview-tts` and `gemini-3.1-flash-tts-preview` accept — so this lands on
+  the engine already in production. New: `[serious]` (the "why it matters" turn — the one that
+  tells the audience you mean it), `[curious]`, `[whispers]`, `[tired]`, `[mischievously]`.
+  The scriptwriter prompt now teaches each one's purpose, with the 3-tag cap unchanged.
+- **Deliberate exclusions, now pinned by tests** so an accidental re-widening fails loudly:
+  `[excited]`/`[amazed]`/`[giggles]` fight the deadpan register, and `[crying]`/`[panicked]`/
+  `[trembling]`/`[gasp]`/`[shouting]` are melodrama over real events — the road to the tragedy
+  exploitation rule 6 forbids. All are documented and would work; they are excluded editorially.
+- **`tools/compare_voices.py` now renders `gemini-3.1-flash-tts-preview` too**, and its sample
+  script exercises `[curious]` → `[sarcastic]` → `[serious]` so the A/B judges the tags, not just
+  the timbre.
+
+### Fixed
+- **A transient TTS blip no longer costs the channel its voice.** `Zubenelgenubi` exists only on
+  the Gemini engine, so a 503 used to fall straight through to Chirp and silently change how that
+  reel sounded. `_synthesize_gemini` now retries once on the stable free model with the same voice
+  before leaving the engine. Not hypothetical: `gemini-3.1-flash-tts-preview` returned 503 "high
+  demand" on **three** attempts across ~40 minutes on 2026-08-07.
+- Quota errors are explicitly **not** transient — a 429 shares the same daily reset across models,
+  so retrying only burns the reel's time before the engine chain can do its job (rules 11, 13).
+- +19 tests (341 pass, 4 skipped).
+
+## [Unreleased] — Gemini 3 for scripts; grounding pinned where it is still free
+
+### Changed
+- **Ungrounded text generation moved to `gemini-3.6-flash`** (was `gemini-2.5-flash`). Free-tier
+  quota is metered **per model**, and measured live on this account 2026-08-07: `3.6-flash`,
+  `3.5-flash`, `3.5-flash-lite`, `3.1-flash-lite` and `3-flash-preview` all answered normally
+  while `gemini-2.5-flash` was returning `limit: 20, model: gemini-2.5-flash`. So this is both a
+  better model for scripts/hooks **and** a second daily budget that no longer competes with
+  grounding.
+- **Grounded research stays pinned to `gemini-2.5-flash` via a new `GEMINI_GROUNDED_MODEL` knob.**
+  Google Search grounding 429s on **every** 3.x model with an empty quota-violation list — the
+  signature of no free allowance — while 2.5-flash 429s with an explicit `limit: 20`, a real
+  budget merely spent. It is still the only model with free grounded search.
+
+### Fixed
+- **Footgun: one knob drove both paths.** `_gen_gemini_grounded` defaulted to `GEMINI_MODEL`, and
+  `.env.example` advised *"bump if free-tier RPD gets tight"* — doing so would have silently
+  killed grounded ideation, the grounded scriptwriter **and** the fact-check gate at once. The two
+  are now separate settings, wired into `.env.example` and both workflows.
+- **`thinking_budget=0` is rejected by Gemini 3.x** (400 INVALID_ARGUMENT, verified live on
+  `gemini-3.6-flash`); it was replaced by `thinking_level`, whose floor is `MINIMAL`. New
+  `llm._thinking_cfg(model)` picks the right field per generation. This mattered more than it
+  looks: the Groq failover **swallowed** the 400, so every Gemini call would have quietly become
+  a Groq call while still appearing to work.
+- +3 tests (324 pass, 4 skipped).
+
+## [Unreleased] — Fact-check gate: stop fabrication, not imprecision
+
+### Changed
+- **The fact-check gate now grades findings by severity and blocks only on fabrication.**
+  Operator report: it was failing most content ideas over "very minute differences". Root cause was
+  the gate being all-or-nothing on top of a prompt that actively encouraged nitpicking — it listed
+  "the real figure, date or name differs" and "overstates its scale or certainty" as failures, and
+  declared *"absence of evidence is failure, not a pass"*, so any true story one search pass
+  happened not to surface was killed. A gate that stops everything protects nothing; it just stops
+  the channel.
+  - **Blocking** (reel dies, idea `rejected`): the event/ruling didn't happen; a named party
+    credited or blamed for something they didn't do; an invented quote, law, product, report or
+    statistic; a number wrong by an order of magnitude, the wrong direction, or >~25%; a blame
+    claim **no** source supports.
+  - **Minor** (logged loudly, reel ships): rounding; a figure that differs because sources count
+    it differently; a date off by a few days; wording, emphasis or over-confidence; a claim
+    nothing contradicts but this pass couldn't confirm; sources disagreeing with each other.
+  - **Contradiction blocks; non-confirmation does not** — one grounded pass missing a real story
+    is routine, and "I couldn't find it" is not evidence that it's false.
+  - **Two sources disagreeing is not proof the script is wrong** (the operator's own reasoning):
+    both can be wrong, both can be right, or they can be measuring different things. Only the
+    *weight* of evidence blocks.
+  - This loosens **precision, not the anti-fabrication spine**. Rule 6's trade — the sharper the
+    verdict, the more certain its facts must be — is about invented facts and misplaced blame,
+    and those still block.
+- **Grading now outranks the verdict word in both directions.** "pass" with a blocking finding
+  still blocks (a model marking its own homework is what the gate exists to catch); "fail" with
+  only nitpicks now ships. A `fail` naming *nothing* still blocks — there is nothing to grade.
+
+### Added
+- **`FACTCHECK_SEVERITY`** (`critical` default | `any`) — `any` restores the old
+  block-on-every-discrepancy behaviour. Wired into `.env.example` and both workflows.
+- `verify()` returns a `minor` list alongside `unsupported` (now the *blocking* findings), and
+  `production.produce_one` logs waived issues per reel — a rising count means the scriptwriter is
+  drifting, which is where to fix it rather than by re-tightening the gate.
+- +9 fact-check tests covering the split, the escape hatch, and malformed checker output.
+
+### Fixed
+- **Fail-open in the findings parser, caught by a new test:** a checker returning a lone finding as
+  a bare object (`"blocking": {...}`, not a list) had it silently dropped — i.e. a real fabrication
+  would have shipped. Bare strings and bare objects are both wrapped now.
+
 ## [Unreleased] — Truth over neutrality + a fact-check gate
 
 ### Changed

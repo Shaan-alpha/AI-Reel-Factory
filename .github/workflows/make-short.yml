@@ -50,6 +50,8 @@ jobs:
       - name: Make a Short (on demand)
         env:                     # secrets configured in repo Settings -> Secrets (rule 5)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.6-flash' }}              # ungrounded text; own per-model free budget
+          GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-2.5-flash' }} # ONLY model with free grounded search — do not bump
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -114,6 +116,7 @@ jobs:
           DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
           APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it
           ENABLE_FACT_CHECK: ${{ vars.ENABLE_FACT_CHECK || 'true' }}   # re-verify every script pre-render
+          FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
