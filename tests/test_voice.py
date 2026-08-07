@@ -247,6 +247,27 @@ def test_invented_tags_are_stripped_not_forwarded():
     assert voice._style_text("a [explodes] b") == "a b"
 
 
+@pytest.mark.parametrize("tag", ["serious", "curious", "whispers", "tired", "mischievously"])
+def test_documented_expressive_tags_reach_the_engine(tag, monkeypatch):
+    """Widened 2026-08-07 to Google's documented audio tags. Without these in the allow-list the
+    scriptwriter can emit them and the filter silently eats them."""
+    monkeypatch.setenv("MAX_STYLE_TAGS", "3")
+    assert f"[{tag}]" in voice._style_text(f"Before. [{tag}] After.")
+
+
+@pytest.mark.parametrize("tag", ["excited", "amazed", "giggles", "crying", "panicked",
+                                 "trembling", "gasp", "shouting"])
+def test_hype_and_melodrama_tags_stay_excluded(tag):
+    """These ARE documented and would work — they are excluded on editorial grounds, so an
+    accidental re-widening should fail here rather than ship.
+
+    Hype ([excited]/[amazed]/[giggles]) fights the deadpan register; melodrama over real events
+    ([crying]/[panicked]/[trembling]/[gasp]/[shouting]) is how a news channel drifts into the
+    tragedy exploitation rule 6 excludes.
+    """
+    assert f"[{tag}]" not in voice._style_text(f"Before. [{tag}] After.")
+
+
 def test_tag_counts_are_capped(monkeypatch):
     monkeypatch.setenv("MAX_PAUSE_TAGS", "2")
     text = "a [pause] b [pause] c [pause] d [pause] e"
@@ -493,6 +514,81 @@ def test_gemini_tts_passes_style_prompt_and_keeps_style_tags(monkeypatch, tmp_pa
     assert "Dry and deadpan." in cap["contents"]
     assert "[sarcastic]" in cap["contents"]
     assert "[pause]" not in cap["contents"]  # pause tags belong to Chirp
+
+
+def _fake_genai_failing(monkeypatch, captured, fail_models: dict[str, Exception]):
+    """Like _fake_genai, but raises for the named models. Records every model attempted."""
+    inline = type("Inline", (), {"data": b"\x00\x00" * 24000})()
+    part = type("Part", (), {"inline_data": inline})()
+    content = type("Content", (), {"parts": [part]})()
+    resp = type("Resp", (), {"candidates": [type("C", (), {"content": content})()]})()
+
+    class _Models:
+        def generate_content(self, **kw):
+            captured.setdefault("tried", []).append(kw["model"])
+            if kw["model"] in fail_models:
+                raise fail_models[kw["model"]]
+            return resp
+
+    class _Client:
+        def __init__(self, api_key=None):
+            self.models = _Models()
+
+    import google.genai as genai
+    monkeypatch.setattr(genai, "Client", _Client)
+
+
+def test_gemini_tts_falls_back_to_the_stable_model_on_a_transient_error(monkeypatch, tmp_path):
+    """The channel's voice (Zubenelgenubi) exists ONLY on the Gemini engine, so a preview-model
+    blip must not fall straight through to Chirp and change how the channel sounds.
+
+    Not hypothetical: gemini-3.1-flash-tts-preview returned 503 "high demand" on three probes
+    across ~40 minutes on 2026-08-07.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+    cap = {}
+    _fake_genai_failing(monkeypatch, cap, {
+        "gemini-3.1-flash-tts-preview": RuntimeError("503 UNAVAILABLE. high demand")})
+
+    path, dur = voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["tried"] == ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]
+    assert path.endswith(".wav") and dur == pytest.approx(1.0, abs=0.05)
+
+
+def test_gemini_tts_does_not_retry_a_non_transient_error(monkeypatch, tmp_path):
+    """A 400 means the REQUEST is wrong — the second model would reject it identically, so
+    retrying just burns time before the engine chain can do its job."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+    cap = {}
+    _fake_genai_failing(monkeypatch, cap, {
+        "gemini-3.1-flash-tts-preview": RuntimeError("400 INVALID_ARGUMENT")})
+
+    with pytest.raises(RuntimeError, match="400"):
+        voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["tried"] == ["gemini-3.1-flash-tts-preview"], "must not try a second model"
+
+
+def test_gemini_tts_does_not_double_call_when_already_on_the_stable_model(monkeypatch, tmp_path):
+    """The default IS the stable model — no free-tier request may be spent twice on it."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.delenv("GEMINI_TTS_MODEL", raising=False)
+    cap = {}
+    _fake_genai_failing(monkeypatch, cap, {
+        "gemini-2.5-flash-preview-tts": RuntimeError("503 UNAVAILABLE")})
+
+    with pytest.raises(RuntimeError):
+        voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["tried"] == ["gemini-2.5-flash-preview-tts"]
+
+
+def test_quota_errors_are_not_treated_as_transient():
+    """429 shares the same daily reset across models, so re-asking wastes the reel's time."""
+    assert voice._is_transient(RuntimeError("503 UNAVAILABLE")) is True
+    assert voice._is_transient(RuntimeError("500 INTERNAL")) is True
+    assert voice._is_transient(RuntimeError("429 RESOURCE_EXHAUSTED")) is False
+    assert voice._is_transient(RuntimeError("400 INVALID_ARGUMENT")) is False
 
 
 def test_gemini_tts_uses_configured_model_and_voice(monkeypatch, tmp_path):

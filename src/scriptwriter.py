@@ -75,8 +75,13 @@ deliberate beat or hesitation — it changes the timing on every voice engine.
 Then add AT MOST 3 delivery tags total, only where they genuinely land:
 - [pause] or [pause long] for a comic beat before a punchline or the "why it matters" turn.
 - [sarcastic], [deadpan] or [dry] immediately before the line whose TONE flips.
+- [serious] for the "why it matters" turn when the subject deserves it — this is the one that \
+tells the audience you actually mean it.
+- [curious] on an opening question, [whispers] on a conspiratorial aside, [tired] on \
+institutional absurdity, [mischievously] before a setup you are about to puncture.
 Tags are stage direction, never narration — never write a tag the sentence already says out \
-loud, and never open the script with one. Fewer is better: a tag on every line reads as noise.
+loud, and never open the script with one. Fewer is better: a tag on every line reads as noise. \
+The failure mode is a narrator who ANNOUNCES the joke; restraint reads as confidence.
 
 ACCURACY (THE ONE HARD LINE): VERIFY the development actually \
 happened (use the sources + web search). State ONLY facts you can support. NEVER invent product \

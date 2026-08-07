@@ -65,6 +65,19 @@ _GEMINI_TTS_RATE = 24000
 # Documented request limits: text and prompt <=4000 bytes each, <=8000 bytes combined.
 _GEMINI_MAX_FIELD_BYTES = 4000
 _GEMINI_MAX_TOTAL_BYTES = 8000
+# The in-engine safety net for GEMINI_TTS_MODEL. Every Gemini TTS model is still labelled
+# preview, so the configured one can be transiently unavailable; this is the one measured to be
+# reliably up and free on both input and output. Only used when it is not already the choice.
+_GEMINI_TTS_STABLE = "gemini-2.5-flash-preview-tts"
+# Retryable upstream states: capacity/outage, not "your request is wrong". A 429 is deliberately
+# NOT here — out of quota means the next model shares the same daily reset, so re-asking just
+# burns time before the engine chain does its job (rules 11, 13).
+_TRANSIENT_MARKERS = ("503", "unavailable", "500", "internal", "504", "deadline", "overloaded")
+
+
+def _is_transient(exc: Exception) -> bool:
+    """True if `exc` looks like an upstream blip worth trying another model for."""
+    return any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
 # Structured per Google's own style-prompt guidance: an audio profile, then director's notes on
 # pacing and inflection, then paralinguistic detail. Their docs are explicit that naming an
 # emotion ("sarcastic") underperforms describing what it SOUNDS like -- and for this channel the
@@ -295,18 +308,38 @@ def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
     voice_name = config.get("GEMINI_TTS_VOICE", "Zubenelgenubi")
 
     client = genai.Client(api_key=key)
-    resp = client.models.generate_content(
-        model=model,
-        contents=f"{style}\n\n{spoken}",
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
-                )
-            ),
+    cfg = types.GenerateContentConfig(
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+            )
         ),
     )
+
+    # Try the configured model, then the stable free one. The channel's voice identity
+    # (Zubenelgenubi, picked by ear) exists ONLY on the Gemini engine, so letting a transient
+    # blip fall straight through to Chirp would silently change how the channel sounds for that
+    # reel. The preview TTS models are genuinely flaky — gemini-3.1-flash-tts-preview returned
+    # 503 "high demand" on two probes 20 minutes apart on 2026-08-07 — so staying inside the
+    # engine one extra step is worth more here than it looks (rule 11).
+    attempts = [model] + ([_GEMINI_TTS_STABLE] if model != _GEMINI_TTS_STABLE else [])
+    resp = last_err = None
+    for attempt in attempts:
+        try:
+            resp = client.models.generate_content(
+                model=attempt, contents=f"{style}\n\n{spoken}", config=cfg)
+            if attempt != model:
+                log.warning("gemini tts: %s unavailable (%s) — fell back to %s, same voice",
+                            model, str(last_err)[:120], attempt)
+            break
+        except Exception as e:  # noqa: BLE001 — try the next model, then let the engine chain run
+            last_err = e
+            if not _is_transient(e):
+                raise
+    if resp is None:
+        raise RuntimeError(f"gemini tts: all models failed ({last_err})") from last_err
+
     try:
         pcm = resp.candidates[0].content.parts[0].inline_data.data
     except (AttributeError, IndexError, TypeError) as e:
@@ -398,7 +431,26 @@ def _engine_kokoro(text: str, out_dir: str) -> tuple[str, float]:
 _PAUSE_TAGS = ("pause short", "pause", "pause long")
 # "beat" deliberately excluded: it is a TIMING direction, so it belongs with the pause family,
 # not here. Keeping it in the style list made the two families overlap confusingly.
-_STYLE_TAGS = ("sarcastic", "deadpan", "dry", "amused", "flat", "sighs", "laughs")
+#
+# Widened 2026-08-07 against Google's documented tag list (both gemini-2.5-flash-preview-tts and
+# gemini-3.1-flash-tts-preview accept audio tags, so this is safe on the current default engine).
+# Curated, NOT exhaustive — the docs list ~16 common tags and note the real set is open-ended, but
+# an allow-list of "whatever the model might accept" is not an allow-list. Two filters applied:
+#
+#   · REGISTER — this channel is deadpan; STATUS 2026-07-27 records that its failure mode is "a
+#     narrator who announces the joke". So [excited], [amazed] and [giggles] are excluded as hype
+#     even though they are documented and would work.
+#   · RULE 6 — [crying], [panicked], [trembling], [gasp] and [shouting] are excluded outright.
+#     Melodrama over real events is how a news channel drifts into tragedy exploitation.
+#
+# Undocumented but kept: deadpan/dry/amused/flat. Google's docs say the tag set is open-ended and
+# to experiment; these four ARE the channel's core register and predate this list.
+_STYLE_TAGS = (
+    # documented (ai.google.dev/gemini-api/docs/speech-generation)
+    "sarcastic", "serious", "curious", "whispers", "tired", "mischievously", "sighs", "laughs",
+    # undocumented, experimental, on-register
+    "deadpan", "dry", "amused", "flat",
+)
 
 _TAG_RE = re.compile(r"\[([^\]]{1,24})\]|<[^>]{1,60}>")
 
