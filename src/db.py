@@ -115,15 +115,43 @@ def top_performing_titles(limit: int = 8) -> list[str]:
     Returns the PUBLISHED YouTube title (the punchy one viewers tapped) with its view count,
     so ideation learns the winning *style*, not just the topic. Falls back to the idea title
     for older rows that pre-date title persistence. Feeds the ideation prompt. [] if no data.
+
+    `analytics` is a TIME SERIES — `collect_stats()` appends one snapshot per published post on
+    every run — so ranking raw snapshot rows ranks *snapshots*, not videos: one breakout Short's
+    own daily history occupies slot after slot, and the window runs dry before it has seen
+    `limit` DISTINCT videos. It also decays as the channel ages, because each extra day adds
+    another snapshot per post while the window stays fixed. Measured on the live DB 2026-08-25:
+    72 posts / 3,454 snapshots, the top-24 window covered **3 distinct videos**, so ideation was
+    handed 3 winners after asking for 6.
+
+    So: collapse to ONE row per post FIRST — its newest snapshot, which for a monotonically
+    rising view count is also its highest — and only then rank.
     """
+    client = get_client()
+    # A full collect_stats() pass writes one row per published post, so the newest
+    # (published posts × 3) rows contain every post's latest snapshot with room to spare
+    # even if a pass or two was partial (rule 14: one bad row never stops the pull).
+    n_posts = (
+        client.table("posts").select("id", count="exact")
+        .eq("platform", "youtube").not_.is_("external_id", "null").limit(1).execute().count
+    ) or 0
+    if not n_posts:
+        return []
     rows = (
-        get_client().table("analytics")
-        .select("views, posts(scripts(title, ideas(title)))")
-        .order("views", desc=True).limit(limit * 4).execute().data
+        client.table("analytics")
+        .select("post_id, views, posts(scripts(title, ideas(title)))")
+        .order("id", desc=True).limit(max(n_posts * 3, limit * 4)).execute().data
     )
+
+    latest: dict = {}
+    for r in rows:  # newest-first, so the FIRST row seen for a post is its current standing
+        pid = r.get("post_id")
+        if pid is not None and pid not in latest:
+            latest[pid] = r
+
     out: list[str] = []
     seen: set[str] = set()
-    for r in rows:
+    for r in sorted(latest.values(), key=lambda x: int(x.get("views") or 0), reverse=True):
         try:
             script = r["posts"]["scripts"]
             title = (script.get("title") or "").strip() or script["ideas"]["title"]
