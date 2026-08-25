@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — The Groq fallback had been dead, and nothing noticed
+
+### Fixed
+- **`llama-3.3-70b-versatile` no longer exists on Groq** — every call returned 404
+  `model_not_found`. Rule 11's mandatory chain therefore had a **dead second link**: the moment
+  Gemini hit its free cap, `llm.generate` failed outright instead of failing over. Found live on
+  2026-08-25 while checking something unrelated.
+- **Why the suite never caught it:** every Groq test mocks `_gen_groq`, so they verify the
+  failover *logic* and say nothing about whether the configured model is real. 366 green tests
+  and a completely broken fallback are not contradictory. Ironically the file already had a test
+  whose docstring warns that Gemini failures get "HIDDEN by the Groq failover" — the failover was
+  itself the thing hiding.
+- **This was not academic.** The Gemini free tier is **20 requests/day per model**, and one reel
+  spends several LLM calls. Above roughly two reels a day the pipeline was running with no
+  safety net at all, and would simply stop.
+- **Now `openai/gpt-oss-120b`** — the most capable model Groq still serves that handles both
+  plain and `json_object` mode, which the scriptwriter and keyword extraction both require.
+  `qwen/qwen3.6-27b` was rejected: it answers plain prompts but 400s on JSON and leaks `<think>`
+  reasoning into its output.
+- **`test_configured_groq_model_actually_exists`** now calls the live API in both modes (skips
+  without a key), so the next retirement fails a test instead of a production run. Confirmed
+  failing against the old default.
+- Verified end to end in the real failure mode: with Gemini 429ing, `generate()` returns `OK` and
+  `generate(json=True)` returns valid JSON via Groq. **366 pass, 4 skipped.**
+
 ## [Unreleased] — Stop recycling B-roll, and keep one narrator
 
 ### Fixed

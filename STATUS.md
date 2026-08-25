@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **364 pass, 4 skipped** — re-measured 2026-08-25)
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **366 pass, 4 skipped** — re-measured 2026-08-25)
 **Last updated:** 2026-08-25
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
   ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
@@ -98,7 +98,7 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ## Log
 
 ### 2026-08-25 — Audit: the analytics feedback loop was learning from 3 videos out of 72
-Health check of a channel that has been live and unattended for ~3 weeks. **357 pass, 4 skipped.**
+Health check of a channel that has been live and unattended for ~3 weeks. **366 pass, 4 skipped.**
 - ✅ **Re-verified, still correct:** suite green; grounded search still 429s with an *empty*
   quota-violation list on every 3.x model while `gemini-2.5-flash` answers, so the grounding pin
   stays; `gemini-3.1-flash-tts-preview` + Zubenelgenubi still exist and are still the newest TTS.
@@ -124,8 +124,21 @@ Health check of a channel that has been live and unattended for ~3 weeks. **357 
   and a wrong flag on the White House — Flux artifacts, shipped to the channel.
 - 📉 **Throughput is ~1.2 reels/day against a 4–5/day target** (46 produced across the last 80
   ideas; crons still commented out in `production.yml`, so cadence is gated on manual clicks).
+- 🔴 **Fixed — the Groq fallback had been dead.** `llama-3.3-70b-versatile` was retired by Groq and
+  404s, so rule 11's chain had no second link: once Gemini hit its **20 req/day per model** free
+  cap, `llm.generate` failed outright. Every Groq test mocks `_gen_groq`, so 366 green tests
+  coexisted with a broken fallback. Now **`openai/gpt-oss-120b`** (handles plain *and*
+  `json_object`, both of which the pipeline needs), pinned by a live test. Verified in the real
+  failure mode: Gemini 429ing, Groq answering.
+- ⚠️ **Free Gemini is 20 requests/day per model** — worth remembering before raising cadence: one
+  reel spends several LLM calls, so the ungrounded path leans on Groq sooner than expected.
 - 🔬 **New capability found: Gemini reads YouTube URLs directly**, so the channel can now critique
   its own published Shorts on the existing free key (see the log entry's winner-vs-flop compare).
+- 🟡 **Flux text artifacts: no clean fix found.** `flux-1-schnell` accepts only `prompt`/`steps`/
+  `seed` — there is **no `negative_prompt`**, so "no text, no watermark" is just a positive token
+  the model is free to ignore. A 3-way prompt A/B (current · text-words removed · tight-framing)
+  was **inconclusive at the sample size the free quota allowed**. Unresolved; the real options are
+  `VISUAL_SOURCE=photos` (free, clean, more generic) or a Workers AI model with a negative prompt.
 
 ### 2026-08-07 — Voice model chosen by ear: `gemini-3.1-flash-tts-preview` is now the default
 Operator A/B'd all three renders from `tools/compare_voices.py` on an identical script and ranked
