@@ -393,3 +393,31 @@ def test_live_full_reel(tmp_path):
     assert "codec_type=audio" in probe
     out_dur = assembly.probe_duration(out)
     assert abs(out_dur - dur) < 1.5
+
+
+# --- cut-rhythm contract (shared with visuals) ------------------------------------------
+
+def test_slice_count_matches_what_ordered_clips_actually_builds(monkeypatch):
+    """`slice_count` is the SINGLE source of truth for how many cuts a reel needs.
+
+    visuals sizes its image generation from it, so if it ever disagrees with the slicer the
+    reel silently goes back to recycling B-roll — the exact drift this function exists to stop.
+    """
+    monkeypatch.delenv("CLIP_SECONDS", raising=False)
+    clips = [f"/tmp/c{i}.mp4" for i in range(40)]
+    monkeypatch.setattr(assembly, "_safe_probe", lambda c: 7.0)
+    for duration in (12.0, 18.0, 25.0, 30.0, 35.0, 48.0):
+        assert assembly.slice_count(duration) == len(
+            assembly._ordered_clips(clips, duration,
+                                    overlap=assembly._xfade_seconds()
+                                    if assembly._xfade_enabled() else 0.0)
+        ), f"slice_count disagrees with _ordered_clips at {duration}s"
+
+
+def test_slice_count_accounts_for_crossfade_overlap(monkeypatch):
+    """Crossfades shrink each slice's effective coverage, so a faded reel needs MORE slices."""
+    monkeypatch.setattr(assembly, "_xfade_enabled", lambda: False)
+    hard = assembly.slice_count(30.0)
+    monkeypatch.setattr(assembly, "_xfade_enabled", lambda: True)
+    monkeypatch.setattr(assembly, "_xfade_seconds", lambda: 0.5)
+    assert assembly.slice_count(30.0) >= hard

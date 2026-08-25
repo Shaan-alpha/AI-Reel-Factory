@@ -8,8 +8,9 @@ Contract:
 
 COPYRIGHT SAFETY (docs/08 §3): CC0 stock only — NEVER broadcaster/agency footage. Both
 Pexels and Pixabay are commercial-use, no-attribution. Prefer maps/charts/data-viz for impact
-stories (push that via keywords). Assembly cuts every 5-8s, so we gather several short clips
-for variety, not one long one.
+stories (push that via keywords). Assembly cuts every `CLIP_SECONDS` (3.5s by default), so we
+gather several short clips for variety, not one long one — and ask `assembly.slice_count()` how
+many rather than guessing, so image B-roll covers every cut instead of looping.
 
 Clips are render artifacts: download to a temp dir, let assembly consume them, then delete
 (rule 15). Filenames are content-hashed so a cron retry reuses the cache (rule 12).
@@ -19,7 +20,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
-import math
 import os
 import re
 import subprocess
@@ -40,7 +40,8 @@ _SLICE_SECONDS = 8.0   # planned cut length in assembly → coverage unit per cl
 _PER_KEYWORD = 3       # candidates pulled per keyword
 
 # Image-based visuals (photos / AI) → Ken Burns clips. Default source is "photos".
-_IMAGE_CLIP_SECONDS = 7.0   # a touch longer than assembly's 6s slice
+_IMAGE_CLIP_SECONDS = 7.0   # comfortably longer than assembly's 3.5s slice (was documented as
+                            # "assembly's 6s slice" — that stale 6.0 was the repeat bug's origin)
 _MAX_IMG_CLIPS = 12         # cap API calls + ffmpeg conversions per reel
 
 # Minimal stopword set for the heuristic keyword fallback (no NLTK dependency).
@@ -318,8 +319,16 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
 
 
 def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str) -> list[str]:
-    """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made."""
-    n = min(_MAX_IMG_CLIPS, math.ceil(target_seconds / 6.0) + 1)
+    """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made.
+
+    One image per cut the assembler will actually make. Sizing this off a local guess (it was
+    `ceil(target / 6.0) + 1`) while assembly cut at `CLIP_SECONDS` left a 30s reel 4 shots short
+    of its 10 slices, and the slicer filled the gap by replaying earlier ones — which on a pan
+    over a single still is unmissable. Ask the module that does the cutting (rule 7).
+    """
+    from src import assembly  # local: keeps the module importable without ffmpeg present
+
+    n = min(_MAX_IMG_CLIPS, assembly.slice_count(target_seconds))
     clips: list[str] = []
     for i in range(n):
         kw = keywords[i % len(keywords)]

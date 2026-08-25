@@ -157,6 +157,29 @@ def _safe_probe(path: str) -> float:
         return 0.0
 
 
+def _slice_count(duration: float, overlap: float) -> int:
+    """How many slices cover `duration` at the configured cut rhythm. The +2 over-covers."""
+    slice_s = _clip_seconds()
+    if duration <= slice_s:
+        return 2
+    step = max(0.1, slice_s - overlap)  # effective coverage per slice after the first
+    return min(_MAX_SLICES, math.ceil((duration - slice_s) / step) + 2)
+
+
+def slice_count(duration: float) -> int:
+    """Cuts this module will make for `duration` seconds of narration, transitions included.
+
+    PUBLIC because `visuals` must generate at least this many distinct shots. It used to size
+    its B-roll off its own hardcoded 6.0s guess while this module cut at `CLIP_SECONDS` (~3.5s),
+    so a 30s reel asked for 10 slices, got 6 images, and replayed 4 of them. `_ordered_clips`
+    normally softens a repeat by advancing the start offset — but a Ken Burns clip is a pan over
+    ONE still, so every offset of it is the same picture and the repeat is plainly visible.
+    Two modules deriving the same number from different constants is the drift this closes:
+    ask the module that does the cutting (rule 7).
+    """
+    return _slice_count(duration, _xfade_seconds() if _xfade_enabled() else 0.0)
+
+
 def _ordered_clips(clip_paths: list[str], duration: float,
                    overlap: float = 0.0) -> list[tuple[str, float]]:
     """Cycle clips into enough slices to over-cover the narration. Returns [(path, start_offset)].
@@ -168,11 +191,7 @@ def _ordered_clips(clip_paths: list[str], duration: float,
     `overlap` (xfade seconds) shrinks each slice's effective coverage to slice_s - overlap, so
     crossfaded reels still over-cover the narration. overlap=0 reproduces the hard-cut count."""
     slice_s = _clip_seconds()
-    step = max(0.1, slice_s - overlap)  # effective coverage per slice after the first
-    if duration > slice_s:
-        n = min(_MAX_SLICES, math.ceil((duration - slice_s) / step) + 2)
-    else:
-        n = 2
+    n = _slice_count(duration, overlap)
     durs = [_safe_probe(c) for c in clip_paths]
     used: dict[int, int] = {}
     ordered: list[tuple[str, float]] = []

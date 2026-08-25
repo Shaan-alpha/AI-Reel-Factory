@@ -122,8 +122,13 @@ def test_fetch_broll_photos_makes_kenburns_clips(monkeypatch, tmp_path):
             f.write(b"\x00" * 4096)
     monkeypatch.setattr(visuals, "_image_to_kenburns_clip", fake_kb)
 
+    from src import assembly
+
     paths = visuals.fetch_broll(["courtroom", "rocket"], target_seconds=18, out_dir=str(tmp_path))
-    assert len(paths) == 4 and all(p.endswith(".mp4") and os.path.exists(p) for p in paths)  # ceil(18/6)+1
+    # One image per cut the assembler will make — NOT the old local `ceil(18/6)+1` guess, which
+    # under-produced against a ~3.5s cut rhythm and left the slicer replaying earlier shots.
+    assert len(paths) == assembly.slice_count(18)
+    assert all(p.endswith(".mp4") and os.path.exists(p) for p in paths)
 
 
 def test_fetch_broll_photos_fall_back_to_video(monkeypatch, tmp_path):
@@ -180,3 +185,51 @@ def test_live_pexels_fetch(tmp_path):
         pytest.skip(f"Pexels unreachable / unkeyed: {e}")
     assert len(paths) >= 1
     assert all(os.path.exists(p) and os.path.getsize(p) > 10_000 for p in paths)
+
+
+# --- B-roll must cover every cut, not recycle ---------------------------------------------
+
+def _stub_image_pipeline(monkeypatch):
+    def fake_fetch_image(kw, dest, seed, source):
+        with open(dest, "wb") as f:
+            f.write(b"\xff" * 2048)
+        return True
+
+    def fake_kb(img, dest, seconds, index=0):
+        with open(dest, "wb") as f:
+            f.write(b"\x00" * 4096)
+    monkeypatch.setattr(visuals, "_fetch_image", fake_fetch_image)
+    monkeypatch.setattr(visuals, "_image_to_kenburns_clip", fake_kb)
+
+
+@pytest.mark.parametrize("target", [18.0, 25.0, 30.0, 35.0])
+def test_image_broll_covers_every_slice_the_assembler_will_cut(monkeypatch, tmp_path, target):
+    """The regression: visuals sized on a hardcoded 6s cut while assembly cuts at CLIP_SECONDS.
+
+    Measured on the live channel 2026-08-25 — a 30s reel wanted 10 slices but got 6 images, so
+    4 of them replayed earlier shots. On Ken Burns clips the slicer's usual anti-repeat trick
+    (advance the start offset) cannot help: every offset of a pan over ONE still is that same
+    still, so the repeat is plainly visible. Gemini's audit of the newest Short named exactly
+    that loop as the swipe-away point. Enough distinct images is the only fix.
+    """
+    from src import assembly
+
+    monkeypatch.delenv("VISUAL_SOURCE", raising=False)  # default = photos
+    _stub_image_pipeline(monkeypatch)
+
+    paths = visuals.fetch_broll(["courtroom", "rocket"], target_seconds=target,
+                                out_dir=str(tmp_path))
+    needed = assembly.slice_count(target)
+    assert len(paths) >= min(needed, visuals._MAX_IMG_CLIPS), (
+        f"{target}s reel cuts {needed} slices but only {len(paths)} distinct images were made "
+        f"— {needed - len(paths)} slices would replay earlier footage"
+    )
+    assert len(set(paths)) == len(paths), "duplicate clip paths"
+
+
+def test_image_broll_still_respects_the_api_call_cap(monkeypatch, tmp_path):
+    """Coverage must not become an unbounded image-generation bill (rule 13)."""
+    _stub_image_pipeline(monkeypatch)
+    monkeypatch.delenv("VISUAL_SOURCE", raising=False)
+    paths = visuals.fetch_broll(["a", "b"], target_seconds=600.0, out_dir=str(tmp_path))
+    assert len(paths) <= visuals._MAX_IMG_CLIPS
