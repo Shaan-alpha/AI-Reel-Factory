@@ -45,7 +45,15 @@ log = logging.getLogger(__name__)
 # silently killed grounded ideation, the grounded scriptwriter AND the fact-check gate at once.
 _GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.6-flash")
 _GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
-_GROQ_MODEL = config.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Groq retired `llama-3.3-70b-versatile` — it 404s `model_not_found` (found 2026-08-25, live).
+# That left rule 11's mandatory chain with a DEAD second link: every Groq test mocks `_gen_groq`,
+# so the suite stayed green while the only fallback under Gemini failed on every call, turning
+# Gemini's 20/day free cap into a hard stop for the whole pipeline. `openai/gpt-oss-120b` is the
+# most capable model Groq still serves that handles BOTH plain and `json_object` mode, which the
+# scriptwriter and keyword extraction both need. (`qwen/qwen3.6-27b` answers plain prompts but
+# 400s on JSON and leaks `<think>` reasoning into its output, so it is not a drop-in.)
+# `test_configured_groq_model_actually_exists` now pins this against the live API.
+_GROQ_MODEL = config.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
 @lru_cache(maxsize=1)

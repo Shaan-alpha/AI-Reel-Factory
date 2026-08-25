@@ -5,6 +5,8 @@ installed — they verify the orchestration in src.llm.generate in isolation (ru
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from src import llm
@@ -228,3 +230,31 @@ def test_thinking_config_is_picked_per_model_generation():
         cfg = llm._thinking_cfg(name)
         assert cfg.thinking_budget == 0, name
         assert cfg.thinking_level is None, f"{name}: 2.x uses thinking_budget"
+
+
+# --- the fallback itself must be alive (rule 11) ------------------------------------------
+
+@pytest.mark.skipif(not os.environ.get("GROQ_API_KEY"),
+                    reason="needs a live Groq key (.env / Actions secrets)")
+@pytest.mark.parametrize("as_json", [False, True])
+def test_configured_groq_model_actually_exists(as_json):
+    """The Groq fallback must be a model Groq still serves.
+
+    Every other Groq test here mocks `_gen_groq`, so they verify the failover LOGIC while saying
+    nothing about whether the configured model is real. That gap let the default rot: Groq
+    decommissioned `llama-3.3-70b-versatile` and the whole suite stayed green while the ONLY
+    fallback under Gemini returned 404 model_not_found on every call. Rule 11 says a single
+    upstream failure must never kill the run — but with a dead second link, Gemini's 20/day free
+    cap became a hard stop for the entire pipeline.
+
+    Both modes are pinned because the pipeline needs both: scriptwriter and keyword extraction
+    ask for JSON, and `json_object` support is NOT implied by a model answering plain prompts
+    (`qwen/qwen3.6-27b` answers plain text fine and 400s on JSON).
+    """
+    prompt = ("Return a JSON object like {\"ok\": true} and nothing else."
+              if as_json else "Reply with the single word OK.")
+    out = llm._gen_groq(prompt, json=as_json, max_tokens=256)
+    assert out and out.strip(), f"{llm._GROQ_MODEL} returned nothing (json={as_json})"
+    if as_json:
+        import json as _json
+        _json.loads(out)  # must be parseable — callers json.loads() this directly
