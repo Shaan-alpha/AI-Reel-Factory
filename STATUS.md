@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **352 pass, 4 skipped** — re-measured 2026-08-07)
-**Last updated:** 2026-08-07
+**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **364 pass, 4 skipped** — re-measured 2026-08-25)
+**Last updated:** 2026-08-25
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
   ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -96,6 +96,36 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-08-25 — Audit: the analytics feedback loop was learning from 3 videos out of 72
+Health check of a channel that has been live and unattended for ~3 weeks. **357 pass, 4 skipped.**
+- ✅ **Re-verified, still correct:** suite green; grounded search still 429s with an *empty*
+  quota-violation list on every 3.x model while `gemini-2.5-flash` answers, so the grounding pin
+  stays; `gemini-3.1-flash-tts-preview` + Zubenelgenubi still exist and are still the newest TTS.
+- 🔴 **Fixed — `db.top_performing_titles` ranked snapshots, not videos.** `analytics` is a time
+  series (3,454 rows for 72 posts), so the top-24 window was filled by one breakout Short's own
+  daily history: it returned **3** winners when ideation asked for 6, and decayed further every
+  day. Now collapses to one row per post (newest snapshot) before ranking, with a window that
+  scales with the post count. **Live: 3 → 6 winners.** +5 tests.
+- 🟠 **No GCP budget cap exists** — billing is enabled on `composed-maxim-498517-f0` with
+  `texttospeech` on, but `billingbudgets.googleapis.com` is not even enabled, so rule 2's "set a
+  hard budget cap so it can never overrun" is unmet. (A GCP budget is an *alert*, not a hard stop.)
+- ✅ **Fixed — the voice-fallback chain changed the narrator's gender.** Primary is Gemini TTS
+  **Zubenelgenubi (male)** but `GOOGLE_TTS_VOICE` was `en-IN-Chirp3-HD-Kore` (**female**), so a
+  double Gemini 503 silently swapped the channel's narrator. Now `en-IN-Chirp3-HD-Zubenelgenubi`
+  in the repo variable, local `.env`, and documented in `.env.example`.
+- ✅ **Fixed — 40% of a reel's shots were recycled.** `visuals` sized B-roll on a hardcoded 6.0s
+  cut while `assembly` cuts at `CLIP_SECONDS` (~3.5s): a 30s reel wanted 11 slices, got 6 images,
+  and replayed 5. The slicer's anti-repeat trick (advance the start offset) can't help on a Ken
+  Burns pan over a single still. `assembly.slice_count()` is now public and the one source of
+  truth. **Repeats per reel: 18s 3→0 · 25s 3→0 · 30s 5→0 · 35s 5→0.**
+- 🟠 **`VISUAL_SOURCE=ai` is set at repo level**, so production runs Cloudflare Flux images, not
+  the `photos` default the code assumes. Gemini's read of a real flop found garbled in-image text
+  and a wrong flag on the White House — Flux artifacts, shipped to the channel.
+- 📉 **Throughput is ~1.2 reels/day against a 4–5/day target** (46 produced across the last 80
+  ideas; crons still commented out in `production.yml`, so cadence is gated on manual clicks).
+- 🔬 **New capability found: Gemini reads YouTube URLs directly**, so the channel can now critique
+  its own published Shorts on the existing free key (see the log entry's winner-vs-flop compare).
 
 ### 2026-08-07 — Voice model chosen by ear: `gemini-3.1-flash-tts-preview` is now the default
 Operator A/B'd all three renders from `tools/compare_voices.py` on an identical script and ranked

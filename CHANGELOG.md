@@ -5,6 +5,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Stop recycling B-roll, and keep one narrator
+
+### Fixed
+- **`visuals` sized its B-roll off a hardcoded 6.0s cut while `assembly` cut at `CLIP_SECONDS`
+  (~3.5s).** A 30s reel therefore asked for 11 slices, got 6 images, and the slicer filled the
+  gap by replaying earlier shots. `_ordered_clips` normally softens a repeat by advancing the
+  start offset within the clip — but a Ken Burns clip is a pan over ONE still, so every offset
+  of it is the same picture and the repeat is plainly visible. Gemini's audit of the newest
+  published Short named that loop as the predicted swipe-away point (0:18), listing three shots
+  replayed verbatim in the second half.
+- **`assembly.slice_count(duration)` is now public and is the single source of truth** for the
+  cut count, transitions included; `visuals._fetch_image_broll` sizes itself from it. Two modules
+  deriving the same number from different constants is exactly the drift rule 7 exists to stop.
+- Measured effect — repeats per reel: **18s 3→0 · 25s 3→0 · 30s 5→0 · 35s 5→0.** The
+  `_MAX_IMG_CLIPS` cap (12) still bounds image-generation cost (rule 13), covered by a test.
+- **The Chirp fallback voice was `en-IN-Chirp3-HD-Kore` (female) against a male Gemini primary
+  (Zubenelgenubi)**, so a double Gemini 503 — and 3.1-flash-tts 503s often — silently changed the
+  channel's narrator mid-catalogue. Now `en-IN-Chirp3-HD-Zubenelgenubi`: the same voice all the
+  way down the chain. Changed in the repo variable, local `.env`, and documented in `.env.example`
+  so it doesn't get casually reverted.
+- +7 tests (`assembly.slice_count` contract, per-duration B-roll coverage, cost cap). **364 pass,
+  4 skipped.**
+
+## [Unreleased] — The "what wins" loop was learning from 3 videos out of 72
+
+### Fixed
+- **`db.top_performing_titles` ranked analytics *snapshots* instead of videos.** `analytics` is a
+  time series — `collect_stats()` appends one row per published post per run — so ordering raw
+  rows by views handed the top slots to a single breakout Short's own daily history. Measured on
+  the live DB (2026-08-25): **72 posts, 3,454 snapshots, the top-24 window covered 3 distinct
+  videos**, so `top_performing_titles(6)` returned **3** winners and ideation learned its
+  "what works" style from a 3-video sample of a 72-video channel.
+- The bug was **progressive**: every extra day added another snapshot per post while the window
+  stayed fixed at `limit * 4`, so coverage decayed as the channel grew — quietly, since a short
+  list is indistinguishable from a young channel.
+- **Fix: collapse to one row per post first (its newest snapshot — for a monotonically rising
+  view count that is also its highest), then rank.** The window now scales with the published-post
+  count instead of the requested limit, so a full snapshot pass always fits.
+- Verified against the live DB: **3 → 6 winners** for the same call.
+- +5 tests in `tests/test_db_top_performers.py`, run with a fake PostgREST client so they need no
+  creds. The fake honours `.order()`, since ordering by `views` vs `id` *is* the bug. Confirmed
+  they fail against the pre-fix implementation. **357 pass, 4 skipped.**
+
 ## [Unreleased] — New channel voice model, chosen by ear
 
 ### Changed
