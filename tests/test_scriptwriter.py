@@ -403,3 +403,41 @@ def test_floor_does_not_add_spoken_words():
     before = len(scriptwriter._visible_words(body))
     after = len(scriptwriter._visible_words(scriptwriter._ensure_delivery_tag(body)))
     assert before == after
+
+
+# --- the word cap must not amputate the payoff --------------------------------------------
+
+def _long_body_with_payoff(filler_sentences: int = 12) -> str:
+    filler = " ".join(
+        f"Setup sentence number {i} adds context that is not load bearing at all."
+        for i in range(filler_sentences))
+    return filler + " Here's why it actually matters: your grocery bill goes up next month."
+
+
+def test_truncation_keeps_the_why_it_matters_turn(monkeypatch):
+    """The cap cut from the END, which is exactly where the payoff lives.
+
+    Observed live (run 32920283763): idea 224 logged `104 words > 80 cap; truncating to a
+    sentence.` and, on the very next line, `has NO 'why it matters' turn`. The truncation
+    CAUSED the warning. That turn is the originality signal the monetization gate turns on
+    (docs/08 §1), so losing it is the most expensive word to drop, not the cheapest.
+    """
+    body = _long_body_with_payoff()
+    out = scriptwriter._truncate_to_words(body, 40)
+
+    assert len(scriptwriter._visible_words(out)) <= 40, "the cap must still be respected"
+    assert scriptwriter._WHY_IT_MATTERS_RE.search(out), "the payoff turn must survive truncation"
+    assert out.rstrip().endswith("."), "must still end on a full sentence, never mid-thought"
+
+
+def test_truncation_is_unchanged_when_there_is_no_payoff_turn():
+    """No bridge to protect -> the original keep-the-front behaviour."""
+    body = " ".join(f"Sentence {i} carries no bridge at all." for i in range(20))
+    out = scriptwriter._truncate_to_words(body, 30)
+    assert len(scriptwriter._visible_words(out)) <= 30
+    assert out.startswith("Sentence 0")
+
+
+def test_truncation_leaves_a_short_script_alone():
+    body = "Short and sweet. Here's why it matters: it just does."
+    assert scriptwriter._truncate_to_words(body, 80) == body

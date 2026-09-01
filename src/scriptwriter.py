@@ -237,13 +237,47 @@ def _visible_words(body: str) -> list[str]:
     return _TAG_IN_TEXT_RE.sub(" ", body).split()
 
 
+def _payoff_start(body: str) -> int | None:
+    """Index where the 'why it matters' sentence begins, or None if there is no bridge.
+
+    Shared by the tag floor and the length cap so the two agree on WHERE the payoff is; two
+    copies of this walk-back drifting apart is how [curious] came to be emitted-but-stripped.
+    """
+    m = _WHY_IT_MATTERS_RE.search(body)
+    if not m:
+        return None
+    starts = [e.end() for e in _SENTENCE_END_RE.finditer(body, 0, m.start())]
+    return starts[-1] if starts else 0
+
+
 def _truncate_to_words(body: str, max_words: int) -> str:
     """Hard length backstop: if the body exceeds max_words, cut to the last full sentence
     at or under the cap (so we never end mid-thought). Deterministic.
 
-    Delivery tags are carried through and do not count toward the cap."""
+    Delivery tags are carried through and do not count toward the cap.
+
+    The cap trims from the END, which is precisely where the 'why it matters' turn lives — so
+    a long script was silently losing its payoff. Observed live on idea 224 (run 32920283763):
+    `104 words > 80 cap; truncating to a sentence.` and then, next line, `has NO 'why it
+    matters' turn`. The truncation caused the warning. That turn is the originality signal the
+    monetization gate turns on (docs/08 §1), which makes it the most expensive sentence in the
+    script to drop, not the cheapest. So when a bridge exists it is RESERVED: the setup is
+    trimmed to whatever budget is left after the payoff is paid for.
+    """
     if len(_visible_words(body)) <= max_words:
         return body
+
+    start = _payoff_start(body)
+    if start is not None:
+        payoff = body[start:].strip()
+        payoff_words = len(_visible_words(payoff))
+        # Only reserve it if the setup still gets a meaningful share; a payoff that alone blows
+        # the cap means the writer wrote one enormous closing sentence, and the old
+        # keep-the-front behaviour degrades better than emitting the payoff by itself.
+        if 0 < payoff_words < max_words:
+            head = _truncate_to_words(body[:start].strip(), max_words - payoff_words)
+            return f"{head} {payoff}".strip() if head else payoff
+
     kept, spoken = [], 0
     for m in _PIECE_RE.finditer(body):
         piece = m.group(0)
