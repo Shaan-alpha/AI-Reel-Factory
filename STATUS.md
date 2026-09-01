@@ -139,8 +139,10 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
   not exist — the live chain is Gemini ↔ Groq only.**
 
 **Still open — needs the operator, not code:**
-- `PIXABAY_API_KEY` secret does not exist, so the mandated Pexels→Pixabay visual fallback is dead
-  (rule 11). Free key from pixabay.com/api/docs, then `gh secret set PIXABAY_API_KEY`.
+- ✅ **`PIXABAY_API_KEY` set (2026-09-01)** — operator supplied a key; stored in the local
+  `.env` (gitignored) and as a GitHub Actions secret, never committed (rule 5). Verified live
+  against both endpoints: images 200/500 hits, and `_pixabay_search` returns 3 clips per
+  keyword. **Rule 11's visual chain is now closed end to end**: Flux → Pexels video → Pixabay.
 - **No GCP budget cap** (rule 2 unmet since 2026-08-25): billing is on with `texttospeech`
   enabled and `billingbudgets.googleapis.com` is not. Deliberately not touched — creating budgets
   on a billing account is the operator's call. (Note a GCP budget is an *alert*, not a hard stop.)
