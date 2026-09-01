@@ -173,10 +173,45 @@ def _notify_failure(idea: dict, error: Exception) -> None:
         log.warning("production: failure alert could not be sent.")
 
 
-def run_production(limit: int | None = None) -> dict:
-    """Produce the approved queue (capped). One failure is logged + skipped (rule 14)."""
+def _release_failed_idea(idea_id: int, error: Exception) -> None:
+    """Move a transiently-failed idea OUT of the approved queue, back to the digest.
+
+    'approved' means "a human tapped Make it for this run". A reel that dies mid-chain has spent
+    that approval, so leaving the row at 'approved' is what let the next /makeshort produce it
+    with no tap at all (STATUS 2026-09-01, idea 223). It also leaked into APPROVAL_CAP, which
+    counts approved rows — three stuck ideas answered "capped" to every future tap.
+
+    Back to 'pending', not 'rejected': the failure was upstream (a 429, a 503, a dead fallback),
+    not a verdict on the idea, so it belongs in front of the operator again rather than in the
+    bin. A FactCheckFailed is the exception — produce_one already set it to 'rejected' because
+    that IS a verdict on the content, and re-offering it would just re-spend quota to reach the
+    same answer. Best-effort: never let bookkeeping kill the batch (rule 14).
+    """
+    if isinstance(error, FactCheckFailed):
+        return
+    try:
+        db.set_idea_status(idea_id, "pending")
+    except Exception:  # noqa: BLE001 — the reel already failed; don't compound it
+        log.warning("production: could not release idea %s back to pending.", idea_id)
+
+
+def run_production(limit: int | None = None, only_ids: list[int] | None = None) -> dict:
+    """Produce the approved queue (capped). One failure is logged + skipped (rule 14).
+
+    `only_ids` scopes the batch to ideas THIS run put in front of the operator. Without it the
+    queue is drained, which is correct for the scheduled cron but wrong for an on-demand run:
+    any idea still sitting at 'approved' from an earlier failed run would ship unapproved.
+    """
     cap = limit if limit is not None else int(config.get("DAILY_REEL_CAP", "3"))
-    approved = db.get_approved_ideas()[:cap]
+    approved = db.get_approved_ideas()
+    if only_ids is not None:
+        wanted = {int(i) for i in only_ids}
+        skipped = [i["id"] for i in approved if int(i["id"]) not in wanted]
+        approved = [i for i in approved if int(i["id"]) in wanted]
+        if skipped:
+            log.warning("production: %d approved idea(s) not offered in this run were skipped: %s "
+                        "— they need a fresh approval.", len(skipped), skipped)
+    approved = approved[:cap]
     if not approved:
         log.info("production: no approved ideas to produce.")
         return {"published": [], "failed": []}
@@ -191,6 +226,7 @@ def run_production(limit: int | None = None) -> dict:
         except Exception as e:  # noqa: BLE001 — fail soft per reel; keep the batch alive
             log.exception("production: idea %s failed", idea.get("id"))
             failed.append({"idea_id": idea.get("id"), "error": f"{type(e).__name__}: {e}"})
+            _release_failed_idea(idea.get("id"), e)
             _notify_failure(idea, e)
     return {"published": published, "failed": failed}
 
@@ -268,13 +304,17 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
         n = ideation_fallback.seed_ideas(num_ideas)
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
+    # The ideas THIS run is putting in front of the operator. Captured before the digest so
+    # production can be scoped to exactly them: anything else still at 'approved' is a leftover
+    # from an earlier failed run and must not ship without a fresh tap (STATUS 2026-09-01).
+    offered = [i["id"] for i in db.get_pending_ideas()]
     approval.send_digest()
     if _approval_mode() == "webhook":
         _wait_for_webhook_decisions(max_seconds=wait_minutes * 60)
     else:
         approval.process_responses(max_seconds=wait_minutes * 60)
 
-    summary = run_production()
+    summary = run_production(only_ids=offered)
     if summary["published"]:
         for p in summary["published"]:
             _notify(f"✅ Published: {p['url']}")
