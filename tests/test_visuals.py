@@ -72,12 +72,22 @@ def _fake_download(monkeypatch):
 
 
 def test_fetch_broll_covers_target_and_stops(monkeypatch, tmp_path):
+    """Fetch one clip per CUT assembly will make, then stop.
+
+    Previously this asserted `len(paths) == 2` for a 15s target on the reasoning "8+8 >= 15" —
+    i.e. it pinned the stale 8.0s slice guess. Assembly cuts at CLIP_SECONDS (~3.5s), so a
+    15s reel needs slice_count(15) shots and two clips leaves assembly recycling the rest.
+    """
+    from src import assembly
+
     monkeypatch.setenv("VISUAL_SOURCE", "video")
-    cands = [{"url": f"http://x/{i}.mp4", "duration": 8.0} for i in range(5)]
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    needed = assembly.slice_count(15)
+    cands = [{"url": f"http://x/{i}.mp4", "duration": 8.0} for i in range(needed + 4)]
     monkeypatch.setattr(visuals, "_gather_candidates", lambda kws: cands)
     calls = _fake_download(monkeypatch)
     paths = visuals.fetch_broll(["a"], target_seconds=15, out_dir=str(tmp_path))
-    assert len(paths) == 2 and len(calls) == 2  # 8+8 >= 15, min 2 clips
+    assert len(paths) == needed and len(calls) == needed  # one shot per cut, then stops
     assert all(os.path.exists(p) for p in paths)
 
 
@@ -233,3 +243,32 @@ def test_image_broll_still_respects_the_api_call_cap(monkeypatch, tmp_path):
     monkeypatch.delenv("VISUAL_SOURCE", raising=False)
     paths = visuals.fetch_broll(["a", "b"], target_seconds=600.0, out_dir=str(tmp_path))
     assert len(paths) <= visuals._MAX_IMG_CLIPS
+
+
+# --- the stock-video fallback must size its clips the way assembly actually cuts -----------
+
+def test_video_broll_coverage_uses_assemblys_real_slice_length(monkeypatch, tmp_path):
+    """The 2026-08-25 repeat fix was wired into the IMAGE path only.
+
+    The stock-video path still credits each downloaded clip with `_SLICE_SECONDS` (8.0s) of
+    coverage while assembly cuts at CLIP_SECONDS (~3.5s), so it stops downloading at less than
+    half the clips assembly needs — and assembly fills the gap by replaying shots. This path is
+    production's fallback when Flux fails, i.e. it runs exactly when things are already going
+    wrong.
+    """
+    from src import assembly
+
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    target = 28.0
+    got = []
+    monkeypatch.setattr(visuals, "_pexels_search",
+                        lambda kw: [{"url": f"https://x/{kw}-{i}.mp4", "duration": 15.0}
+                                    for i in range(12)])
+    monkeypatch.setattr(visuals, "_pixabay_search", lambda kw: [])
+    monkeypatch.setattr(visuals, "_download",
+                        lambda url, dest: (got.append(url), open(dest, "wb").write(b"x")))
+
+    paths = visuals._fetch_video_broll(["a", "b"], target, str(tmp_path))
+    assert len(paths) >= assembly.slice_count(target), (
+        f"downloaded {len(paths)} clips for {assembly.slice_count(target)} cuts — "
+        "assembly will recycle the difference")
