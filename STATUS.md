@@ -97,6 +97,151 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-09-01 — Fixed (batch 2): the reason nobody noticed, plus six reliability holes
+**396 pass, 5 skipped** (batch 1 left it at 383 + 4). Still uncommitted — working tree only.
+
+- ✅ **CI now runs the suite** — new `.github/workflows/tests.yml` (push · PR · daily 05:00 UTC ·
+  manual). **The schedule is the point:** both Groq breakages were upstream drift, not code
+  changes, so a push-only trigger would have missed them. This is the single fix that would have
+  caught two of batch 1's four bugs.
+  - ⚠️ **`test_live_real_llm_ideation` was the one live test that ran by DEFAULT**, and it is the
+    most expensive in the suite — `run_fallback_ideation()` spends several grounded Gemini calls
+    against the 20/day cap that production shares. Every casual `pytest` was competing with the
+    day's reels for their provider. Now gated behind `IDEATION_LIVE_TEST=1`, matching the four
+    other live tests. CI therefore spends **zero** Gemini requests; verified by simulation —
+    382 passed, 5 skipped, every skip a deliberate opt-in, and 30s faster.
+- ✅ **`posts.published_at` is stamped at insert** (`db.insert_post`). The column has no DB
+  default and nothing ever set it, so the bot's `/today` always answered "0 Shorts" and `/latest`
+  ordered by an all-NULL column. Bot queries now also use `.nullslast`, so the 75 legacy NULL
+  rows can't outrank real ones (Postgres sorts NULLs FIRST on DESC).
+  **Not backfilled** — that is 75 production writes and the operator's call.
+- ✅ **The word cap no longer amputates the payoff.** `_truncate_to_words` reserves the
+  "why it matters" sentence and trims the setup to fit around it; new shared `_payoff_start()`
+  keeps the cap and the tag floor agreeing on where the payoff is. Idea 224's log — `104 words >
+  80 cap; truncating` immediately followed by `has NO 'why it matters' turn` — was cause and
+  effect. Untouched when there is no bridge, or when the payoff alone would blow the cap.
+- ✅ **Transient upstream errors get one retry** (`_call_with_retry`). 429/503/500/504 retry once,
+  honouring Google's own `retryDelay` when it names one, capped by `LLM_RETRY_MAX_WAIT` (90s) so a
+  daily-cap 429 naming an hour fails over instead of stalling. A 400 is a verdict — no retry.
+  Run 32920283763 had Gemini 503, an explicit `retryDelay: 46s` nobody read, and ~40 minutes of
+  unused job budget; it failed over to the (then-broken) Groq leg and died.
+- ✅ **`generate_grounded` retries too** — it has NO second provider, and its failure is silent:
+  `factcheck.verify` fails OPEN under the default `FACTCHECK_STRICT=false`, so a 503 there doesn't
+  block a reel, it publishes one with the accuracy gate quietly absent.
+- ✅ **A failed post-insert no longer costs a duplicate video.** `publish()` swallows and loudly
+  logs an `insert_post` failure instead of propagating it. The upload is irreversible; the row is
+  not — and both idempotency guards key off that row, so letting it raise meant the idea returned
+  to the queue and the next run re-uploaded the same reel. **This one was made worse by batch 1's
+  `_release_failed_idea`** (which returns failed ideas to `pending`), so it needed fixing here.
+- ✅ **GitHub Models is retired by GitHub** — verified live: catalog *and* inference both return
+  HTTP 410 `github_models_retirement_brownout`. Left in the tree (opt-in, off, fails over
+  cleanly) but now documented as dead in `llm.py` and `.env.example`. **Rule 11's third link does
+  not exist — the live chain is Gemini ↔ Groq only.**
+
+**Still open — needs the operator, not code:**
+- `PIXABAY_API_KEY` secret does not exist, so the mandated Pexels→Pixabay visual fallback is dead
+  (rule 11). Free key from pixabay.com/api/docs, then `gh secret set PIXABAY_API_KEY`.
+- **No GCP budget cap** (rule 2 unmet since 2026-08-25): billing is on with `texttospeech`
+  enabled and `billingbudgets.googleapis.com` is not. Deliberately not touched — creating budgets
+  on a billing account is the operator's call. (Note a GCP budget is an *alert*, not a hard stop.)
+- **The 75 already-published Shorts still carry dead citations.** Batch 1 stops new ones; it does
+  not rewrite existing descriptions.
+
+### 2026-09-01 — Fixed: all four audit blockers, each pinned by a test watched failing first
+**383 pass, 4 skipped** (was 366 + 4; 17 new tests). No code was committed — working tree only.
+
+- ✅ **`config.get()` treats a present-but-empty env var as absent.** One line, three subsystems
+  back. Verified under the exact CI env shape (`SFX_DIR=""`, `VOICE_STYLE_PROMPT=""`,
+  `IMAGE_STYLE=""`, `CAPTION_FONT_FILE=""`): style prompt resolves to its real 480 chars,
+  `ensure_sfx_assets()` generates 5 wavs instead of raising, `"no text, no watermark"` is back in
+  the Flux prompt, Montserrat path restored.
+- ✅ **`_gen_groq` sends `reasoning_effort` (default `low`).** Reproduced the production failure
+  against the exact call — `visuals.extract_keywords` at `max_tokens=200` — then fixed it:
+  `400 json_validate_failed` → valid JSON in 52 reasoning tokens. The old "live" test was
+  replaced with one that sends the **real** prompt at its **real** budget; it fails on the
+  unfixed code with the production error.
+- ✅ **`run_production(only_ids=…)` scopes a batch to the ideas that run offered**, and
+  `_release_failed_idea` returns a transiently-failed idea to `pending` (a `FactCheckFailed`
+  stays `rejected`). Stale approved rows can no longer ship unapproved or eat `APPROVAL_CAP`.
+- ✅ **`_url_is_dead()` probes every source before the digest**; `MIN_SOURCES` now counts live
+  links. Verified against the real fabricated URLs: drops the TOI/DW/HT 404s, keeps the live
+  Al Jazeera article, keeps bot-blocked NDTV and paywalled Bloomberg, keeps an unresolvable host.
+  **Honest limits:** it catches hard 404/410 only — The Hindu's `article12345678.ece` placeholder
+  answers 200 (soft-404) and still gets through, and fail-soft means a DNS blip keeps a URL.
+- ⚠️ **Not fixed, deliberately** (each is its own change): no CI workflow runs pytest;
+  `posts.published_at` NULL on all 75 rows; the 80-word cap truncates from the end, where the
+  "why it matters" turn lives; missing `PIXABAY_API_KEY`; GitHub Models retired (410); no Gemini
+  429 retry; non-atomic publish→status; no GCP budget cap.
+- 🔎 **Not repaired by any of this: the 75 already-published Shorts still carry dead citations.**
+  The fix stops new ones. Cleaning up the existing descriptions is a separate decision.
+
+### 2026-09-01 — Audit: 91 of 167 published citations are dead links, and one config bug broke three subsystems
+Operator report: reels failing, failed reels re-producing without approval, "voice TTS not coming".
+All three reproduced. **366 pass, 4 skipped** — the suite is green against every defect below,
+which is itself the top finding.
+
+- 🔴 **Ideation fabricates source URLs; 23 published Shorts cite nothing but dead links.**
+  `_clean_sources` ([ideation_fallback.py:131](src/ideation_fallback.py#L131)) validates only that a
+  string starts with `http` — that is the whole of what STATUS has been calling "sourced+validated".
+  Live-checked all 167 source URLs on the 75 produced ideas: **91 hard 404, 45 blocked/paywalled,
+  25 OK.** 58 of 75 reels have ≥1 dead citation; **23 of 75 have no live citation at all**. Several
+  are placeholder ids (`articleshow/12345678.cms`, `article12345678.ece`); others are real articles
+  about a different story (idea 226, published, cites an RSS-chief piece for a Modi–Putin script).
+  This is the monetization gate (docs/08 §1) failing silently on a public channel, and it is the
+  **upstream cause of most fact-check kills** — the checker was right to object.
+- 🔴 **Unapproved re-production — confirmed with a receipt.** `run_production` drains
+  `db.get_approved_ideas()`, unscoped to the current run; only `FactCheckFailed` sets `rejected`, so
+  any other failure leaves the idea `approved` forever. `ideas` has **no `approved_at` column**, so
+  the system structurally cannot tell "approved 5 min ago" from "stuck 3 days". Run 32920283763
+  (08-26) logged `idea 223 failed`; run 33108008045 (08-27) logged `sent 2 ideas to the digest` then
+  `3 approved after webhook wait` and published 223 → `floqwtYfhPw`, now *Video unavailable*.
+  Knock-ons: stale `approved` rows permanently consume `APPROVAL_CAP` (3 stuck = every future tap
+  returns "capped"), and stale `pending` rows are reported as `already queued (Routine)` next run.
+- 🔴 **`config.get()` lets a set-but-empty env var shadow its default** —
+  [config.py:72](src/config.py#L72) is `os.environ.get(key, DEFAULTS.get(key, default))`, and
+  `FOO: ${{ vars.FOO }}` with no repo variable exports `FOO=`. `get_bool`/`require` are safe; only
+  `get()` is affected. **One bug, three live symptoms:**
+  · `VOICE_STYLE_PROMPT=""` → [voice.py:305](src/voice.py#L305) sends the Gemini TTS request with
+    **no delivery direction at all** since 7393ef5 (2026-07-27). `tools/compare_voices.py` runs
+    locally where the default applies, so the voice was tuned by ear on a render production has
+    never made. **This is the operator's "voice TTS not coming".**
+  · `SFX_DIR=""` → `os.makedirs("")` → the `SFX track generation failed ([Errno 2] …: '')` line in
+    **100% of runs**; `ENABLE_SFX`/`SFX_VOLUME`/`SFX_EVERY_N_CUTS` are dead knobs.
+  · `IMAGE_STYLE=""` → [visuals.py:225](src/visuals.py#L225) strips `"…no text, no watermark"` from
+    every Flux prompt. **This retires the 2026-08-25 "no clean fix found" entry**: the negative
+    styling was never ignored by the model, it was never sent — which is also why that A/B was
+    inconclusive.
+- ✅ **Narration is NOT missing.** Pulled the audio of every reachable published Short and
+  transcribed it: all three carry clear, intelligible narration (mean −17…−21 dB, full transcripts
+  recovered). The defect is character, not presence — see `VOICE_STYLE_PROMPT` above.
+- 🔴 **The Groq fallback is still dead — a 404 was traded for a 400.** `openai/gpt-oss-120b` is a
+  reasoning model and Groq bills its trace against `max_tokens`. Reproduced against the exact
+  production call: `visuals.extract_keywords` at `max_tokens=200` returns
+  `400 json_validate_failed / failed_generation: ''`; adding `reasoning_effort="low"` returns valid
+  JSON in 52 reasoning tokens. Every `llm.generate` caller passes `json=True`, so rule 11's chain is
+  **one deep** — a Gemini 429 (20 req/day/model) is a hard stop. That is what killed idea 223.
+  The live test that "pinned" the fix uses a toy prompt at `max_tokens=256`, which fits inside the
+  trace — and **no CI workflow runs pytest**, so it never executes anyway.
+- 🟠 **Fact-check over-blocks, but less than it first appeared.** Severity grading is pure prompt
+  prose; [factcheck.py:212](src/factcheck.py#L212) harvests undocumented `critical`/`unsupported`
+  keys into the blocking bucket and line 229 discards the model's own `verdict`, so the code only
+  ever *widens* what blocks. It fired 3 times in 13 runs. **Correction to the first read:** the
+  "script from 2024" block was *not* the checker's training cutoff — the string `2024` was in its
+  prompt, inside an ideation-supplied Reuters date-slug. Fix the sources, not the date prompt.
+- 🟠 **The word cap eats the payoff.** `_truncate_to_words` cuts from the end, and the
+  "why it matters" check runs after it — idea 224 logs `104 words > 80 cap; truncating` immediately
+  followed by `has NO 'why it matters' turn`. Not the only cause (most warnings have no truncation
+  line), but a real one, on the exact turn that carries the originality signal.
+- 🟠 **`posts.published_at` is NULL on all 75 rows** — `db.insert_post` never sets it. The bot's
+  `/today` therefore always reports 0 Shorts, and `/latest` orders by an all-NULL column.
+- 🟡 Also: `PIXABAY_API_KEY` secret does not exist, so the Pexels→Pixabay fallback is dead (rule 11);
+  GitHub Models (the designated third provider) is retired by GitHub and returns HTTP 410;
+  no Gemini 429 retry despite an explicit `retryDelay`, inside a 60-minute job; publish→
+  `set_idea_status("produced")` is non-atomic; `TELEGRAM_APPROVAL_MODE` is empty in production.yml
+  (→ polling, which Telegram refuses while the webhook is registered — latent, cron is off);
+  still no GCP budget cap (rule 2 unmet).
+
+
 ### 2026-08-25 — Audit: the analytics feedback loop was learning from 3 videos out of 72
 Health check of a channel that has been live and unattended for ~3 weeks. **366 pass, 4 skipped.**
 - ✅ **Re-verified, still correct:** suite green; grounded search still 429s with an *empty*
