@@ -119,6 +119,11 @@ jobs:
           ENABLE_FACT_CHECK: ${{ vars.ENABLE_FACT_CHECK || 'true' }}   # re-verify every script pre-render
           FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run
+          # Groq bills gpt-oss reasoning tokens against max_tokens; at the default effort the
+          # trace eats the budget and json_object mode 400s. 'low' keeps the fallback alive.
+          GROQ_REASONING_EFFORT: ${{ vars.GROQ_REASONING_EFFORT || 'low' }}
+          # HTTP-probe ideation's source URLs; drop 404/410 (invented links), keep 401/403.
+          ENABLE_SOURCE_CHECK: ${{ vars.ENABLE_SOURCE_CHECK || 'true' }}
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
         run: python -m src.production make
