@@ -192,8 +192,10 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
     src_block = "\n".join(f"- {s}" for s in (sources or [])) or "- (none provided)"
     prompt = _PROMPT.format(body=f"{title}\n\n{body}".strip(), sources=src_block)
 
+    raw = ""
     try:
-        data = _parse(llm.generate_grounded(prompt, max_tokens=2048, model=_model()))
+        raw = llm.generate_grounded(prompt, max_tokens=2048, model=_model())
+        data = _parse(raw)
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
         # Grounded search shares one free-tier bucket with ideation and the scriptwriter, so a
         # busy day can exhaust it and leave the gate unable to run. FACTCHECK_STRICT decides
@@ -231,6 +233,12 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
     if not ok:
         log.warning("factcheck: BLOCKED — %d blocking finding(s): %s",
                     len(blocking), " | ".join(blocking[:3]) or "verdict=fail with no detail")
+        # A kill is expensive and the grading is the model's, not ours — so record verbatim what
+        # it returned. Without this the flattened strings are all that survive, and a model that
+        # mis-sorted a finding is indistinguishable from _findings() harvesting one of the
+        # undocumented `critical`/`unsupported` keys. Different causes, different fixes; three
+        # real reels died in August with no way to tell them apart.
+        log.warning("factcheck: raw checker reply for the block above: %s", raw.strip()[:1500])
     else:
         log.info("factcheck: passed (%d claims checked)", checked)
     if minor:  # shipped anyway, but loudly — a rising count here means the writer is drifting
