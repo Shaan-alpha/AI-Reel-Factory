@@ -258,3 +258,190 @@ def test_configured_groq_model_actually_exists(as_json):
     if as_json:
         import json as _json
         _json.loads(out)  # must be parseable — callers json.loads() this directly
+
+
+# --- the fallback must survive the BUDGET the pipeline actually passes ---------------------
+
+def test_gen_groq_sends_a_reasoning_effort_so_the_trace_cannot_eat_the_budget(monkeypatch):
+    """`_gen_groq` must cap reasoning effort.
+
+    `openai/gpt-oss-120b` is a reasoning model and Groq bills its reasoning trace against the
+    completion budget. At the default (medium) effort the trace alone can exhaust a small
+    `max_tokens`, so generation stops before one content token is emitted; in json_object mode
+    Groq then rejects the empty completion with `400 json_validate_failed` and an empty
+    `failed_generation`. That is the 2026-09-01 production failure, reproduced against the real
+    `visuals.extract_keywords` call (max_tokens=200) — which is why the model-identity test above
+    stayed green: its toy prompt at 256 fits inside the trace.
+    """
+    seen = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            seen.update(kwargs)
+            msg = type("M", (), {"content": '{"ok": true}'})()
+            return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
+
+    monkeypatch.setattr(llm, "_groq_client",
+                        lambda: type("Cl", (), {"chat": type("Ch", (), {"completions": _FakeCompletions()})()})())
+    llm._gen_groq("return a json object", json=True, max_tokens=200)
+
+    assert seen.get("reasoning_effort") == "low", (
+        "reasoning_effort must be sent, else the trace eats max_tokens and JSON mode 400s")
+
+
+def test_gen_groq_reasoning_effort_is_overridable(monkeypatch):
+    seen = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            seen.update(kwargs)
+            msg = type("M", (), {"content": "ok"})()
+            return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
+
+    monkeypatch.setattr(llm, "_groq_client",
+                        lambda: type("Cl", (), {"chat": type("Ch", (), {"completions": _FakeCompletions()})()})())
+    monkeypatch.setenv("GROQ_REASONING_EFFORT", "medium")
+    llm._gen_groq("hello", json=False, max_tokens=256)
+    assert seen.get("reasoning_effort") == "medium"
+
+
+@pytest.mark.skipif(not os.environ.get("GROQ_API_KEY"),
+                    reason="needs a live Groq key (.env / Actions secrets)")
+def test_groq_survives_the_real_keyword_prompt_at_its_real_budget():
+    """The exact call that 400s in production: the visuals keyword prompt at max_tokens=200.
+
+    Pinned as a LIVE test with the REAL prompt shape and the REAL budget, because the previous
+    live test proved only that the model id resolves. The property that broke was whether the
+    model reaches its answer inside the budget the pipeline actually passes — which is a
+    function of prompt shape, not model identity, and is invisible to a toy prompt.
+    """
+    import json as _json
+
+    from src import visuals
+
+    captured = {}
+    real = llm.generate
+
+    def _spy(prompt, **kw):
+        captured["prompt"], captured["kw"] = prompt, kw
+        raise RuntimeError("captured")
+
+    llm.generate = _spy
+    try:
+        visuals.extract_keywords("Trump is threatening a 50% tariff on Canada. It hits cars and steel.")
+    except Exception:
+        pass
+    finally:
+        llm.generate = real
+
+    out = llm._gen_groq(captured["prompt"], json=True, max_tokens=captured["kw"]["max_tokens"])
+    assert out and out.strip(), f"{llm._GROQ_MODEL} returned nothing for the real keyword prompt"
+    _json.loads(out)
+
+
+# --- transient upstream errors deserve a retry, not an instant failover --------------------
+
+def test_transient_gemini_error_retries_the_same_provider(monkeypatch):
+    """A 503 is capacity, not a verdict — retry before burning the fallback.
+
+    Run 32920283763 shows Gemini 503ing and the loop failing straight over to a provider that
+    400s on every JSON call, inside a job with ~40 minutes of budget left.
+    """
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    calls = []
+
+    def _flaky(prompt, *, json, max_tokens):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("503 UNAVAILABLE. The model is overloaded.")
+        return "gemini-text"
+
+    monkeypatch.setattr(llm, "_gen_gemini", _flaky)
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: pytest.fail("must not fail over yet"))
+    assert llm.generate("p") == "gemini-text"
+    assert len(calls) == 2, "the transient error should have been retried once"
+
+
+def test_a_429_waits_the_delay_the_api_asked_for(monkeypatch):
+    slept = []
+    monkeypatch.setattr(llm.time, "sleep", lambda s: slept.append(s))
+    calls = []
+
+    def _quota(prompt, *, json, max_tokens):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'retryDelay': '46s' ...")
+        return "ok"
+
+    monkeypatch.setattr(llm, "_gen_gemini", _quota)
+    assert llm.generate("p") == "ok"
+    assert slept and 45 <= slept[0] <= 47, f"should honour the API's own retryDelay, slept {slept}"
+
+
+def test_a_long_retry_delay_is_not_waited_for(monkeypatch):
+    """A daily-cap 429 can name a delay longer than the reel is worth — fail over instead."""
+    slept = []
+    monkeypatch.setattr(llm.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(llm, "_gen_gemini", _raise("429 RESOURCE_EXHAUSTED 'retryDelay': '3600s'"))
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+    assert llm.generate("p") == "groq-text"
+    assert not slept, "must not stall the run on an hour-long backoff"
+
+
+def test_a_permanent_error_fails_over_immediately(monkeypatch):
+    slept = []
+    monkeypatch.setattr(llm.time, "sleep", lambda s: slept.append(s))
+    calls = []
+    monkeypatch.setattr(llm, "_gen_gemini",
+                        lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(
+                            RuntimeError("400 INVALID_ARGUMENT: your request is malformed")))
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+    assert llm.generate("p") == "groq-text"
+    assert len(calls) == 1 and not slept, "a 400 is a verdict, not a blip — no retry"
+
+
+def test_retry_happens_at_most_once_per_provider(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    calls = []
+    monkeypatch.setattr(llm, "_gen_gemini",
+                        lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(
+                            RuntimeError("503 UNAVAILABLE")))
+    monkeypatch.setattr(llm, "_gen_groq", lambda *a, **k: "groq-text")
+    assert llm.generate("p") == "groq-text"
+    assert len(calls) == 2, "one original attempt + one retry, then fail over"
+
+
+def test_generate_grounded_retries_a_transient_error(monkeypatch):
+    """Grounding has no second provider, so a blip there is a total loss.
+
+    It is the single point of failure behind the fact-check gate: when it raises, factcheck
+    fails OPEN (FACTCHECK_STRICT=false), so a 503 silently removes the accuracy gate rather
+    than blocking a reel. One retry is the cheapest thing standing between a blip and an
+    unverified publish.
+    """
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    calls = []
+
+    def _flaky(prompt, *, max_tokens, model=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("503 UNAVAILABLE. high demand")
+        return "grounded-text"
+
+    monkeypatch.setattr(llm, "_gen_gemini_grounded", _flaky)
+    assert llm.generate_grounded("p") == "grounded-text"
+    assert len(calls) == 2
+
+
+def test_generate_grounded_does_not_retry_a_permanent_error(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: pytest.fail("must not sleep on a 400"))
+    calls = []
+
+    def _bad(prompt, *, max_tokens, model=None):
+        calls.append(1)
+        raise RuntimeError("400 INVALID_ARGUMENT")
+
+    monkeypatch.setattr(llm, "_gen_gemini_grounded", _bad)
+    with pytest.raises(RuntimeError, match="400"):
+        llm.generate_grounded("p")
+    assert len(calls) == 1
