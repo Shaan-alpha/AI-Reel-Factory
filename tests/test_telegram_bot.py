@@ -111,3 +111,24 @@ def test_handle_callback_ignores_foreign_chat(bot, monkeypatch):
         "id": "cb1", "data": "a:7",
         "message": {"message_id": 50, "text": "Idea text", "chat": {"id": 999}},
     }})
+
+
+def test_latest_posts_sorts_nulls_last(bot, monkeypatch):
+    """/latest must not be dominated by the 75 legacy rows whose published_at is NULL.
+
+    insert_post only started stamping published_at on 2026-09-01, so every earlier row is NULL.
+    Postgres sorts NULLs FIRST on a DESC order, which would put the whole legacy backlog ahead
+    of every genuinely-recent Short.
+    """
+    seen = {}
+    monkeypatch.setattr(bot, "sb_get", lambda path: seen.setdefault("path", path) or [])
+    bot.latest_posts(5)
+    assert "order=published_at.desc.nullslast" in seen["path"], seen["path"]
+
+
+def test_posts_today_filters_on_the_ist_window(bot, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(bot, "sb_get", lambda path: seen.setdefault("path", path) or [])
+    bot.posts_today()
+    assert "published_at=gte." in seen["path"]
+    assert "order=published_at.desc.nullslast" in seen["path"], seen["path"]

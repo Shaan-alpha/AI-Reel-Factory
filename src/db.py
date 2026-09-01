@@ -12,6 +12,7 @@ here — only rows/metadata (rule 15).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 
 from supabase import Client, create_client
@@ -87,9 +88,17 @@ def insert_script(idea_id: int, template: str, body: str, caption: str,
 
 def insert_post(script_id: int, platform: str, external_id: str, url: str,
                 status: str) -> int:
-    """Record a published/queued output; return its id."""
+    """Record a published/queued output; return its id.
+
+    `published_at` is stamped HERE. The column has no database default, and nothing else ever
+    set it, so all 75 live rows carried NULL — which silently broke the operator's only
+    dashboard: the Telegram bot's /today filters `published_at=gte.<IST midnight>` (a NULL
+    matches no range, so it always answered "0 Shorts today") and /latest orders by it.
+    Timezone-aware UTC, because the bot compares against an IST-midnight boundary.
+    """
     row = {"script_id": script_id, "platform": platform,
-           "external_id": external_id, "url": url, "status": status}
+           "external_id": external_id, "url": url, "status": status,
+           "published_at": datetime.now(timezone.utc).isoformat()}
     return get_client().table("posts").insert(row).execute().data[0]["id"]
 
 

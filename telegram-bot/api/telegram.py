@@ -148,10 +148,16 @@ def _published_filter() -> str:
     return "platform=eq.youtube&external_id=not.is.null"
 
 
+# `nullslast` matters: insert_post only began stamping published_at on 2026-09-01, so every
+# earlier row is NULL — and Postgres sorts NULLs FIRST on a DESC order, which would park the
+# whole legacy backlog above every genuinely-recent Short in /latest.
+_ORDER_NEWEST = "order=published_at.desc.nullslast"
+
+
 def posts_today() -> list:
     since = urllib.parse.quote(_ist_today_start_utc_iso(), safe="")
     return sb_get(f"posts?select=url,published_at&{_published_filter()}"
-                  f"&published_at=gte.{since}&order=published_at.desc")
+                  f"&published_at=gte.{since}&{_ORDER_NEWEST}")
 
 
 def posts_total() -> int:
@@ -160,7 +166,7 @@ def posts_total() -> int:
 
 def latest_posts(n: int = 5) -> list:
     return sb_get(f"posts?select=url,published_at&{_published_filter()}"
-                  f"&order=published_at.desc&limit={n}")
+                  f"&{_ORDER_NEWEST}&limit={n}")
 
 
 def top_performer() -> str | None:

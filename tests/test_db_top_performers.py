@@ -148,3 +148,39 @@ def test_falls_back_to_the_idea_title_and_skips_malformed_rows(monkeypatch):
 def test_no_published_posts_returns_empty(monkeypatch):
     _install(monkeypatch, [], [])
     assert db.top_performing_titles() == []
+
+
+# --- posts.published_at must actually be written -------------------------------------------
+
+class _CapturingInsert:
+    """Captures the row handed to .insert() and returns a plausible PostgREST response."""
+
+    def __init__(self):
+        self.row = None
+
+    def table(self, _name):
+        return self
+
+    def insert(self, row):
+        self.row = row
+        return self
+
+    def execute(self):
+        return type("R", (), {"data": [{"id": 1}]})()
+
+
+def test_insert_post_stamps_published_at(monkeypatch):
+    """Every one of the 75 live rows had published_at=NULL because insert_post never set it.
+
+    The column has no DB default, so the operator's own dashboard lied: the Telegram bot's
+    /today filters `published_at=gte.<IST midnight>` and therefore always reported 0 Shorts,
+    and /latest orders by a column that was NULL for every row.
+    """
+    fake = _CapturingInsert()
+    monkeypatch.setattr(db, "get_client", lambda: fake)
+    db.insert_post(script_id=1, platform="youtube", external_id="abc", url="u", status="published")
+    assert fake.row.get("published_at"), "published_at must be stamped at insert time"
+    # ISO-8601 UTC, which is what PostgREST's timestamptz filters compare against.
+    from datetime import datetime
+    parsed = datetime.fromisoformat(fake.row["published_at"])
+    assert parsed.tzinfo is not None, "must be timezone-aware or the IST window comparison drifts"
