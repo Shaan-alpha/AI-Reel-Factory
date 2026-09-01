@@ -43,10 +43,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-${{ hashFiles('requirements.txt') }}
+          key: pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # -dev pulls in requirements.txt plus the pinned test runner. pytest was never a
+        # declared dependency — it existed only in a local .venv, which is why the first real
+        # run of this workflow died with `pytest: command not found`.
+        run: pip install -r requirements-dev.txt
 
       - name: pytest
         env:
@@ -68,4 +71,7 @@ jobs:
           # operator's Telegram, or spend metered quota:
           #   IDEATION_LIVE_TEST · FACTCHECK_LIVE_TEST · GEMINI_TTS_LIVE_TEST
           #   TELEGRAM_LIVE_TEST · YOUTUBE_LIVE_UPLOAD_TEST
-        run: pytest -q --durations=10
+        # `python -m pytest`, not bare `pytest`: it does not depend on the console script
+        # landing on PATH, and it puts the repo root on sys.path so `from src import ...`
+        # resolves the same way it does locally.
+        run: python -m pytest -q --durations=10
