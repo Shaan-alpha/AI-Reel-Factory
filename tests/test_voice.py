@@ -825,3 +825,34 @@ def test_gemini_accepts_a_real_length_script(monkeypatch, tmp_path):
     _fake_genai(monkeypatch, {})
     path, _ = voice._synthesize_gemini(" ".join(["word"] * 75), str(tmp_path))
     assert os.path.exists(path)
+
+
+# --- one narrator, all the way down the chain ---------------------------------------------
+
+def test_every_fallback_engine_defaults_to_a_male_narrator(monkeypatch):
+    """The channel has ONE narrator; a fallback must not change who is speaking.
+
+    STATUS 2026-08-25 fixed exactly this for the Chirp link (GOOGLE_TTS_VOICE was the female
+    Kore under the male Gemini primary) and recorded it as "keep one narrator down the whole
+    voice fallback chain" — but only link 2 of 4 was actually changed. edge-tts still defaulted
+    to en-IN-NeerjaNeural (female) and Kokoro to af_heart (American female), so a double
+    Gemini/Chirp outage still swapped the channel's narrator mid-catalogue.
+    """
+    for key in ("VOICE", "KOKORO_VOICE"):
+        monkeypatch.delenv(key, raising=False)
+    import importlib
+
+    from src import voice as v
+    importlib.reload(v)
+    try:
+        assert v._VOICE == "en-IN-PrabhatNeural", \
+            f"edge-tts default {v._VOICE} is not the male en-IN narrator"
+        assert v._kokoro_voice().startswith(("am_", "bm_")), \
+            "Kokoro default must be a male voice (af_*/bf_* are female in Kokoro's naming)"
+    finally:
+        importlib.reload(v)
+
+
+def test_kokoro_uses_the_configured_default_voice(monkeypatch):
+    monkeypatch.delenv("KOKORO_VOICE", raising=False)
+    assert voice._kokoro_voice().startswith(("am_", "bm_"))
