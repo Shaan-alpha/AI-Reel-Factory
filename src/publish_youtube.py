@@ -112,7 +112,17 @@ def publish(video_path: str, metadata: dict, script_id: int) -> tuple[str, str]:
 
     video_id = response["id"]
     url = f"https://www.youtube.com/shorts/{video_id}"
-    db.insert_post(script_id, _PLATFORM, video_id, url, "published")
+    # The upload is IRREVERSIBLE; the row is not. If this insert raises and we let it propagate,
+    # produce_one never marks the idea 'produced', the idea returns to the queue, and the next
+    # run uploads the same reel again — because BOTH idempotency guards (find_post and
+    # get_published_post_for_idea) key off the row that was never written. A missing analytics
+    # row is far cheaper than a duplicate public video, so swallow it and shout (rule 14).
+    try:
+        db.insert_post(script_id, _PLATFORM, video_id, url, "published")
+    except Exception as e:  # noqa: BLE001 — never turn a recorded upload into a repeated one
+        log.error("publish: video %s IS LIVE at %s but its post row could not be written (%s). "
+                  "Reconcile manually — analytics will miss it, and the idempotency guard for "
+                  "script %s is now blind.", video_id, url, e, script_id)
 
     # Asset policy (rule 15): the upload is the source of truth now — drop the local render.
     try:
