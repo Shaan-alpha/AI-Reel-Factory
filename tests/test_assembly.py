@@ -484,3 +484,22 @@ def test_narration_only_render_is_not_limited(monkeypatch, tmp_path):
     cmd = assembly._build_cmd([("a.mp4", 0.0), ("b.mp4", 0.0)], "n.wav", 20.0,
                               str(tmp_path / "o.mp4"), music_path=None, sfx_path=None)
     assert "alimiter" not in " ".join(cmd)
+
+
+def test_seamless_loop_noops_when_only_the_opening_slice_is_visible(monkeypatch):
+    """When one slice fills the reel there is nothing to reprise.
+
+    `_slice_count` returns 2 for a duration at or under one slice, so index 1 exists but starts
+    at or after the trim point. Clamping the target index up to 1 put the reprise back on an
+    invisible slice — the very defect this function was fixed for, reappearing at the boundary.
+    """
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_SEAMLESS_LOOP", "true")
+    overlap = assembly._xfade_seconds() if assembly._xfade_enabled() else 0.0
+    step = 3.5 - overlap
+    for duration in (2.0, 3.0, step):
+        ordered = [("a.mp4", 0.0), ("b.mp4", 0.0)]
+        out = assembly._apply_seamless_loop(list(ordered), duration, overlap)
+        assert out == ordered, (
+            f"dur={duration}: only slice 0 is visible, so the list must be left alone rather "
+            "than reprising onto a trimmed-away slice")

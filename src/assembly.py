@@ -219,8 +219,13 @@ def _apply_seamless_loop(ordered: list[tuple[str, float]], duration: float,
     if not (config.get_bool("ENABLE_SEAMLESS_LOOP", True) and len(ordered) >= 2):
         return ordered
     step = max(0.01, _clip_seconds() - overlap)
-    # Last index whose slice actually starts before the trim point.
-    last_visible = min(len(ordered) - 1, max(1, math.ceil(duration / step) - 1))
+    # Last index whose slice actually STARTS before the trim point (start = i * step, strictly
+    # less than duration). No clamping up to 1: _slice_count returns 2 even for a duration of
+    # one slice or less, so index 1 exists but begins at or after the trim — forcing the reprise
+    # onto it would put it back on a slice nobody sees, which is the defect this function fixes.
+    last_visible = min(len(ordered) - 1, math.ceil(duration / step) - 1)
+    if last_visible < 1:
+        return ordered  # only the opening slice survives the trim; nothing to rhyme with
     return (ordered[:last_visible] + [(ordered[0][0], 0.0)]
             + ordered[last_visible + 1:])
 
