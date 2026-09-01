@@ -8,9 +8,10 @@ Contract:
 Used by the scriptwriter (Module 3) and the ideation fallback. NOT used for Claude —
 Claude ideation runs only in the Routine (rule 4). Respect free-tier quotas (rule 13).
 
-Optional third provider: **GitHub Models** (free with a GitHub plan, OpenAI-family catalog).
-It is OPT-IN via ENABLE_GH_MODELS / PREFER_GH_MODELS so an incidentally-present GITHUB_TOKEN
-can't wedge an unconfigured provider into the failover chain.
+Optional third provider: **GitHub Models** — ⚠️ **RETIRED BY GITHUB** (HTTP 410
+`github_models_retirement_brownout`, verified 2026-09-01). Still opt-in via ENABLE_GH_MODELS /
+PREFER_GH_MODELS and still fails over cleanly, but it can no longer answer, so rule 11's THIRD
+link does not currently exist: the live chain is Gemini ↔ Groq only.
 
 SDK note: uses the current **google-genai** SDK (`from google import genai`), not the
 deprecated `google-generativeai`. Models are overridable via env (GEMINI_MODEL/GROQ_MODEL)
@@ -19,6 +20,8 @@ so we can swap free-tier models without a code change.
 from __future__ import annotations
 
 import logging
+import re
+import time
 
 from functools import lru_cache
 
@@ -147,20 +150,87 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
     """Generate with live web research (Gemini Google Search grounding). Raises on failure so
     callers can fall back to plain generate(). Gemini-only — Groq has no grounding.
 
-    Pass `model` to spend a DIFFERENT model's free-tier quota (see _gen_gemini_grounded)."""
-    text = _gen_gemini_grounded(prompt, max_tokens=max_tokens, model=model)
+    Pass `model` to spend a DIFFERENT model's free-tier quota (see _gen_gemini_grounded).
+
+    Retried once on a transient error, because this path has NO second provider (Groq has no
+    grounding) and its failure is silent: `factcheck.verify` treats a checker outage as
+    fail-open under the default FACTCHECK_STRICT=false, so a 503 here does not block a reel —
+    it publishes one with the accuracy gate quietly absent.
+    """
+    def _attempt(p, *, json=False, max_tokens=max_tokens):  # noqa: ARG001 — _call_with_retry's shape
+        return _gen_gemini_grounded(p, max_tokens=max_tokens, model=model)
+
+    text = _call_with_retry("gemini-grounded", _attempt, prompt, json=False, max_tokens=max_tokens)
     if not text or not text.strip():
         raise RuntimeError("llm.generate_grounded: empty response")
     return text
 
 
+# Upstream states worth ONE retry: capacity and quota-window, not "your request is wrong".
+# A 400 is a verdict — retrying it just spends the clock twice for the same answer.
+_RETRYABLE_MARKERS = ("429", "resource_exhausted", "503", "unavailable", "500", "internal",
+                      "504", "deadline", "overloaded")
+# Google returns its own advice as `'retryDelay': '46s'`. Honour it rather than guessing.
+_RETRY_DELAY_RE = re.compile(r"retrydelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", re.I)
+_DEFAULT_RETRY_WAIT = 2.0
+
+
+def _retry_wait(exc: Exception) -> float | None:
+    """Seconds to wait before retrying `exc`, or None if it is not worth retrying.
+
+    None also covers "retryable, but the API wants longer than a reel is worth": a daily-cap 429
+    can name an hour, and stalling a 60-minute job on it is worse than failing over.
+    """
+    text = str(exc).lower()
+    if not any(m in text for m in _RETRYABLE_MARKERS):
+        return None
+    m = _RETRY_DELAY_RE.search(text)
+    wait = float(m.group(1)) if m else _DEFAULT_RETRY_WAIT
+    try:
+        ceiling = float(config.get("LLM_RETRY_MAX_WAIT", "90"))
+    except (TypeError, ValueError):
+        ceiling = 90.0
+    return wait if wait <= ceiling else None
+
+
+def _call_with_retry(name: str, fn, prompt: str, *, json: bool, max_tokens: int) -> str:
+    """One provider call, retried ONCE on a transient upstream error.
+
+    Rule 11 gives every dependency a fallback, but failing over on a 503 spends the fallback on
+    a blip — and when the fallback is itself degraded, that turns a recoverable hiccup into a
+    dead reel. Run 32920283763: Gemini 503s, the loop immediately hands the work to a Groq leg
+    that 400s on every JSON call, and the reel dies with ~40 minutes of job budget unused, while
+    the 429 in the same run carried an explicit `retryDelay: 46s` nobody read.
+    """
+    try:
+        return fn(prompt, json=json, max_tokens=max_tokens)
+    except Exception as e:  # noqa: BLE001 — decide retry-vs-failover from the error itself
+        wait = _retry_wait(e)
+        if wait is None:
+            raise
+        log.warning("llm: %s hit a transient error (%s); retrying once in %.1fs", name, e, wait)
+        time.sleep(wait)
+        return fn(prompt, json=json, max_tokens=max_tokens)
+
+
 def _gen_groq(prompt: str, *, json: bool, max_tokens: int) -> str:
     # Groq's json_object mode requires the word "json" to appear in the prompt; callers
     # that pass json=True already phrase the prompt as "return a JSON object …".
+    #
+    # reasoning_effort is LOAD-BEARING, not a tuning knob. The default model is a reasoning
+    # model (openai/gpt-oss-*) and Groq bills the reasoning trace against the completion budget.
+    # At Groq's default effort the trace alone can consume a small max_tokens, so generation is
+    # cut off before a single content token is emitted — and in json_object mode Groq then
+    # rejects that empty completion with `400 json_validate_failed` / `failed_generation: ''`.
+    # Measured 2026-09-01 on the real visuals keyword prompt at max_tokens=200: default effort
+    # 400s, "low" answers in 52 reasoning tokens. That 400 is what left rule 11's chain one-deep
+    # for six days, because the model-identity test passes a toy prompt that fits in the trace.
+    # Documented values for gpt-oss are low|medium|high (console.groq.com/docs/reasoning).
     kwargs: dict = {
         "messages": [{"role": "user", "content": prompt}],
         "model": _GROQ_MODEL,
         "max_tokens": max_tokens,
+        "reasoning_effort": config.get("GROQ_REASONING_EFFORT", "low"),
     }
     if json:
         kwargs["response_format"] = {"type": "json_object"}
@@ -198,6 +268,12 @@ def _github_enabled() -> bool:
 
 def _gen_github_models(prompt: str, *, json: bool, max_tokens: int) -> str:
     """GitHub Models inference (OpenAI-compatible chat completions).
+
+    ⚠️ **RETIRED BY GITHUB — this leg cannot contribute a completion.** Verified 2026-09-01:
+    both `models.github.ai/catalog/models` and the inference endpoint below return HTTP 410
+    `github_models_retirement_brownout`. It stays in the tree because it is opt-in, defaults to
+    off, and fails over cleanly — but do NOT count it as rule 11's third link. If a genuine
+    third provider is wanted, a second model on the existing Groq key is the cheapest real one.
 
     Endpoint + model naming per GitHub's REST docs: the host is `models.github.ai/inference`
     (the old `models.inference.ai.azure.com` preview host is retired) and `model` MUST carry its
@@ -266,7 +342,7 @@ def generate(prompt: str, *, json: bool = False, max_tokens: int = 1024,
     errors: list[str] = []
     for name, fn in order:
         try:
-            text = fn(prompt, json=json, max_tokens=max_tokens)
+            text = _call_with_retry(name, fn, prompt, json=json, max_tokens=max_tokens)
         except Exception as e:  # noqa: BLE001 — failover must catch anything upstream throws
             log.warning("llm: %s failed (%s); failing over", name, e)
             errors.append(f"{name}: {e}")

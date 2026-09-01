@@ -205,12 +205,29 @@ def _ordered_clips(clip_paths: list[str], duration: float,
     return ordered
 
 
-def _apply_seamless_loop(ordered: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    """Make the final slice reuse the opening clip so the ending visually rhymes with the start
-    (loop-friendly replays). No-op when disabled or there's only one slice."""
-    if config.get_bool("ENABLE_SEAMLESS_LOOP", True) and len(ordered) >= 2:
-        return ordered[:-1] + [(ordered[0][0], 0.0)]
-    return ordered
+def _apply_seamless_loop(ordered: list[tuple[str, float]], duration: float,
+                         overlap: float) -> list[tuple[str, float]]:
+    """Make the last VISIBLE slice reuse the opening clip so the ending rhymes with the start
+    (loop-friendly replays). No-op when disabled or there's only one slice.
+
+    It must be the last visible slice, not simply the last one. `slice_count` deliberately
+    over-covers the narration, and the render is then trimmed to the narration length — so the
+    final entry starts at or beyond the trim point and never reaches the screen. Measured across
+    23/25/28/30s narrations at CLIP_SECONDS=3.5, the reprise was on screen for 0.00s every time:
+    the feature was inert from the day it shipped.
+    """
+    if not (config.get_bool("ENABLE_SEAMLESS_LOOP", True) and len(ordered) >= 2):
+        return ordered
+    step = max(0.01, _clip_seconds() - overlap)
+    # Last index whose slice actually STARTS before the trim point (start = i * step, strictly
+    # less than duration). No clamping up to 1: _slice_count returns 2 even for a duration of
+    # one slice or less, so index 1 exists but begins at or after the trim — forcing the reprise
+    # onto it would put it back on a slice nobody sees, which is the defect this function fixes.
+    last_visible = min(len(ordered) - 1, math.ceil(duration / step) - 1)
+    if last_visible < 1:
+        return ordered  # only the opening slice survives the trim; nothing to rhyme with
+    return (ordered[:last_visible] + [(ordered[0][0], 0.0)]
+            + ordered[last_visible + 1:])
 
 
 def _sfx_enabled() -> bool:
@@ -318,7 +335,12 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
 
     # `normalize=0` sums without headroom, so anything layered over the narration can push past
     # full scale. Cap the SUM with a lookahead limiter rather than pre-attenuating the voice.
-    mix_out = "[amixed]" if has_sfx else "[aout]"
+    # Gate on "did we mix at all", NOT on SFX: the limiter used to hang off has_sfx, and since
+    # SFX_DIR="" meant SFX never rendered (STATUS 2026-09-01), the only mix production ever
+    # built — narration + music bed — was going out unlimited.
+    has_music = bool(music_path)
+    mixed = has_sfx or has_music
+    mix_out = "[amixed]" if mixed else "[aout]"
     if music_path:
         vol = config.get("MUSIC_VOLUME", "0.12")
         cmd += ["-stream_loop", "-1", "-i", music_path]
@@ -345,7 +367,7 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
     else:
         audio_map = f"{n}:a"
 
-    if has_sfx:
+    if mixed:
         parts.append("[amixed]alimiter=limit=0.95:level=0[aout]")
 
     # Brand-bug overlay: composite the logo (added as the LAST input so it never shifts the
@@ -387,7 +409,8 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     duration = probe_duration(audio_path)
     overlap = _xfade_seconds() if _xfade_enabled() else 0.0
-    ordered = _apply_seamless_loop(_ordered_clips(clip_paths, duration, overlap=overlap))
+    ordered = _apply_seamless_loop(
+        _ordered_clips(clip_paths, duration, overlap=overlap), duration, overlap)
     music = _pick_music(os.path.abspath(audio_path))
     sfx_path = None
     if _sfx_enabled():

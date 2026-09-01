@@ -110,4 +110,12 @@ jobs:
           ENABLE_FACT_CHECK: ${{ vars.ENABLE_FACT_CHECK || 'true' }}   # re-verify every script pre-render
           FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run
+          # Groq bills gpt-oss reasoning tokens against max_tokens; at the default effort the
+          # trace eats the budget and json_object mode 400s. 'low' keeps the fallback alive.
+          GROQ_REASONING_EFFORT: ${{ vars.GROQ_REASONING_EFFORT || 'low' }}
+          # Settable without a code edit: the last two breakages were both the Groq model,
+          # and both needed a commit to swap because this was wired nowhere.
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
+          # HTTP-probe ideation's source URLs; drop 404/410 (invented links), keep 401/403.
+          ENABLE_SOURCE_CHECK: ${{ vars.ENABLE_SOURCE_CHECK || 'true' }}
         run: python -m src.production

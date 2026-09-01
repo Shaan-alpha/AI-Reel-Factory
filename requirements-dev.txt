@@ -1,0 +1,10 @@
+# Test-only dependencies. Kept OUT of requirements.txt so the production job (make-short /
+# production) installs nothing it does not run — but pinned like everything else, because an
+# unpinned test runner is the same reproducibility hole as an unpinned library (rule 10).
+#
+# This file exists because pytest was never a declared dependency at all: it lived only in the
+# developer's local .venv. The first real CI run of tests.yml therefore died with
+# `pytest: command not found` (exit 127) — the suite had never executed anywhere but one laptop.
+-r requirements.txt
+
+pytest==9.0.3

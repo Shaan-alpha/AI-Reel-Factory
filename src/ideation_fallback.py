@@ -21,6 +21,8 @@ import logging
 import os
 import re
 
+import requests
+
 from src import config, db, llm, news, trends
 
 log = logging.getLogger(__name__)
@@ -140,10 +142,47 @@ def _clean_sources(raw_sources) -> list[str]:
     return out
 
 
+# Codes that mean the publisher itself says the page does not exist. Deliberately NARROW:
+# news sites answer 401/403 to anything that looks like a bot (NDTV and Bloomberg both did,
+# measured 2026-09-01), and treating those as dead would bin good ideas citing real articles.
+_DEAD_CODES = (404, 410)
+_SOURCE_TIMEOUT = 12
+# A browser UA, because several publishers 403 the python-requests default outright — which
+# would make the check useless rather than merely conservative.
+_SOURCE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+
+
+def _url_is_dead(url: str) -> bool:
+    """True only when the publisher answers 404/410 for `url`.
+
+    `_clean_sources` checks that a source merely STARTS WITH http, which is the whole of what
+    this module used to mean by "sourced+validated". Measured against the live channel on
+    2026-09-01: of 167 source URLs on 75 published Shorts, 91 were hard 404s and 23 reels cited
+    no live article at all — some with placeholder ids (`articleshow/12345678.cms`), some real
+    articles about an entirely different story. Citing sources that do not exist is the
+    originality/monetization gate failing (docs/08 §1), and it is also what the fact-checker
+    kept (correctly) blocking reels over.
+
+    Fail-SOFT by design (rule 14): any transport error, timeout or odd status returns False, so
+    a network blip can never empty the digest. This drops only what a publisher actively denies.
+    """
+    try:
+        resp = requests.get(url, timeout=_SOURCE_TIMEOUT, allow_redirects=True,
+                            stream=True, headers={"User-Agent": _SOURCE_UA})
+        try:
+            return resp.status_code in _DEAD_CODES
+        finally:
+            resp.close()  # stream=True: don't pull the body just to read a status line
+    except Exception:  # noqa: BLE001 — a failed probe is NOT evidence the article is missing
+        return False
+
+
 def _validate_and_clean(ideas: list[dict]) -> list[dict]:
     """Keep well-formed, sufficiently-sourced, de-duplicated ideas; coerce fields."""
     min_src = int(config.get("MIN_SOURCES", "2"))
     niche = config.get("NICHE", "impact-news")
+    check_sources = config.get_bool("ENABLE_SOURCE_CHECK", True)
     seen_titles: set[str] = set()
     kept_tokens: list[set[str]] = []
     clean: list[dict] = []
@@ -163,8 +202,16 @@ def _validate_and_clean(ideas: list[dict]) -> list[dict]:
             log.debug("ideation_fallback: dropping near-duplicate %r", title)
             continue
         sources = _clean_sources(idea.get("sources"))
+        if check_sources and sources:
+            live = [s for s in sources if not _url_is_dead(s)]
+            if len(live) < len(sources):
+                log.warning("ideation_fallback: %r cited %d dead link(s): %s",
+                            title, len(sources) - len(live),
+                            [s for s in sources if s not in live])
+            sources = live
         if len(sources) < min_src:
-            log.debug("ideation_fallback: dropping %r (<%d sources)", title, min_src)
+            log.info("ideation_fallback: dropping %r (%d live source(s) < %d required)",
+                     title, len(sources), min_src)
             continue
         try:
             est = float(idea.get("est_score", 0.5))

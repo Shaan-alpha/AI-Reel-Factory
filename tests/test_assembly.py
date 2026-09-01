@@ -70,22 +70,31 @@ def test_build_cmd_single_slice_uses_concat_not_xfade(monkeypatch):
 
 
 def test_seamless_loop_ends_on_first_clip(monkeypatch):
+    """The reprise lands on the last slice the viewer actually sees.
+
+    This used to pass `out[-1]`, i.e. the very last entry — which the trim always discards,
+    because slice_count over-covers the narration on purpose. With a 3-slice list fully inside
+    a 12s reel the last entry IS the last visible one, so the intent is unchanged; the extra
+    args are what let the function tell the two apart when they differ.
+    """
     monkeypatch.delenv("ENABLE_SEAMLESS_LOOP", raising=False)  # default on
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
     ordered = [("a.mp4", 0.0), ("b.mp4", 0.0), ("c.mp4", 3.0)]
-    out = assembly._apply_seamless_loop(ordered)
-    assert out[-1] == ("a.mp4", 0.0)          # last slice reuses the opening clip
+    out = assembly._apply_seamless_loop(ordered, duration=12.0, overlap=0.0)
+    assert out[-1] == ("a.mp4", 0.0)          # last visible slice reuses the opening clip
     assert out[:-1] == ordered[:-1]           # earlier slices unchanged
 
 
 def test_seamless_loop_disabled_is_noop(monkeypatch):
     monkeypatch.setenv("ENABLE_SEAMLESS_LOOP", "false")
     ordered = [("a.mp4", 0.0), ("b.mp4", 0.0)]
-    assert assembly._apply_seamless_loop(ordered) == ordered
+    assert assembly._apply_seamless_loop(ordered, duration=10.0, overlap=0.0) == ordered
 
 
 def test_seamless_loop_single_slice_noop(monkeypatch):
     monkeypatch.delenv("ENABLE_SEAMLESS_LOOP", raising=False)
-    assert assembly._apply_seamless_loop([("a.mp4", 0.0)]) == [("a.mp4", 0.0)]
+    assert assembly._apply_seamless_loop(
+        [("a.mp4", 0.0)], duration=5.0, overlap=0.0) == [("a.mp4", 0.0)]
 
 
 def test_clip_seconds_clamped(monkeypatch):
@@ -421,3 +430,76 @@ def test_slice_count_accounts_for_crossfade_overlap(monkeypatch):
     monkeypatch.setattr(assembly, "_xfade_enabled", lambda: True)
     monkeypatch.setattr(assembly, "_xfade_seconds", lambda: 0.5)
     assert assembly.slice_count(30.0) >= hard
+
+
+# --- the loop reprise must land inside the trimmed reel ------------------------------------
+
+def test_seamless_loop_reprise_is_actually_visible(monkeypatch):
+    """ENABLE_SEAMLESS_LOOP replaced the LAST slice, which the trim always cuts away.
+
+    slice_count over-covers the narration on purpose, so the final slice starts at or past the
+    trim point: measured across 23/25/28/30s narrations the reprise was on screen for 0.00s.
+    The feature has never once done anything. It must replace the last slice that is still
+    VISIBLE after the trim.
+    """
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_SEAMLESS_LOOP", "true")
+    duration = 28.0
+    clips = [f"c{i}.mp4" for i in range(12)]
+    overlap = assembly._xfade_seconds() if assembly._xfade_enabled() else 0.0
+    ordered = assembly._apply_seamless_loop(
+        assembly._ordered_clips(clips, duration, overlap=overlap), duration, overlap)
+
+    step = 3.5 - overlap
+    visible = [i for i in range(len(ordered)) if i * step < duration]
+    assert visible, "sanity: some slice must be visible"
+    last_visible = visible[-1]
+    assert ordered[last_visible][0] == ordered[0][0], (
+        "the last VISIBLE slice must reprise the opening shot")
+
+
+def test_seamless_loop_off_leaves_the_order_alone(monkeypatch):
+    monkeypatch.setenv("ENABLE_SEAMLESS_LOOP", "false")
+    ordered = [("a.mp4", 0.0), ("b.mp4", 0.0), ("c.mp4", 0.0)]
+    assert assembly._apply_seamless_loop(list(ordered), 10.0, 0.0) == ordered
+
+
+def test_music_only_mix_is_limited(monkeypatch, tmp_path):
+    """`normalize=0` sums without headroom, so any mix can clip — including music-only.
+
+    The limiter was gated on `has_sfx`, and SFX_DIR="" meant SFX never rendered at all, so in
+    production the ONLY mix ever built (narration + music bed) went out unlimited.
+    """
+    music = tmp_path / "bed.mp3"
+    music.write_bytes(b"x")
+    cmd = assembly._build_cmd([("a.mp4", 0.0), ("b.mp4", 0.0)], "n.wav", 20.0,
+                              str(tmp_path / "o.mp4"), music_path=str(music), sfx_path=None)
+    fg = " ".join(cmd)
+    assert "amix" in fg, "sanity: a music bed means a mix happened"
+    assert "alimiter" in fg, "a summed mix must be limited, with or without SFX"
+
+
+def test_narration_only_render_is_not_limited(monkeypatch, tmp_path):
+    """No mix, no summing, nothing to limit — don't touch a clean voice track."""
+    cmd = assembly._build_cmd([("a.mp4", 0.0), ("b.mp4", 0.0)], "n.wav", 20.0,
+                              str(tmp_path / "o.mp4"), music_path=None, sfx_path=None)
+    assert "alimiter" not in " ".join(cmd)
+
+
+def test_seamless_loop_noops_when_only_the_opening_slice_is_visible(monkeypatch):
+    """When one slice fills the reel there is nothing to reprise.
+
+    `_slice_count` returns 2 for a duration at or under one slice, so index 1 exists but starts
+    at or after the trim point. Clamping the target index up to 1 put the reprise back on an
+    invisible slice — the very defect this function was fixed for, reappearing at the boundary.
+    """
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_SEAMLESS_LOOP", "true")
+    overlap = assembly._xfade_seconds() if assembly._xfade_enabled() else 0.0
+    step = 3.5 - overlap
+    for duration in (2.0, 3.0, step):
+        ordered = [("a.mp4", 0.0), ("b.mp4", 0.0)]
+        out = assembly._apply_seamless_loop(list(ordered), duration, overlap)
+        assert out == ordered, (
+            f"dur={duration}: only slice 0 is visible, so the list must be left alone rather "
+            "than reprising onto a trimmed-away slice")

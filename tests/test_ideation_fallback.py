@@ -6,10 +6,23 @@ the news-niche sourcing gate, dedup, idempotency, and the thin-digest guard.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
 from src import ideation_fallback as fb
+
+
+@pytest.fixture(autouse=True)
+def _offline_source_check(monkeypatch):
+    """Keep this module offline (see its docstring).
+
+    _validate_and_clean now probes every source URL for liveness, so without this the existing
+    fixtures — which cite made-up hosts like https://x.example — would each make a real HTTP
+    request and wait for DNS to time out. The liveness tests below re-enable the check and stub
+    the probe.
+    """
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "false")
 
 
 def _idea(title, n_sources=2, **over):
@@ -202,7 +215,17 @@ def test_seed_ideas_dedupes_against_db(monkeypatch):
 
 
 def test_live_real_llm_ideation(monkeypatch):
-    """Real Gemini/Groq generates parseable, well-sourced ideas (DB mocked). Skips offline."""
+    """Real Gemini/Groq generates parseable, well-sourced ideas (DB mocked). Skips offline.
+
+    Opt-in like every other live test here (TELEGRAM_LIVE_TEST, FACTCHECK_LIVE_TEST,
+    GEMINI_TTS_LIVE_TEST, YOUTUBE_LIVE_UPLOAD_TEST). It was the one live test that ran by
+    DEFAULT, and it is the most expensive one in the suite: `run_fallback_ideation()` spends
+    several grounded Gemini requests against a free tier of 20/day/model, so every casual
+    `pytest` run was competing with production for the day's budget — and it is exactly that
+    budget running out that leaves the pipeline with no working provider (STATUS 2026-09-01).
+    """
+    if os.environ.get("IDEATION_LIVE_TEST") != "1":
+        pytest.skip("set IDEATION_LIVE_TEST=1 to run (spends the shared 20/day Gemini quota)")
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
@@ -346,3 +369,74 @@ def test_ideation_prompt_asks_for_spread_scores():
     assert "score calibration" in prompt   # require relative, spread-out scores
     assert "spread" in prompt and "0.0-1.0" in prompt
     assert "do not give everything" in prompt
+
+
+# --- source liveness: an idea may not enter the digest citing a dead link ------------------
+
+def test_url_is_dead_only_on_404_and_410(monkeypatch):
+    """Only a hard 'this page does not exist' counts as dead.
+
+    News sites routinely answer 401/403 to a bot (NDTV, Bloomberg measured 2026-09-01), so
+    treating those as dead would throw away good ideas citing real articles.
+    """
+    codes = {}
+
+    class _Resp:
+        def __init__(self, url):
+            self.status_code = codes[url]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(fb.requests, "get", lambda url, **k: _Resp(url))
+    for code, dead in ((404, True), (410, True), (200, False), (401, False),
+                       (403, False), (429, False), (500, False)):
+        codes["https://x.example/a"] = code
+        assert fb._url_is_dead("https://x.example/a") is dead, f"code {code}"
+
+
+def test_url_is_not_dead_when_the_check_itself_fails(monkeypatch):
+    """A timeout/DNS blip must never be read as 'the article does not exist' (rule 14)."""
+    def _boom(url, **k):
+        raise OSError("connection reset")
+    monkeypatch.setattr(fb.requests, "get", _boom)
+    assert fb._url_is_dead("https://x.example/a") is False
+
+
+def test_ideas_citing_only_dead_links_are_dropped(monkeypatch):
+    """The 2026-09-01 finding: 23 of 75 published Shorts cited nothing but 404s, because
+    _clean_sources only checked that a string starts with http."""
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "true")
+    dead = {"https://ok.example/1": False, "https://ok.example/2": False,
+            "https://gone.example/1": True, "https://gone.example/2": True}
+    monkeypatch.setattr(fb, "_url_is_dead", lambda u: dead[u])
+    ideas = [
+        {"title": "Real story", "hook": "h", "angle": "a",
+         "sources": ["https://ok.example/1", "https://ok.example/2"]},
+        {"title": "Fabricated story", "hook": "h", "angle": "a",
+         "sources": ["https://gone.example/1", "https://gone.example/2"]},
+    ]
+    kept = fb._validate_and_clean(ideas)
+    assert [i["title"] for i in kept] == ["Real story"]
+
+
+def test_an_idea_keeps_only_its_live_sources_and_needs_min_sources_of_them(monkeypatch):
+    monkeypatch.setenv("MIN_SOURCES", "1")
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "true")
+    monkeypatch.setattr(fb, "_url_is_dead",
+                        lambda u: u.endswith("/dead"))
+    ideas = [{"title": "Half sourced", "hook": "h", "angle": "a",
+              "sources": ["https://x.example/live", "https://x.example/dead"]}]
+    kept = fb._validate_and_clean(ideas)
+    assert kept[0]["sources"] == ["https://x.example/live"], "dead citation must not reach the reel"
+
+
+def test_source_check_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "false")
+    monkeypatch.setattr(fb, "_url_is_dead",
+                        lambda u: pytest.fail("must not probe when disabled"))
+    ideas = [{"title": "Unchecked", "hook": "h", "angle": "a",
+              "sources": ["https://gone.example/1", "https://gone.example/2"]}]
+    assert len(fb._validate_and_clean(ideas)) == 1

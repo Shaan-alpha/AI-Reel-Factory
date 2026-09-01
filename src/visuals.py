@@ -43,6 +43,7 @@ _PER_KEYWORD = 3       # candidates pulled per keyword
 _IMAGE_CLIP_SECONDS = 7.0   # comfortably longer than assembly's 3.5s slice (was documented as
                             # "assembly's 6s slice" — that stale 6.0 was the repeat bug's origin)
 _MAX_IMG_CLIPS = 12         # cap API calls + ffmpeg conversions per reel
+_MAX_VIDEO_CLIPS = 12       # same cap for the stock-video path (bounds downloads per reel)
 
 # Minimal stopword set for the heuristic keyword fallback (no NLTK dependency).
 _STOPWORDS = frozenset(
@@ -375,9 +376,17 @@ def _fetch_video_broll(keywords: list[str], target_seconds: float, out_dir: str)
         raise RuntimeError(f"visuals: no B-roll found on Pexels/Pixabay for {keywords}.")
 
     paths: list[str] = []
-    covered = 0.0
+    from src import assembly  # local: keeps the module importable without ffmpeg present
+
+    # Ask assembly how many CUTS it will make, exactly as the image path does (line ~331).
+    # This used to accumulate `min(duration, _SLICE_SECONDS)` with _SLICE_SECONDS=8.0 while
+    # assembly cuts at CLIP_SECONDS (~3.5s), so a 28s reel stopped at 4 downloads for 10 cuts
+    # and assembly replayed the other 6. The 2026-08-25 repeat fix made slice_count the single
+    # source of truth but was only wired into the image path; this is the same bug, in the
+    # branch that runs precisely when the primary visual source has already failed.
+    needed = min(_MAX_VIDEO_CLIPS, assembly.slice_count(target_seconds))
     for c in candidates:
-        if covered >= target_seconds and len(paths) >= 2:
+        if len(paths) >= max(2, needed):
             break
         dest = os.path.join(out_dir, _clip_filename(c["url"]))
         try:
@@ -387,9 +396,8 @@ def _fetch_video_broll(keywords: list[str], target_seconds: float, out_dir: str)
             log.warning("visuals: download failed (%s); skipping", e)
             continue
         paths.append(dest)
-        covered += min(c["duration"], _SLICE_SECONDS)
 
     if not paths:
         raise RuntimeError("visuals: found candidates but every download failed.")
-    log.info("visuals: %d clips (~%.0fs coverage) for target %.0fs", len(paths), covered, target_seconds)
+    log.info("visuals: %d clip(s) for %d cut(s) over %.0fs", len(paths), needed, target_seconds)
     return paths

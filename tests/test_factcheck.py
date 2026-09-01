@@ -270,3 +270,20 @@ def test_model_override_is_honoured(monkeypatch):
                         lambda p, **k: seen.update(k) or '{"checked":1,"unsupported":[],"verdict":"pass"}')
     factcheck.verify("Body.", [])
     assert seen["model"] == "gemini-2.5-pro"
+
+
+def test_a_block_logs_the_raw_checker_reply(monkeypatch, caplog):
+    """When a reel dies, the log must show what the checker actually said.
+
+    Today it shows only the flattened strings, so it is impossible after the fact to tell a
+    model that mis-sorted a finding from `verify()` harvesting one of the undocumented
+    `critical`/`unsupported` keys — the two have different fixes, and three real reels were
+    killed with no way to distinguish them.
+    """
+    raw = '{"checked": 4, "blocking": ["the 40% figure is invented"], "minor": [], "verdict": "fail"}'
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", lambda *a, **k: raw)
+    with caplog.at_level("WARNING"):
+        out = factcheck.verify("body text", ["https://x.example"], "title")
+    assert out["ok"] is False
+    assert any("the 40% figure is invented" in r.getMessage() and "checked" in r.getMessage()
+               for r in caplog.records), "the raw checker JSON must be logged on a block"

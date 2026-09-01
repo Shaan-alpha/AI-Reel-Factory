@@ -112,3 +112,31 @@ def test_live_private_upload(tmp_path):
         "tags": ["test"], "privacy": "private",
     }, script_id=-1)
     assert vid and url.startswith("https://www.youtube.com/shorts/")
+
+
+def test_publish_survives_a_failed_post_insert(monkeypatch, tmp_path, caplog):
+    """A DB hiccup AFTER the upload must not cost us a duplicate public video.
+
+    The upload is irreversible; the row is not. If insert_post raises, the old behaviour
+    propagated it out of publish() -> produce_one never ran set_idea_status("produced") ->
+    the idea went back into the queue -> the next run uploaded the SAME reel again, because
+    the idempotency guards (find_post / get_published_post_for_idea) both key off the row that
+    was never written. Losing an analytics row is much cheaper than publishing a duplicate, so
+    the id is returned and the failure is logged loudly for reconciliation.
+    """
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr(pub.db, "find_post", lambda sid, plat: None)
+    monkeypatch.setattr(pub, "_youtube_client", lambda: object())
+    monkeypatch.setattr(pub, "_upload", lambda yt, body, path: {"id": "NEWID"})
+
+    def _db_down(*a, **k):
+        raise RuntimeError("supabase unreachable")
+    monkeypatch.setattr(pub.db, "insert_post", _db_down)
+
+    with caplog.at_level("ERROR"):
+        video_id, url = pub.publish(str(video), {"title": "t", "description": "d", "tags": []}, 1)
+
+    assert video_id == "NEWID" and url.endswith("NEWID")
+    assert any("NEWID" in r.getMessage() for r in caplog.records), \
+        "the orphaned video id must be logged for reconciliation"

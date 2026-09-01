@@ -109,6 +109,7 @@ def test_run_production_is_fail_soft(monkeypatch):
     ideas = [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}, {"id": 3, "title": "c"}]
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
     monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: None)  # no live Supabase
 
     def fake_produce(idea, root):
         if idea["id"] == 2:
@@ -191,7 +192,8 @@ def test_make_on_demand_flow(monkeypatch):
     monkeypatch.setattr(production.approval, "process_responses",
                         lambda **k: calls.append(("drain", k)) or 1)
     monkeypatch.setattr(production, "run_production",
-                        lambda: {"published": [{"idea_id": 1, "url": "https://yt/x"}], "failed": []})
+                        lambda limit=None, only_ids=None: {
+                            "published": [{"idea_id": 1, "url": "https://yt/x"}], "failed": []})
     notes = []
     monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
 
@@ -210,7 +212,8 @@ def test_make_on_demand_prefers_existing_pending(monkeypatch):
                         lambda n: pytest.fail("must not generate when ideas already queued"))
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 1)
-    monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: {"published": [], "failed": []})
     monkeypatch.setattr(production, "_notify", lambda t: None)
     production.make_on_demand()  # uses the 2 queued ideas, no generation
 
@@ -221,7 +224,8 @@ def test_make_on_demand_nothing_approved(monkeypatch):
     monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n: 3)
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
-    monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: {"published": [], "failed": []})
     notes = []
     monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
     production.make_on_demand()
@@ -282,3 +286,85 @@ def test_factcheck_failure_alerts_the_operator(monkeypatch):
     production.run_production()
     assert len(alerts) == 1
     assert "FactCheckFailed" in alerts[0] and "bad date" in alerts[0]
+
+
+# --- the approval boundary: a run may only produce what THIS run offered -------------------
+
+def test_run_production_only_produces_ideas_offered_in_this_run(monkeypatch):
+    """`only_ids` scopes the batch to the ideas this run put in front of the operator.
+
+    Without it, run_production drained every row still sitting at status='approved' — including
+    ones left over from an earlier run that failed. Live receipt (2026-09-01): run 32920283763
+    logged `idea 223 failed`; two days later run 33108008045 sent 2 ideas to the digest, reported
+    `3 approved after webhook wait`, and published 223 with no fresh tap.
+    """
+    stale, fresh = {"id": 223, "title": "left over from a failed run"}, {"id": 226, "title": "offered now"}
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [stale, fresh])
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    seen = []
+    monkeypatch.setattr(production, "produce_one",
+                        lambda idea, root: seen.append(idea["id"]) or ("V", "u"))
+
+    production.run_production(only_ids=[226])
+    assert seen == [226], "a stale approved idea must not be produced without a fresh approval"
+
+
+def test_run_production_without_only_ids_still_drains_the_queue(monkeypatch):
+    """The scheduled cron path has no 'this run's digest' — it legitimately drains the queue."""
+    monkeypatch.setattr(production.db, "get_approved_ideas",
+                        lambda: [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}])
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    seen = []
+    monkeypatch.setattr(production, "produce_one",
+                        lambda idea, root: seen.append(idea["id"]) or ("V", "u"))
+    production.run_production()
+    assert seen == [1, 2]
+
+
+def test_a_failed_reel_is_released_from_the_approved_queue(monkeypatch):
+    """A reel that dies mid-chain must not stay 'approved'.
+
+    Staying approved is what let it be produced later with no tap, and it also permanently
+    consumed a slot of APPROVAL_CAP (approval._apply_callback counts every approved row), so
+    three stuck ideas made every future tap answer "capped".
+    """
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 5, "title": "x"}])
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "produce_one",
+                        lambda idea, root: (_ for _ in ()).throw(RuntimeError("voice died")))
+    statuses = []
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+
+    production.run_production()
+    assert (5, "pending") in statuses, (
+        "a transiently failed idea must go back to the digest for a fresh decision, not linger approved")
+
+
+def test_a_factcheck_failure_stays_rejected_and_is_not_re_offered(monkeypatch):
+    """produce_one already rejected it — a content verdict must not be reset to pending."""
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 6, "title": "y"}])
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "produce_one", lambda idea, root: (_ for _ in ()).throw(
+        production.FactCheckFailed("idea 6 failed fact check: invented statistic")))
+    statuses = []
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+
+    production.run_production()
+    assert (6, "pending") not in statuses
+
+
+def test_make_on_demand_scopes_production_to_the_ideas_it_offered(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 11}, {"id": 12}])
+    monkeypatch.setattr(production.approval, "send_digest", lambda: None)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 1)
+    monkeypatch.setattr(production, "_notify", lambda t: None)
+    captured = {}
+
+    def _fake_run(limit=None, only_ids=None):
+        captured["only_ids"] = only_ids
+        return {"published": [], "failed": []}
+    monkeypatch.setattr(production, "run_production", _fake_run)
+
+    production.make_on_demand()
+    assert sorted(captured["only_ids"]) == [11, 12]

@@ -51,7 +51,13 @@ log = logging.getLogger(__name__)
 _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 
 # edge-tts (fallback engine)
-_VOICE = config.get("VOICE", "en-IN-NeerjaNeural")
+# The channel has ONE narrator. Every link in the chain must sound like the same person, or a
+# transient outage silently swaps who is presenting the news mid-catalogue. STATUS 2026-08-25
+# recorded this as fixed ("keep one narrator down the whole voice fallback chain") but only
+# changed the Chirp link; edge-tts still defaulted to Neerja (female) under a male primary
+# (Gemini Zubenelgenubi), and Kokoro to af_heart (American female). Prabhat is the male en-IN
+# edge voice; see _KOKORO_DEFAULT_VOICE for the Kokoro end of the same fix.
+_VOICE = config.get("VOICE", "en-IN-PrabhatNeural")
 _RATE = config.get("VOICE_RATE", "+0%")
 _TICKS_PER_SECOND = 1e7  # edge-tts offsets/durations are in 100-nanosecond ticks
 
@@ -142,6 +148,17 @@ def _kokoro():
     return Kokoro(model, voices)
 
 
+# Kokoro's naming encodes gender: af_* / bf_* are female, am_* / bm_* male. `af_heart` was the
+# last link still contradicting the channel's male narrator (see _VOICE above). Kokoro has no
+# Indian English voice, so a neutral male read is the closest match to Zubenelgenubi.
+_KOKORO_DEFAULT_VOICE = "am_michael"
+
+
+def _kokoro_voice() -> str:
+    """The Kokoro narrator. Public-ish so the one-narrator rule is testable (rule 8)."""
+    return config.get("KOKORO_VOICE", _KOKORO_DEFAULT_VOICE)
+
+
 def _split_sentences(text: str) -> list[str]:
     """Split narration into sentences for dramatic pacing. Always ≥1 item for non-empty input."""
     return [s.strip() for s in _SENTENCE_RE.split(text.strip()) if s.strip()]
@@ -164,7 +181,7 @@ def _synthesize_kokoro(text: str, out_path: str) -> float:
     import numpy as np
 
     k = _kokoro()
-    voice_name = config.get("KOKORO_VOICE", "af_heart")
+    voice_name = _kokoro_voice()
     speed = float(config.get("KOKORO_SPEED", "1.0"))
     lang = config.get("KOKORO_LANG", "en-us")
 
