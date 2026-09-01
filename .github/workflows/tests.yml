@@ -1,0 +1,71 @@
+# Run the test suite. The point of the SCHEDULE is upstream drift, not code changes.
+#
+# Twice now a provider changed under us and the suite stayed green because nothing ran it:
+# Groq retired `llama-3.3-70b-versatile` (404s for days), and its replacement `gpt-oss-120b`
+# 400s on every real JSON prompt. Both were caught by hand, days late, after production runs
+# had already failed. The liveness tests that would have caught them are skipif-gated on a key
+# being present, which in practice meant "only when the operator runs pytest locally".
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC daily = 10:30 IST — before the operator's usual run window
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The suite renders a real reel and burns real captions (test_live_full_reel,
+      # test_live_caption_burn), so it needs the same system deps as production.
+      - name: Install FFmpeg + espeak-ng (Kokoro TTS phonemizer)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
+
+      - name: Cache TTS/ASR models (Kokoro + faster-whisper)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/kokoro
+            ~/.cache/huggingface
+          key: models-kokoro1.0-whisper-base-v1
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: pytest
+        env:
+          # Only these four gate whether a test runs vs skips. Everything else in the suite is
+          # mocked, and the pipeline's own env knobs are left at their code defaults on purpose:
+          # this job should exercise what the code does by default, not what the repo variables
+          # happen to say.
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          # Gemini's free tier is 20 requests/day PER MODEL and it is SHARED with production.
+          # Nothing in the suite spends it today: the one test that did (test_live_real_llm_ideation)
+          # is now gated behind IDEATION_LIVE_TEST, like every other live test.
+          # >>> If you add a test that calls Gemini, gate it behind an opt-in env var. An ungated
+          # >>> one runs on every push and can starve the day's real reels of their provider.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Live opt-ins are deliberately NOT set here — they publish to YouTube, message the
+          # operator's Telegram, or spend metered quota:
+          #   IDEATION_LIVE_TEST · FACTCHECK_LIVE_TEST · GEMINI_TTS_LIVE_TEST
+          #   TELEGRAM_LIVE_TEST · YOUTUBE_LIVE_UPLOAD_TEST
+        run: pytest -q --durations=10
