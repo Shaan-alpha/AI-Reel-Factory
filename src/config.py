@@ -68,8 +68,22 @@ def require(key: str) -> str:
 
 
 def get(key: str, default: str | None = None) -> str | None:
-    """Return an optional setting, falling back to DEFAULTS then `default`."""
-    return os.environ.get(key, DEFAULTS.get(key, default))
+    """Return an optional setting, falling back to DEFAULTS then `default`.
+
+    An env var that is present but EMPTY counts as absent. This is not pedantry: GitHub Actions
+    renders `FOO: ${{ vars.FOO }}` as `FOO=` when no repo variable exists, so a plain
+    `os.environ.get(key, default)` hands the pipeline "" and the code default never applies.
+    Locally the same var is simply unset, so the default DOES apply — which is how a green test
+    suite coexisted with three broken subsystems in production (STATUS 2026-09-01): SFX_DIR=""
+    crashed the SFX mixer, VOICE_STYLE_PROMPT="" stripped the narrator's delivery direction, and
+    IMAGE_STYLE="" stripped "no text, no watermark" from every Flux prompt.
+
+    `require` and `get_bool` already rejected empty values; only this accessor did not.
+    """
+    val = os.environ.get(key)
+    if val is None or not val.strip():
+        return DEFAULTS.get(key, default)
+    return val
 
 
 def get_bool(key: str, default: bool = True) -> bool:
