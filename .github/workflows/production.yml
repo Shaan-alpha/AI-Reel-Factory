@@ -113,6 +113,9 @@ jobs:
           # Groq bills gpt-oss reasoning tokens against max_tokens; at the default effort the
           # trace eats the budget and json_object mode 400s. 'low' keeps the fallback alive.
           GROQ_REASONING_EFFORT: ${{ vars.GROQ_REASONING_EFFORT || 'low' }}
+          # Settable without a code edit: the last two breakages were both the Groq model,
+          # and both needed a commit to swap because this was wired nowhere.
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
           # HTTP-probe ideation's source URLs; drop 404/410 (invented links), keep 401/403.
           ENABLE_SOURCE_CHECK: ${{ vars.ENABLE_SOURCE_CHECK || 'true' }}
         run: python -m src.production
