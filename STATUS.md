@@ -97,6 +97,42 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-09-01 — Audit complete (batch 3): the coverage gaps the cut-short fan-out left
+**404 pass, 5 skipped.** Every module in `src/` is now read or scanned, plus `telegram-bot/`
+and all five workflows. Clean on review: `analytics.py` (deleted videos are handled),
+`news.py`, `trends.py`, `graphics.py`, `subtitles.py`.
+
+- ✅ **The narrator still changed gender two links down.** STATUS 2026-08-25 recorded "keep one
+  narrator down the whole voice fallback chain" but changed only link 2 of 4. Actual chain:
+  Gemini **Zubenelgenubi (male)** → Chirp **Zubenelgenubi (male)** → edge-tts
+  **en-IN-NeerjaNeural (FEMALE)** → Kokoro **af_heart (FEMALE)**. A double outage still swapped
+  who was presenting the news. Now `en-IN-PrabhatNeural` (the male en-IN edge voice, confirmed
+  against the live voice list) and `am_michael`; new `_kokoro_voice()` makes the rule testable.
+- ✅ **The stock-video path still recycled shots** — the 2026-08-25 `slice_count` fix was wired
+  into the IMAGE path only. Video credited each clip with `_SLICE_SECONDS` (8.0s) while assembly
+  cuts at ~3.5s: measured **4 clips downloaded for 10 cuts**, so 6 of 10 shots replayed. It is
+  the branch that runs when Flux fails, i.e. exactly when things are already going wrong.
+- ✅ **`ENABLE_SEAMLESS_LOOP` had never once done anything.** It replaced the LAST slice, but
+  `slice_count` over-covers on purpose and the render is trimmed to the narration, so the
+  reprise started at or past the trim point. Measured across 23/25/28/30s narrations: **visible
+  for 0.00s every time.** Now targets the last *visible* slice.
+- ✅ **The audio limiter was gated on SFX.** With `SFX_DIR=""` breaking SFX on 100% of runs, the
+  only mix production ever built — narration + music bed, summed with `normalize=0` (no
+  headroom) — went out **unlimited**. Now gated on "did we mix at all".
+- ✅ **`GROQ_MODEL` was settable by no workflow.** Both Groq breakages were the model, and both
+  needed a commit to swap. Now a repo variable.
+- ✅ **fact-check now logs the raw checker reply on a block.** There was zero observability into
+  what the checker returned, so a model that mis-sorted a finding was indistinguishable from
+  `_findings()` harvesting one of the undocumented `critical`/`unsupported` keys — different
+  causes, different fixes, and three August reels died with no way to tell them apart.
+- ✅ `.env.example`: `NICHE_LEAN` marked removed (dead in code since 2026-07-27); `VOICE` and the
+  one-narrator rule documented for the first time.
+- ⚠️ **Deliberately NOT changed: fact-check's blocking logic.** `verify()` still harvests the
+  undocumented `critical`/`unsupported` keys and still lets grading override the model's own
+  `verdict` — it only ever *widens* what blocks. Loosening a safety gate without being able to
+  measure the result live is the wrong trade, and the source-liveness fix already removes what
+  triggered 2 of the 3 real blocks. Revisit once the raw-reply logs show real data.
+
 ### 2026-09-01 — Fixed (batch 2): the reason nobody noticed, plus six reliability holes
 **396 pass, 5 skipped** (batch 1 left it at 383 + 4). Still uncommitted — working tree only.
 

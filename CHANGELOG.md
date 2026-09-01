@@ -5,6 +5,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Audit completed: the narrator, the recycled shots, and a feature that never ran
+
+Third batch from the 2026-09-01 audit, covering what the cut-short fan-out never reached.
+**404 pass, 5 skipped** (was 396 + 5). Every module in `src/` is now read or scanned.
+
+### Fixed
+- **The narrator changed gender two links down the voice chain.** STATUS 2026-08-25 recorded
+  "keep one narrator down the whole voice fallback chain" but changed only the Chirp link. The
+  real chain was Gemini Zubenelgenubi (male) -> Chirp Zubenelgenubi (male) -> edge-tts
+  en-IN-NeerjaNeural (FEMALE) -> Kokoro af_heart (FEMALE), so a double outage still swapped who
+  was reading the news. Now en-IN-PrabhatNeural and am_michael, both confirmed against the live
+  voice lists; `_kokoro_voice()` makes the one-narrator rule testable.
+- **The stock-video B-roll path still recycled shots.** The 2026-08-25 `slice_count` fix made
+  assembly the single source of truth for cut count but was wired into the IMAGE path only; the
+  video path still credited each clip with the stale `_SLICE_SECONDS` (8.0s) while assembly cuts
+  at ~3.5s. Measured: 4 clips downloaded for 10 cuts, so 6 of 10 shots replayed. This is the
+  branch that runs when the AI image source fails.
+- **`ENABLE_SEAMLESS_LOOP` had never done anything.** It replaced the last slice, but
+  `slice_count` over-covers the narration on purpose and the render is trimmed to narration
+  length, so the reprise started at or past the trim point — measured visible for 0.00s across
+  23/25/28/30s narrations. It now targets the last slice that survives the trim.
+- **The audio limiter was gated on SFX rather than on the mix.** With `SFX_DIR=""` breaking SFX
+  on every run, the only mix production ever built (narration + music bed, summed with
+  `normalize=0` and therefore no headroom) was going out unlimited.
+- **`GROQ_MODEL` was read by the code but settable by no workflow** — both Groq breakages were
+  the model, and both required a commit to swap. Now a repo variable in both workflows.
+- **fact-check logs the raw checker reply on a block.** There was no way, after the fact, to
+  distinguish a model that mis-sorted a finding from `_findings()` harvesting one of the
+  undocumented `critical`/`unsupported` keys. Different causes, different fixes.
+- `.env.example`: `NICHE_LEAN` marked removed (dead in code since 2026-07-27), and `VOICE` /
+  `KOKORO_VOICE` documented with the one-narrator rule for the first time.
+
+### Deliberately unchanged
+- **fact-check's blocking logic.** `verify()` still harvests the undocumented
+  `critical`/`unsupported` keys and still lets grading override the model's own `verdict`, so it
+  only ever widens what blocks. Loosening a safety gate without being able to measure the effect
+  live is the wrong trade, and the source-liveness fix already removes what triggered two of the
+  three real blocks. The new raw-reply logging is what makes revisiting it measurable.
+
 ## [Unreleased] — CI finally runs the tests, and six reliability holes
 
 Second batch from the 2026-09-01 audit. **396 pass, 5 skipped** (was 383 + 4).
