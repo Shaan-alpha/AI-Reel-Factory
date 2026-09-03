@@ -445,3 +445,91 @@ def test_generate_grounded_does_not_retry_a_permanent_error(monkeypatch):
     with pytest.raises(RuntimeError, match="400"):
         llm.generate_grounded("p")
     assert len(calls) == 1
+
+
+# --- grounded CITATIONS (2026-09-03) ------------------------------------------------------
+# `_gen_gemini_grounded` returned only resp.text and dropped grounding_metadata on the floor, so
+# the real Google Search citations were discarded and callers had to ask the model to write
+# source URLs from memory. It cannot, so it invented them. These expose the real ones.
+
+class _FakeWeb:
+    def __init__(self, uri, title):
+        self.uri, self.title = uri, title
+
+
+class _FakeChunk:
+    def __init__(self, uri, title):
+        self.web = _FakeWeb(uri, title)
+
+
+class _FakeSegment:
+    def __init__(self, start, end):
+        self.start_index, self.end_index, self.text = start, end, ""
+
+
+class _FakeSupport:
+    def __init__(self, start, end, idxs):
+        self.segment = _FakeSegment(start, end)
+        self.grounding_chunk_indices = idxs
+
+
+class _FakeMeta:
+    def __init__(self, chunks, supports):
+        self.grounding_chunks, self.grounding_supports = list(chunks), list(supports)
+
+
+class _FakeCandidate:
+    def __init__(self, meta):
+        self.grounding_metadata = meta
+
+
+class _FakeResponse:
+    def __init__(self, text, candidates):
+        self.text, self.candidates = text, candidates
+
+
+def _fake_grounded_response(text, chunks=(), supports=()):
+    return _FakeResponse(text, [_FakeCandidate(_FakeMeta(chunks, supports))])
+
+
+def test_grounded_sources_extracts_real_citation_uris():
+    resp = _fake_grounded_response(
+        "some text",
+        chunks=[_FakeChunk("https://redirect/aaa", "aljazeera.com"),
+                _FakeChunk("https://redirect/bbb", "bbc.com")],
+        supports=[_FakeSupport(0, 4, [0]), _FakeSupport(5, 9, [1])],
+    )
+    assert llm._grounded_sources(resp) == [
+        {"uri": "https://redirect/aaa", "domain": "aljazeera.com", "spans": [(0, 4)]},
+        {"uri": "https://redirect/bbb", "domain": "bbc.com", "spans": [(5, 9)]},
+    ]
+
+
+def test_grounded_sources_keeps_chunks_that_have_no_support_span():
+    """A citation with no span still names a real, live article — it just can't be attributed
+    to one idea. Dropping it would throw away the only usable URL on a thin response."""
+    resp = _fake_grounded_response("t", chunks=[_FakeChunk("https://r/a", "ndtv.com")])
+    assert llm._grounded_sources(resp) == [
+        {"uri": "https://r/a", "domain": "ndtv.com", "spans": []}]
+
+
+def test_grounded_sources_is_empty_when_metadata_is_absent():
+    """Grounding metadata is absent on plenty of real replies; that must not raise (rule 11)."""
+    assert llm._grounded_sources(_FakeResponse("t", [])) == []
+
+
+def test_generate_grounded_with_sources_returns_text_and_citations(monkeypatch):
+    monkeypatch.setattr(
+        llm, "_gen_gemini_grounded_full",
+        lambda prompt, *, max_tokens, model=None: ("body", [{"uri": "https://r/a",
+                                                             "domain": "bbc.com", "spans": []}]))
+    text, sources = llm.generate_grounded_with_sources("x")
+    assert text == "body"
+    assert sources == [{"uri": "https://r/a", "domain": "bbc.com", "spans": []}]
+
+
+def test_generate_grounded_with_sources_raises_on_empty(monkeypatch):
+    monkeypatch.setattr(llm, "_gen_gemini_grounded_full",
+                        lambda prompt, *, max_tokens, model=None: ("  ", []))
+    with pytest.raises(RuntimeError):
+        llm.generate_grounded_with_sources("x")
