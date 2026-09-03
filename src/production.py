@@ -301,7 +301,17 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
         n = len(existing)
         log.info("make_on_demand: %d pending idea(s) already queued (Routine).", n)
     else:
-        n = ideation_fallback.seed_ideas(num_ideas)
+        try:
+            n = ideation_fallback.seed_ideas(num_ideas)
+        except Exception as e:  # noqa: BLE001 — a dry ideation pass is runtime, not misconfig
+            # Rule 14: fail loud on misconfig, SOFT on runtime. "No story cleared sourcing right
+            # now" is the soft kind — an upstream 503, a thin news feed, a search that returned
+            # nothing citable. Run 33755597063 raised here and exited 1, so the only signal the
+            # operator got was a red X in the Actions UI; a tap on the phone deserves an answer
+            # on the phone. config.validate() above still hard-stops a missing secret.
+            log.warning("make_on_demand: ideation produced nothing (%s)", e)
+            _notify(f"🤷 No Short this time — ideation came up dry: {e}")
+            return {"published": [], "failed": []}
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
     # The ideas THIS run is putting in front of the operator. Captured before the digest so
