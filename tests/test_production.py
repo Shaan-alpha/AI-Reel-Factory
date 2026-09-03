@@ -407,3 +407,56 @@ def test_make_on_demand_still_raises_on_a_misconfigured_run(monkeypatch):
                         _raiser(production.config.ConfigError("Missing required settings: X")))
     with pytest.raises(production.config.ConfigError):
         production.make_on_demand()
+
+
+# --- a silent fail-open is the worst outcome (2026-09-03 audit) ---------------------------
+# factcheck.verify returns ok=True both when a reel PASSES and when the checker could not run
+# (quota exhausted, Gemini down). produce_one only read `ok`, so an unverified reel published
+# looking exactly like a verified one. Accuracy is the monetization gate (rule 6) — the operator
+# has to be told.
+
+def test_produce_one_alerts_when_the_fact_check_gate_could_not_run(monkeypatch):
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.factcheck, "verify",
+                        lambda *a, **k: {"ok": True, "unsupported": [], "minor": [], "checked": 0,
+                                         "reason": "checker-failed: 429 RESOURCE_EXHAUSTED"})
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+
+    video_id, _url = production.produce_one(dict(IDEA), "/tmp/work")
+
+    assert video_id == "VID1"            # fail-open still ships (FACTCHECK_STRICT default)
+    assert notes, "the operator must be told the gate did not run"
+    assert "unverified" in notes[0].lower()
+    assert str(IDEA["id"]) in notes[0]
+
+
+def test_produce_one_does_not_alert_on_a_normal_pass(monkeypatch):
+    _wire_happy(monkeypatch)
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+    production.produce_one(dict(IDEA), "/tmp/work")
+    assert notes == [], "a verified reel must not cry wolf"
+
+
+# --- stale ideas must not be re-offered (2026-09-03 audit) --------------------------------
+# make_on_demand PREFERS whatever is already pending, and a reel that dies mid-chain is put back
+# to 'pending' by _release_failed_idea. Nothing ages those out, so yesterday's news can be
+# re-proposed as today's digest — on a channel whose whole premise is "today's story".
+
+def test_make_on_demand_expires_stale_pending_before_reusing_it(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    order = []
+    monkeypatch.setattr(production.db, "expire_stale_pending_ideas",
+                        lambda: order.append("expire") or 2)
+    monkeypatch.setattr(production.db, "get_pending_ideas",
+                        lambda: order.append("read") or [{"id": 9}])
+    monkeypatch.setattr(production.approval, "send_digest", lambda: 1)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+    monkeypatch.setattr(production, "_wait_for_webhook_decisions", lambda **k: 0)
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: {"published": [], "failed": []})
+    monkeypatch.setattr(production, "_notify", lambda t: None)
+
+    production.make_on_demand(3, 1)
+    assert order[0] == "expire", "stale ideas must be cleared BEFORE the queue is read"

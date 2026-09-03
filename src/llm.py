@@ -59,12 +59,18 @@ _GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
 _GROQ_MODEL = config.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
-@lru_cache(maxsize=1)
-def _gemini_client():
-    """Cached google-genai client. Imported lazily so the module loads without the SDK."""
+@lru_cache(maxsize=4)
+def _gemini_client(api_key: str | None = None):
+    """Cached google-genai client, one per API key. Imported lazily (no SDK at import time).
+
+    Keyed by credential because the free tier is metered per PROJECT as well as per model:
+    a second free key carries its own 20/day grounded allowance. That matters because
+    ideation, the scriptwriter and the fact-check gate all draw on one budget today — see
+    `generate_grounded`.
+    """
     from google import genai
 
-    return genai.Client(api_key=config.require("GEMINI_API_KEY"))
+    return genai.Client(api_key=api_key or config.require("GEMINI_API_KEY"))
 
 
 @lru_cache(maxsize=1)
@@ -113,7 +119,8 @@ def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
     return resp.text or ""
 
 
-def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = None) -> str:
+def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = None,
+                         api_key: str | None = None) -> str:
     """Gemini with Google Search grounding — live web research with real sources.
 
     Note: the google_search tool can't combine with forced-JSON mime, so the caller must
@@ -130,7 +137,8 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = No
     instead of competing for the shared 20/day bucket (rule 13) — but only among models that HAVE
     a grounded allowance, which today is just the default. See factcheck._model().
     """
-    return _gen_gemini_grounded_full(prompt, max_tokens=max_tokens, model=model)[0]
+    return _gen_gemini_grounded_full(prompt, max_tokens=max_tokens, model=model,
+                                     api_key=api_key)[0]
 
 
 def _grounded_sources(resp) -> list[dict]:
@@ -173,8 +181,8 @@ def _grounded_sources(resp) -> list[dict]:
     return out
 
 
-def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int,
-                              model: str | None = None) -> tuple[str, list[dict]]:
+def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None = None,
+                              api_key: str | None = None) -> tuple[str, list[dict]]:
     """One grounded call — returns (text, real citations). See `_grounded_sources`."""
     from google.genai import types
 
@@ -186,17 +194,21 @@ def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int,
         # reply mid-script, forcing the ungrounded fallback. Per-generation field (_thinking_cfg).
         thinking_config=_thinking_cfg(chosen),
     )
-    resp = _gemini_client().models.generate_content(
+    resp = _gemini_client(api_key).models.generate_content(
         model=chosen, contents=prompt, config=cfg
     )
     return resp.text or "", _grounded_sources(resp)
 
 
-def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None = None) -> str:
+def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None = None,
+                      api_key: str | None = None) -> str:
     """Generate with live web research (Gemini Google Search grounding). Raises on failure so
     callers can fall back to plain generate(). Gemini-only — Groq has no grounding.
 
-    Pass `model` to spend a DIFFERENT model's free-tier quota (see _gen_gemini_grounded).
+    Pass `model` to spend a DIFFERENT model's free-tier quota (see _gen_gemini_grounded), or
+    `api_key` to spend a different PROJECT's. Both matter: measured 2026-09-03, ideation +
+    the scriptwriter + the fact-check gate share ONE 20/day grounded budget, a 3-reel run
+    costs 7 calls, and once it is gone the gate fails open (factcheck.verify).
 
     Retried once on a transient error, because this path has NO second provider (Groq has no
     grounding) and its failure is silent: `factcheck.verify` treats a checker outage as
@@ -204,7 +216,7 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
     it publishes one with the accuracy gate quietly absent.
     """
     def _attempt(p, *, json=False, max_tokens=max_tokens):  # noqa: ARG001 — _call_with_retry's shape
-        return _gen_gemini_grounded(p, max_tokens=max_tokens, model=model)
+        return _gen_gemini_grounded(p, max_tokens=max_tokens, model=model, api_key=api_key)
 
     text = _call_with_retry("gemini-grounded", _attempt, prompt, json=False, max_tokens=max_tokens)
     if not text or not text.strip():
@@ -213,7 +225,8 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
 
 
 def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
-                                  model: str | None = None) -> tuple[str, list[dict]]:
+                                   model: str | None = None,
+                                   api_key: str | None = None) -> tuple[str, list[dict]]:
     """Like `generate_grounded`, but also returns the search's REAL citation URLs.
 
     Use this wherever the reply is supposed to be SOURCED. Asking the model to write the URLs
@@ -221,7 +234,8 @@ def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
     grounding metadata, which is what this exposes (see `_grounded_sources`).
     """
     def _attempt(p, *, json=False, max_tokens=max_tokens):  # noqa: ARG001 — _call_with_retry's shape
-        return _gen_gemini_grounded_full(p, max_tokens=max_tokens, model=model)
+        return _gen_gemini_grounded_full(p, max_tokens=max_tokens, model=model,
+                                         api_key=api_key)
 
     text, sources = _call_with_retry("gemini-grounded", _attempt, prompt,
                                      json=False, max_tokens=max_tokens)

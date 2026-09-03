@@ -136,8 +136,32 @@ def _model() -> str | None:
     return config.get("FACTCHECK_MODEL") or None
 
 
+def _api_key() -> str | None:
+    """A dedicated Gemini key for the gate, or None to share GEMINI_API_KEY.
+
+    Free grounded search is 20 requests/day and is metered per PROJECT as well as per model.
+    Ideation (1/run), the scriptwriter (1/reel) and this gate (1/reel) all draw on the same
+    bucket, so a 3-reel run costs 7 and a third run in a day exhausts it — measured live on
+    2026-09-03 (`429 ... limit: 20, model: gemini-2.5-flash`). When it runs dry the gate
+    cannot run at all, and under the default FACTCHECK_STRICT=false that means reels ship
+    UNVERIFIED. Pointing the gate at a second free key gives it an allowance nothing else
+    can spend — the same isolation GEMINI_TTS_API_KEY already provides for TTS.
+    """
+    return (config.get("FACTCHECK_API_KEY") or "").strip() or None
+
+
 def enabled() -> bool:
     return config.get_bool("ENABLE_FACT_CHECK", True)
+
+
+def gate_ran(result: dict) -> bool:
+    """Did the check actually reach a verdict? False when it was disabled or unavailable.
+
+    `ok=True` alone does not mean "verified": it is also what a fail-open returns. Callers
+    that need to know whether the accuracy gate was really in place must ask this, or a
+    quota outage looks exactly like a pass (audit 2026-09-03).
+    """
+    return str(result.get("reason", "")) in ("pass", "fail")
 
 
 def severity_gate() -> str:
@@ -194,7 +218,8 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
 
     raw = ""
     try:
-        raw = llm.generate_grounded(prompt, max_tokens=2048, model=_model())
+        raw = llm.generate_grounded(prompt, max_tokens=2048, model=_model(),
+                                    api_key=_api_key())
         data = _parse(raw)
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
         # Grounded search shares one free-tier bucket with ideation and the scriptwriter, so a

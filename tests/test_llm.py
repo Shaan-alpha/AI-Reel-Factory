@@ -46,13 +46,13 @@ def test_raises_when_all_providers_fail(monkeypatch):
 
 def test_generate_grounded_returns_text(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded",
-                        lambda prompt, *, max_tokens, model=None: "grounded")
+                        lambda prompt, *, max_tokens, model=None, api_key=None: "grounded")
     assert llm.generate_grounded("x") == "grounded"
 
 
 def test_generate_grounded_raises_on_empty(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded",
-                        lambda prompt, *, max_tokens, model=None: "   ")
+                        lambda prompt, *, max_tokens, model=None, api_key=None: "   ")
     with pytest.raises(RuntimeError, match="empty"):
         llm.generate_grounded("x")
 
@@ -178,7 +178,7 @@ def test_generate_grounded_passes_a_model_override(monkeypatch):
     call at a specific one."""
     seen = {}
     monkeypatch.setattr(llm, "_gen_gemini_grounded",
-                        lambda prompt, *, max_tokens, model=None: seen.update(model=model) or "ok")
+                        lambda prompt, *, max_tokens, model=None, api_key=None: seen.update(model=model) or "ok")
     llm.generate_grounded("x", model="gemini-2.5-pro")
     assert seen["model"] == "gemini-2.5-pro"
     llm.generate_grounded("x")
@@ -203,7 +203,8 @@ def test_grounded_defaults_to_the_grounded_model_not_the_text_model(monkeypatch)
             seen["model"] = model
             return _Resp()
 
-    monkeypatch.setattr(llm, "_gemini_client", lambda: type("C", (), {"models": _Models})())
+    monkeypatch.setattr(llm, "_gemini_client",
+                        lambda api_key=None: type("C", (), {"models": _Models})())
     monkeypatch.setattr(llm, "_GEMINI_MODEL", "gemini-3.6-flash")
     monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
 
@@ -422,7 +423,7 @@ def test_generate_grounded_retries_a_transient_error(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda s: None)
     calls = []
 
-    def _flaky(prompt, *, max_tokens, model=None):
+    def _flaky(prompt, *, max_tokens, model=None, api_key=None):
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("503 UNAVAILABLE. high demand")
@@ -437,7 +438,7 @@ def test_generate_grounded_does_not_retry_a_permanent_error(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda s: pytest.fail("must not sleep on a 400"))
     calls = []
 
-    def _bad(prompt, *, max_tokens, model=None):
+    def _bad(prompt, *, max_tokens, model=None, api_key=None):
         calls.append(1)
         raise RuntimeError("400 INVALID_ARGUMENT")
 
@@ -521,7 +522,7 @@ def test_grounded_sources_is_empty_when_metadata_is_absent():
 def test_generate_grounded_with_sources_returns_text_and_citations(monkeypatch):
     monkeypatch.setattr(
         llm, "_gen_gemini_grounded_full",
-        lambda prompt, *, max_tokens, model=None: ("body", [{"uri": "https://r/a",
+        lambda prompt, *, max_tokens, model=None, api_key=None: ("body", [{"uri": "https://r/a",
                                                              "domain": "bbc.com", "spans": []}]))
     text, sources = llm.generate_grounded_with_sources("x")
     assert text == "body"
@@ -530,6 +531,42 @@ def test_generate_grounded_with_sources_returns_text_and_citations(monkeypatch):
 
 def test_generate_grounded_with_sources_raises_on_empty(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded_full",
-                        lambda prompt, *, max_tokens, model=None: ("  ", []))
+                        lambda prompt, *, max_tokens, model=None, api_key=None: ("  ", []))
     with pytest.raises(RuntimeError):
         llm.generate_grounded_with_sources("x")
+
+
+# --- a SEPARATE grounded key (2026-09-03 audit) --------------------------------------------
+# Ideation, the scriptwriter and the fact-check gate all spend ONE 20/day free budget on
+# gemini-2.5-flash. A 3-reel run costs 7 grounded calls, so a busy day exhausts it — and the
+# fact-check gate then fails OPEN. Threading an api_key lets the gate spend a different free
+# key's own budget (the same trick GEMINI_TTS_API_KEY already uses for TTS).
+
+def test_gemini_client_is_cached_per_api_key(monkeypatch):
+    built = []
+
+    class _FakeGenai:
+        @staticmethod
+        def Client(api_key=None):
+            built.append(api_key)
+            return f"client:{api_key}"
+
+    monkeypatch.setattr(llm, "_gemini_client", llm._gemini_client.__wrapped__)  # drop the cache
+    monkeypatch.setitem(__import__("sys").modules, "google", type("m", (), {"genai": _FakeGenai}))
+    monkeypatch.setenv("GEMINI_API_KEY", "default-key")
+
+    assert llm._gemini_client("other-key") == "client:other-key"
+    assert llm._gemini_client(None) == "client:default-key"
+    assert built == ["other-key", "default-key"]
+
+
+def test_generate_grounded_threads_an_api_key_through(monkeypatch):
+    seen = {}
+
+    def _fake(prompt, *, max_tokens, model=None, api_key=None):
+        seen["api_key"] = api_key
+        return ("body", [])
+
+    monkeypatch.setattr(llm, "_gen_gemini_grounded_full", _fake)
+    llm.generate_grounded("x", api_key="checker-key")
+    assert seen["api_key"] == "checker-key"
