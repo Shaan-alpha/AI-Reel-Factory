@@ -138,6 +138,16 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     if check.get("minor"):
         log.warning("produce: idea %s shipped with %d waived minor fact issue(s): %s",
                     idea_id, len(check["minor"]), " | ".join(check["minor"][:3]))
+    # `ok=True` is ALSO what a fail-open returns, so "passed" and "could not be checked" were
+    # indistinguishable here and an unverified reel shipped looking exactly like a verified one.
+    # The gate shares a 20/day grounded budget with ideation and the scriptwriter, so it runs dry
+    # on precisely the busiest days (audit 2026-09-03). Accuracy is the monetization gate (rule 6):
+    # if it did not run, say so on the operator's phone rather than in a log nobody reads.
+    if check["ok"] and factcheck.enabled() and not factcheck.gate_ran(check):
+        log.warning("produce: idea %s is shipping UNVERIFIED — %s", idea_id, check.get("reason"))
+        _notify(f"⚠️ Idea {idea_id} ({idea.get('title')!r}) shipped UNVERIFIED — the fact-check "
+                f"gate could not run ({check.get('reason')}). Set FACTCHECK_API_KEY to give it "
+                f"its own quota, or FACTCHECK_STRICT=true to block instead.")
     if not check["ok"]:
         db.set_idea_status(idea_id, "rejected")
         raise FactCheckFailed(
@@ -296,6 +306,15 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     config.validate()
     # Prefer ideas already queued (the daily Anthropic Routine inserts these straight into
     # Supabase). Only generate via the Gemini/Groq fallback when the queue is empty.
+    # BEFORE reading the queue: a stale idea reused as "today's digest" is worse than no idea
+    # at all on a daily-news channel. Best-effort — bookkeeping must never block a run (rule 14).
+    try:
+        expired = db.expire_stale_pending_ideas()
+        if expired:
+            log.info("make_on_demand: aged out %d stale pending idea(s).", expired)
+    except Exception as e:  # noqa: BLE001
+        log.warning("make_on_demand: could not age out stale ideas (%s)", e)
+
     existing = db.get_pending_ideas()
     if existing:
         n = len(existing)

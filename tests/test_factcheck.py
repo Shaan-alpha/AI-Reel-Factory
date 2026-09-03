@@ -287,3 +287,58 @@ def test_a_block_logs_the_raw_checker_reply(monkeypatch, caplog):
     assert out["ok"] is False
     assert any("the 40% figure is invented" in r.getMessage() and "checked" in r.getMessage()
                for r in caplog.records), "the raw checker JSON must be logged on a block"
+
+
+# --- the gate's own quota (2026-09-03 audit) ----------------------------------------------
+# Ideation + scriptwriter + this gate share ONE 20/day grounded budget on gemini-2.5-flash. A
+# 3-reel run costs 7 calls, so a busy day exhausts it — and with FACTCHECK_STRICT=false the gate
+# then fails OPEN, publishing unverified reels. A second free key gives the gate its own budget.
+
+def test_verify_spends_the_dedicated_key_when_one_is_set(monkeypatch):
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.setenv("FACTCHECK_API_KEY", "checker-key")
+    seen = {}
+
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+        seen["api_key"] = api_key
+        return '{"checked": 2, "blocking": [], "minor": [], "verdict": "pass"}'
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    assert factcheck.verify("a body")["ok"] is True
+    assert seen["api_key"] == "checker-key"
+
+
+def test_verify_falls_back_to_the_shared_key_when_none_is_set(monkeypatch):
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.delenv("FACTCHECK_API_KEY", raising=False)
+    seen = {}
+
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+        seen["api_key"] = api_key
+        return '{"checked": 1, "blocking": [], "minor": [], "verdict": "pass"}'
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    factcheck.verify("a body")
+    assert seen["api_key"] is None  # None => llm uses GEMINI_API_KEY
+
+
+def test_a_failed_checker_is_reported_as_unverified(monkeypatch):
+    """produce_one has to be able to TELL the operator the gate did not run — a fail-open that
+    looks exactly like a pass is how unverified reels ship silently (audit 2026-09-03)."""
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.setenv("FACTCHECK_STRICT", "false")
+
+    def _boom(*a, **k):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _boom)
+    out = factcheck.verify("a body")
+    assert out["ok"] is True                      # fail-open, as configured
+    assert factcheck.gate_ran(out) is False       # ...but visibly so
+    assert "checker-failed" in out["reason"]
+
+
+def test_gate_ran_is_true_for_a_real_verdict(monkeypatch):
+    assert factcheck.gate_ran({"reason": "pass"}) is True
+    assert factcheck.gate_ran({"reason": "fail"}) is True
+    assert factcheck.gate_ran({"reason": "disabled"}) is False

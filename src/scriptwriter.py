@@ -145,7 +145,17 @@ def _parse_llm_json(raw: str) -> dict:
 def _generate_script_json(prompt: str) -> dict:
     """Write the script with live web-grounding (verifies facts), falling back to ungrounded
     JSON mode if grounding is unavailable or returns unusable JSON. Accuracy guard for a public
-    channel — grounding lets the model catch a fabricated premise instead of repeating it."""
+    channel — grounding lets the model catch a fabricated premise instead of repeating it.
+
+    ENABLE_GROUNDED_SCRIPT=false skips the grounded attempt entirely. It exists because this call
+    is one of the 7 a 3-reel run spends from the single 20/day grounded budget shared with
+    ideation and `factcheck.verify` (audit 2026-09-03) — and when that budget runs dry it is the
+    fact-check GATE that stops working. If one of the two has to go, the gate is worth more: it
+    re-verifies the finished script, so a fabricated premise is still caught downstream. Default
+    stays ON — this is a lever for a busy day, not a silent quality cut."""
+    if not config.get_bool("ENABLE_GROUNDED_SCRIPT", True):
+        log.info("scriptwriter: grounded write disabled; using ungrounded JSON mode.")
+        return _parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048))
     try:
         data = _parse_llm_json(llm.generate_grounded(prompt, max_tokens=2048))
         if (data.get("script_body") or "").strip():
@@ -298,7 +308,10 @@ def _ensure_sources(caption: str, sources: list[str]) -> str:
     missing = [s for s in sources if s and s not in caption]
     if not missing:
         return caption
-    block = "Sources: " + " | ".join(missing)
+    # One per line, not " | "-joined: since the 2026-09-03 sourcing fix these are Google News
+    # article links, measured at 249-884 chars each, so a joined pair is an unreadable wall in
+    # the YouTube description.
+    block = "Sources:" + "".join("\n" + m for m in missing)
     return f"{caption.rstrip()}\n\n{block}" if caption.strip() else block
 
 

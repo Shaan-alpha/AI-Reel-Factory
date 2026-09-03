@@ -184,3 +184,31 @@ def test_insert_post_stamps_published_at(monkeypatch):
     from datetime import datetime
     parsed = datetime.fromisoformat(fake.row["published_at"])
     assert parsed.tzinfo is not None, "must be timezone-aware or the IST window comparison drifts"
+
+
+# --- retention levers (2026-09-03 audit) --------------------------------------------------
+# `analytics` is an append-only time series: one snapshot per published post per collect_stats
+# run. Measured on the live DB 2026-09-03: 4,049 rows for 76 posts, growing ~76/day. That is far
+# from Supabase's 500 MB, so pruning is a LEVER, not a default — history is not deleted unless
+# the operator asks for it.
+
+def test_prune_analytics_is_off_unless_asked(monkeypatch):
+    from src import db as dbm
+
+    def _never(*a, **k):
+        raise AssertionError("nothing may be deleted without an explicit retention setting")
+
+    monkeypatch.setattr(dbm, "get_client", _never)
+    monkeypatch.delenv("ANALYTICS_KEEP_PER_POST", raising=False)
+    assert dbm.prune_analytics() == 0
+
+
+def test_expire_stale_pending_ideas_is_off_unless_configured(monkeypatch):
+    from src import db as dbm
+
+    def _never(*a, **k):
+        raise AssertionError("no DB call when the age-out is disabled")
+
+    monkeypatch.setattr(dbm, "get_client", _never)
+    monkeypatch.setenv("IDEA_MAX_AGE_HOURS", "0")
+    assert dbm.expire_stale_pending_ideas() == 0

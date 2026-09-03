@@ -278,15 +278,25 @@ def _cloudflare_image(prompt: str, dest: str) -> bool:
         return False
 
 
-def _fetch_image(keyword: str, dest: str, seed: int, source: str) -> bool:
-    """Put one image at dest: AI (if source='ai' and CF set) else a Pexels photo. Bool = success."""
+def _fetch_image(keyword: str, dest: str, seed: int, source: str,
+                 variant: str = "") -> bool:
+    """Put one image at dest: AI (if source='ai' and CF set) else a Pexels photo. Bool = success.
+
+    `variant` distinguishes one reel from another. `_pexels_photo_urls` is lru_cached for the
+    life of the process and this used to index it by cut number alone, so two reels in the
+    same batch that shared a keyword ("indian flag") drew the IDENTICAL photo at the identical
+    cut. Offsetting by a hash of the variant keeps the cache (it saves API calls) while giving
+    each reel its own starting point — and stays deterministic for a given (variant, cut), so
+    a retry re-renders the same reel rather than a different one (rule 12).
+    """
     if source == "ai" and _cloudflare_image(_img_prompt(keyword), dest):
         return True
     urls = _pexels_photo_urls(keyword)
     if not urls:
         return False
+    offset = int(hashlib.sha1(str(variant).encode("utf-8")).hexdigest()[:8], 16) if variant else 0
     try:
-        _download(urls[seed % len(urls)], dest)
+        _download(urls[(seed + offset) % len(urls)], dest)
         return os.path.getsize(dest) > 1000
     except Exception as e:  # noqa: BLE001
         log.warning("visuals: photo download failed for %r (%s)", keyword, e)
@@ -319,7 +329,8 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
         raise RuntimeError(f"ken burns failed ({proc.returncode}): {proc.stderr[-400:]}")
 
 
-def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str) -> list[str]:
+def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str,
+                       variant: str = "") -> list[str]:
     """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made.
 
     One image per cut the assembler will actually make. Sizing this off a local guess (it was
@@ -334,7 +345,7 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
     for i in range(n):
         kw = keywords[i % len(keywords)]
         img = os.path.join(out_dir, f"img_{i:02d}.jpg")
-        if not _fetch_image(kw, img, i, source):
+        if not _fetch_image(kw, img, i, source, variant=variant):
             continue
         clip = os.path.join(out_dir, f"imgclip_{i:02d}.mp4")
         try:
@@ -362,7 +373,11 @@ def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> lis
     source = str(config.get("VISUAL_SOURCE", "photos")).lower()
     if source in ("photos", "ai"):
         try:
-            return _fetch_image_broll(keywords, target_seconds, out_dir, source)
+            # The work dir is per-idea (production names it idea_<id>), so it is a stable,
+            # already-available identifier for "which reel is this" — no new parameter needed
+            # at the call site, and identical across a retry of the same reel.
+            return _fetch_image_broll(keywords, target_seconds, out_dir, source,
+                                      variant=os.path.basename(os.path.normpath(out_dir)))
         except Exception as e:  # noqa: BLE001 — fall back to stock video (rule 11)
             log.warning("visuals: %s source failed (%s); falling back to stock video", source, e)
 

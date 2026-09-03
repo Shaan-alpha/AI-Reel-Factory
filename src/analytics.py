@@ -74,6 +74,16 @@ def collect_stats() -> int:
         except Exception as e:  # noqa: BLE001 — one bad row shouldn't stop the pull
             log.warning("analytics: failed to record %s (%s)", vid, e)
     log.info("analytics: recorded %d snapshots.", recorded)
+
+    # Retention is a no-op unless ANALYTICS_KEEP_PER_POST is set (see db.prune_analytics), but it
+    # has to be invoked from somewhere or the setting is one an operator can tune with no effect.
+    # Best-effort: housekeeping must never cost us the snapshots we just pulled (rule 14).
+    try:
+        dropped = db.prune_analytics()
+        if dropped:
+            log.info("analytics: pruned %d old snapshot(s).", dropped)
+    except Exception as e:  # noqa: BLE001
+        log.warning("analytics: retention pass failed (%s); snapshots are recorded regardless", e)
     return recorded
 
 

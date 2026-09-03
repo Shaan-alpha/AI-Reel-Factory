@@ -121,7 +121,7 @@ def test_fetch_broll_no_results_raises(monkeypatch, tmp_path):
 def test_fetch_broll_photos_makes_kenburns_clips(monkeypatch, tmp_path):
     monkeypatch.delenv("VISUAL_SOURCE", raising=False)  # default = photos
 
-    def fake_fetch_image(kw, dest, seed, source):
+    def fake_fetch_image(kw, dest, seed, source, variant=""):
         with open(dest, "wb") as f:
             f.write(b"\xff" * 2048)
         return True
@@ -200,7 +200,7 @@ def test_live_pexels_fetch(tmp_path):
 # --- B-roll must cover every cut, not recycle ---------------------------------------------
 
 def _stub_image_pipeline(monkeypatch):
-    def fake_fetch_image(kw, dest, seed, source):
+    def fake_fetch_image(kw, dest, seed, source, variant=""):
         with open(dest, "wb") as f:
             f.write(b"\xff" * 2048)
         return True
@@ -272,3 +272,36 @@ def test_video_broll_coverage_uses_assemblys_real_slice_length(monkeypatch, tmp_
     assert len(paths) >= assembly.slice_count(target), (
         f"downloaded {len(paths)} clips for {assembly.slice_count(target)} cuts — "
         "assembly will recycle the difference")
+
+
+# --- photo variety across a batch (2026-09-03 audit) --------------------------------------
+# _pexels_photo_urls is lru_cached for the whole process, and _fetch_image indexed it by the CUT
+# number. Two reels in one batch sharing a keyword ("indian flag") therefore drew the identical
+# photo at the identical cut. The cache is worth keeping (it saves API calls); the INDEX is what
+# has to differ per reel.
+
+def test_two_reels_sharing_a_keyword_do_not_get_the_same_photo(monkeypatch):
+    urls = tuple(f"https://img/{i}.jpg" for i in range(8))
+    monkeypatch.setattr(visuals, "_pexels_photo_urls", lambda kw: urls)
+    picked = []
+    monkeypatch.setattr(visuals, "_download", lambda url, dest: picked.append(url))
+    monkeypatch.setattr(visuals.os.path, "getsize", lambda p: 5000)
+
+    visuals._fetch_image("indian flag", "/tmp/a.jpg", 0, "photos", variant="idea-1")
+    visuals._fetch_image("indian flag", "/tmp/b.jpg", 0, "photos", variant="idea-2")
+
+    assert picked[0] != picked[1], "the same cut of two reels must not reuse one photo"
+
+
+def test_the_same_reel_and_cut_is_still_deterministic(monkeypatch):
+    """Rule 12: a cron retry must re-render the same reel, not a different one."""
+    urls = tuple(f"https://img/{i}.jpg" for i in range(8))
+    monkeypatch.setattr(visuals, "_pexels_photo_urls", lambda kw: urls)
+    picked = []
+    monkeypatch.setattr(visuals, "_download", lambda url, dest: picked.append(url))
+    monkeypatch.setattr(visuals.os.path, "getsize", lambda p: 5000)
+
+    visuals._fetch_image("indian flag", "/tmp/a.jpg", 2, "photos", variant="idea-7")
+    visuals._fetch_image("indian flag", "/tmp/b.jpg", 2, "photos", variant="idea-7")
+
+    assert picked[0] == picked[1]

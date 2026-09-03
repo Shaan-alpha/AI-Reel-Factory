@@ -141,5 +141,10 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 
 ## Current status
 
-- **Phase:** 1 (MVP) — **foundation only so far** (docs + rules). No pipeline code yet.
+- **Phase:** 1 (MVP) — **built and live.** The full chain (ideation → Telegram approval →
+  script → fact-check → voice → visuals → assembly → captions → YouTube) runs unattended; 76
+  Shorts published as of 2026-09-03. Every module in [src/](src/) is implemented and tested.
+- **Primary trigger is ON-DEMAND**, not cron: run the `make-short` workflow (or send
+  `/makeshort` to the Telegram bot) and approve from the digest. `production.yml`'s schedule
+  stays commented out on purpose.
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.

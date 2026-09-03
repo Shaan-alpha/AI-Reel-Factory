@@ -22,8 +22,8 @@ def test_require_raises_when_missing(monkeypatch):
 
 
 def test_get_falls_back_to_default():
-    # CHANNEL_NAME has a built-in default even if the env var is unset.
-    assert config.get("CHANNEL_NAME") == os.environ.get("CHANNEL_NAME", "But It Matters")
+    # NICHE has a built-in default even if the env var is unset.
+    assert config.get("NICHE") == os.environ.get("NICHE", "impact-news")
 
 
 def test_validate_reports_all_missing(monkeypatch):
@@ -55,8 +55,8 @@ def test_get_treats_a_whitespace_only_env_var_as_absent(monkeypatch):
 
 
 def test_get_prefers_DEFAULTS_over_the_caller_default_for_an_empty_env_var(monkeypatch):
-    monkeypatch.setenv("CHANNEL_NAME", "")
-    assert config.get("CHANNEL_NAME", "caller-default") == "But It Matters"
+    monkeypatch.setenv("NICHE", "")
+    assert config.get("NICHE", "caller-default") == "impact-news"
 
 
 def test_get_still_returns_a_real_value(monkeypatch):

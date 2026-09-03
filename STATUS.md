@@ -5,7 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **366 pass, 4 skipped** — re-measured 2026-08-25)
+**Version:** 0.17.0 (**PUBLIC**) · _Full audit: the gate that switched itself off_ (fact-check fail-open now alerts + can hold its own quota; stale-idea age-out; per-reel photo variety; 17 stacked `[Unreleased]` blocks turned into a real version history; **460 pass, 5 skipped** — measured 2026-09-03)
+  ↳ the 0.5.0 label was a STATUS-only number: the last git tag was `v0.2.0`. `v0.17.0` is tagged.
 **Last updated:** 2026-09-03
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
   ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
@@ -29,7 +30,7 @@
 | YouTube OAuth | ✅ Verified (upload+readonly); token bound to the correct **@butitmatters** channel |
 | YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
 | YouTube channel *title* | ✅ Renamed to **But It Matters** (matches handle + CHANNEL_NAME) |
-| Pipeline logic (modules) | 🟡 `db.py` + `llm.py` done + tested; other modules still stubs |
+| Pipeline logic (modules) | ✅ **All modules implemented + tested** — see the table below (this row said "still stubs" until 2026-09-03, contradicting it) |
 | Local `.venv` | ✅ pytest + supabase + google-genai + groq + edge-tts (suite green) |
 | FFmpeg (system dep) | ✅ Installed locally — winget `Gyan.FFmpeg` 8.1.1 (assembly module) |
 
@@ -52,7 +53,7 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-- ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (85 pass).
+- ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**460 pass, 5 skipped** — 2026-09-03).
 
 ### Operating model: ON-DEMAND (chosen 2026-06-09)
 Instead of (or before) scheduled crons, the primary trigger is the **`make-short` workflow**
@@ -96,6 +97,42 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-09-03 — Full audit, start to end
+
+Read every module, both cron paths, the Vercel bot, the docs, the workflows and the live
+database. **460 pass, 5 skipped** (was 440 + 5). Findings, worst first:
+
+- **The accuracy gate switched itself off on busy days, silently.** Ideation (1/run), the
+  scriptwriter (1/reel) and `factcheck.verify` (1/reel) share ONE 20/day free grounded budget on
+  `gemini-2.5-flash`. A 3-reel run spends 7, so a third run exhausts it — reproduced live
+  (`429 … limit: 20`). With `FACTCHECK_STRICT=false` (default) the gate then returns `ok=True`,
+  and `produce_one` read only `ok` — so an unverified reel shipped looking exactly like a verified
+  one. Now `factcheck.gate_ran()` separates a verdict from an outage, `produce_one` Telegram-alerts
+  on a fail-open, `FACTCHECK_API_KEY` can give the gate its own free key, and
+  `ENABLE_GROUNDED_SCRIPT=false` reclaims the scriptwriter's call for it.
+- **CLAUDE.md — the file every agent must read first — said "No pipeline code yet."** It was
+  written before the build and never updated; 76 Shorts and 5,100 lines of pipeline later it was
+  still the first thing a cold agent read. STATUS also contradicted itself (Snapshot said "other
+  modules still stubs" while the table below marked all ✅) and carried two stale test counts.
+- **Versioning had collapsed:** 17 stacked `[Unreleased]` blocks, STATUS claiming 0.5.0, last real
+  tag `v0.2.0` (2026-06-10). Blocks are now dated from git and versioned from their own
+  subsections; **`v0.17.0` is tagged**. No retroactive tags — those releases were never cut.
+- **The Telegram bot's `APPROVAL_CAP` defaulted to 5 vs the pipeline's 3**, which would strand
+  approved-but-unproducible ideas at 'approved' forever and answer "capped" to later taps.
+- **Nothing aged out stale pending ideas**, so a two-day-old story could headline today's digest.
+- Smaller: two reels in a batch could draw identical photos; source blocks were an unreadable
+  wall; three GitHub Actions were on the deprecated Node 20; `production.yml` had no job timeout;
+  `analytics.yml` installed Kokoro + Whisper for one API call; three settings were read by nothing.
+
+**Verified healthy, not changed:** secrets hygiene (`.env`, `client_secret*.json` gitignored AND
+untracked); all deps pinned and importable; assets committed; DB clean (0 stuck approved/pending,
+76 posts / 123 ideas); publish idempotent and correct about the irreversible-upload case.
+
+**Known and deliberately not fixed:** citations are Google News article links (249-884 chars) —
+the modern `AU_yqL…` id is opaque, so the publisher URL cannot be recovered; grounded publisher
+URLs are already preferred when quota allows. `_GEMINI_TTS_RATE` stays hardcoded at 24000 (matches
+the API's declared mime type today, re-check if a TTS model changes).
 
 ### 2026-09-03 — The digest was starving on invented citations (and the captions were wrong)
 

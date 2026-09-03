@@ -441,3 +441,44 @@ def test_truncation_is_unchanged_when_there_is_no_payoff_turn():
 def test_truncation_leaves_a_short_script_alone():
     body = "Short and sweet. Here's why it matters: it just does."
     assert scriptwriter._truncate_to_words(body, 80) == body
+
+
+# --- grounded budget control (2026-09-03 audit) -------------------------------------------
+# The scriptwriter's grounded write is 1 of the 7 calls a 3-reel run spends from the shared
+# 20/day bucket. When that bucket runs dry the FACT-CHECK gate is what stops working, and the
+# gate matters more than grounding the first draft (it re-verifies the finished script anyway).
+# So this is a knob the operator can turn, not a silent default change: grounding stays ON.
+
+def test_grounded_write_is_on_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded",
+                        lambda *a, **k: calls.append("grounded") or '{"script_body": "b"}')
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: '{"script_body": "u"}')
+    assert scriptwriter._generate_script_json("p")["script_body"] == "b"
+    assert calls == ["grounded"]
+
+
+def test_grounded_write_can_be_switched_off_to_save_the_gates_quota(monkeypatch):
+    monkeypatch.setenv("ENABLE_GROUNDED_SCRIPT", "false")
+    calls = []
+    # Recording, not raising: _generate_script_json catches everything and falls back, so a
+    # raising double would be swallowed and the test would pass without the feature.
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded",
+                        lambda *a, **k: calls.append("grounded") or '{"script_body": "b"}')
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: '{"script_body": "ungrounded"}')
+
+    assert scriptwriter._generate_script_json("p")["script_body"] == "ungrounded"
+    assert calls == [], "no grounded request may be sent when the toggle is off"
+
+
+def test_sources_are_listed_one_per_line(monkeypatch):
+    """Citations became Google News article links after the 2026-09-03 sourcing fix — 249-884
+    chars each (measured). Joined with ' | ' two of them are an unreadable wall in the YouTube
+    description; one per line at least keeps the block scannable."""
+    caption = scriptwriter._ensure_sources("Hook.", ["https://a.example/1", "https://b.example/2"])
+    assert caption.endswith("Sources:\nhttps://a.example/1\nhttps://b.example/2")
+
+
+def test_sources_already_cited_are_not_repeated():
+    caption = scriptwriter._ensure_sources("See https://a.example/1", ["https://a.example/1"])
+    assert caption == "See https://a.example/1"
