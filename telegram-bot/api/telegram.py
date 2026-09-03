@@ -197,11 +197,18 @@ _DECISION_TEXT = {
 }
 
 
+# Must match the pipeline: src/approval.py and both workflows default APPROVAL_CAP to 3, and
+# src/production.py caps PRODUCTION at DAILY_REEL_CAP (3). Defaulting to 5 here meant that with
+# the var unset on Vercel you could approve 5, only 3 would ever be produced, and the surplus sat
+# at 'approved' forever — counting toward the cap and answering "capped" to every later tap.
+_DEFAULT_APPROVAL_CAP = 3
+
+
 def approval_cap() -> int:
     try:
-        return int(_env("APPROVAL_CAP", "5") or "5")
+        return int(_env("APPROVAL_CAP") or _DEFAULT_APPROVAL_CAP)
     except ValueError:
-        return 5
+        return _DEFAULT_APPROVAL_CAP
 
 
 def approved_count() -> int:

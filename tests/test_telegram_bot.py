@@ -132,3 +132,25 @@ def test_posts_today_filters_on_the_ist_window(bot, monkeypatch):
     bot.posts_today()
     assert "published_at=gte." in seen["path"]
     assert "order=published_at.desc.nullslast" in seen["path"], seen["path"]
+
+
+# --- the cap must match the pipeline's (2026-09-03 audit) ---------------------------------
+# The webhook applies approvals; src/production caps PRODUCTION at DAILY_REEL_CAP (3) and both
+# workflows set APPROVAL_CAP=3. This module defaulted to 5, so with the var unset on Vercel you
+# could approve 5, only 3 would ever be produced, and the surplus would sit at 'approved'
+# forever — counting toward the cap and answering "capped" to every later tap. That is the exact
+# leak src/production.py:_release_failed_idea was written to clean up after.
+
+def test_approval_cap_default_matches_the_pipelines(bot, monkeypatch):
+    monkeypatch.delenv("APPROVAL_CAP", raising=False)
+    assert bot.approval_cap() == 3
+
+
+def test_approval_cap_reads_the_env_var(bot, monkeypatch):
+    monkeypatch.setenv("APPROVAL_CAP", "4")
+    assert bot.approval_cap() == 4
+
+
+def test_approval_cap_survives_a_junk_value(bot, monkeypatch):
+    monkeypatch.setenv("APPROVAL_CAP", "not-a-number")
+    assert bot.approval_cap() == 3
