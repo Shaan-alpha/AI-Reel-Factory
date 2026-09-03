@@ -357,3 +357,40 @@ def test_burned_text_strips_delivery_tags():
 def test_burned_text_survives_a_tag_only_string():
     """All-tag input must yield nothing to draw rather than an empty box."""
     assert subtitles._hook_banner_text("[sarcastic]") == ""
+
+
+# --- number tokens (2026-09-03) -----------------------------------------------------------
+# Measured on real narration: faster-whisper emits "1,270" as the two word tokens '1' and ',270'
+# (and "2.4" as '2' and '.4'). _clean_caption_word then strips the leading punctuation, so the
+# burned captions read "authority 1" / "270 people died" and "and 2 4" — a news channel showing
+# 270 deaths when the script says 1,270. The audio is correct; only the caption layer was wrong.
+
+def test_merge_number_tokens_rejoins_a_thousands_separator():
+    words = [(0.0, 0.4, "1"), (0.4, 0.9, ",270"), (0.9, 1.3, "people")]
+    assert subtitles._merge_number_tokens(words) == [(0.0, 0.9, "1,270"), (0.9, 1.3, "people")]
+
+
+def test_merge_number_tokens_rejoins_a_decimal_point():
+    words = [(0.0, 0.3, "2"), (0.3, 0.7, ".4"), (0.7, 1.1, "billion")]
+    assert subtitles._merge_number_tokens(words) == [(0.0, 0.7, "2.4"), (0.7, 1.1, "billion")]
+
+
+def test_merge_number_tokens_leaves_sentence_punctuation_alone():
+    """'likes.' does not end in a digit, so a following '.4' must not be glued onto it."""
+    words = [(0.0, 0.5, "likes."), (0.5, 0.9, ".4"), (0.9, 1.2, "percent")]
+    assert subtitles._merge_number_tokens(words) == words
+
+
+def test_merge_number_tokens_handles_a_number_in_three_groups():
+    words = [(0.0, 0.2, "1"), (0.2, 0.4, ",270"), (0.4, 0.6, ",500")]
+    assert subtitles._merge_number_tokens(words) == [(0.0, 0.6, "1,270,500")]
+
+
+def test_captions_keep_a_number_whole(monkeypatch):
+    """End to end through the caption grouping: the burned text must never split a figure."""
+    monkeypatch.setenv("CAPTION_WORDS", "3")
+    words = subtitles._merge_number_tokens(
+        [(0.0, 0.5, "authority."), (0.5, 0.7, "1"), (0.7, 1.0, ",270"),
+         (1.0, 1.4, "people"), (1.4, 1.8, "died")])
+    texts = [t for _s, _e, t in subtitles._build_events(words)]
+    assert texts == ["authority 1,270 people", "died"]

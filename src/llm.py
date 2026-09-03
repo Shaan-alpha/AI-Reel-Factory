@@ -130,6 +130,52 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = No
     instead of competing for the shared 20/day bucket (rule 13) — but only among models that HAVE
     a grounded allowance, which today is just the default. See factcheck._model().
     """
+    return _gen_gemini_grounded_full(prompt, max_tokens=max_tokens, model=model)[0]
+
+
+def _grounded_sources(resp) -> list[dict]:
+    """The REAL Google Search citations behind a grounded reply: [{uri, domain, spans}].
+
+    This is the metadata the module used to discard. Without it, callers had no way to learn
+    which pages the search actually returned, so `ideation_fallback` asked the MODEL for source
+    URLs — and a model cannot recall URLs, so it produced plausible-looking ones with placeholder
+    ids (`articleshow/115000000.cms`, `world-asia-68700000`). Measured 2026-09-03: every such URL
+    404'd, the liveness probe dropped the ideas, and the on-demand run either shipped a digest of
+    one or died with "no fresh ideas to seed".
+
+    `spans` are (start, end) character offsets into the reply text, from `grounding_supports`, so
+    a caller emitting several objects in one reply can attribute each citation to the right one.
+    A chunk with no support keeps an empty span list: it is still a real article, merely
+    unattributable. Fail-soft (rule 11) — a reply with no grounding metadata yields [].
+    """
+    try:
+        gm = resp.candidates[0].grounding_metadata
+        chunks = list(gm.grounding_chunks or [])
+    except (AttributeError, IndexError, TypeError):
+        return []
+
+    spans: dict[int, list[tuple[int, int]]] = {}
+    try:
+        for sup in gm.grounding_supports or []:
+            seg = sup.segment
+            for idx in sup.grounding_chunk_indices or []:
+                spans.setdefault(int(idx), []).append((int(seg.start_index), int(seg.end_index)))
+    except (AttributeError, TypeError):  # noqa: BLE001 — spans are a bonus, citations are not
+        spans = {}
+
+    out: list[dict] = []
+    for i, chunk in enumerate(chunks):
+        web = getattr(chunk, "web", None)
+        uri = (getattr(web, "uri", "") or "").strip()
+        if uri:
+            out.append({"uri": uri, "domain": (getattr(web, "title", "") or "").strip(),
+                        "spans": spans.get(i, [])})
+    return out
+
+
+def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int,
+                              model: str | None = None) -> tuple[str, list[dict]]:
+    """One grounded call — returns (text, real citations). See `_grounded_sources`."""
     from google.genai import types
 
     chosen = model or _GEMINI_GROUNDED_MODEL
@@ -143,7 +189,7 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = No
     resp = _gemini_client().models.generate_content(
         model=chosen, contents=prompt, config=cfg
     )
-    return resp.text or ""
+    return resp.text or "", _grounded_sources(resp)
 
 
 def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None = None) -> str:
@@ -164,6 +210,24 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
     if not text or not text.strip():
         raise RuntimeError("llm.generate_grounded: empty response")
     return text
+
+
+def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
+                                  model: str | None = None) -> tuple[str, list[dict]]:
+    """Like `generate_grounded`, but also returns the search's REAL citation URLs.
+
+    Use this wherever the reply is supposed to be SOURCED. Asking the model to write the URLs
+    into its own answer does not work — it invents them — so the citations must come from the
+    grounding metadata, which is what this exposes (see `_grounded_sources`).
+    """
+    def _attempt(p, *, json=False, max_tokens=max_tokens):  # noqa: ARG001 — _call_with_retry's shape
+        return _gen_gemini_grounded_full(p, max_tokens=max_tokens, model=model)
+
+    text, sources = _call_with_retry("gemini-grounded", _attempt, prompt,
+                                     json=False, max_tokens=max_tokens)
+    if not text or not text.strip():
+        raise RuntimeError("llm.generate_grounded: empty response")
+    return text, sources
 
 
 # Upstream states worth ONE retry: capacity and quota-window, not "your request is wrong".

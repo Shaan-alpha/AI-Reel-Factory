@@ -21,8 +21,13 @@ def _offline_source_check(monkeypatch):
     fixtures — which cite made-up hosts like https://x.example — would each make a real HTTP
     request and wait for DNS to time out. The liveness tests below re-enable the check and stub
     the probe.
+
+    Same for the source SEARCH: an under-sourced idea now queries the Google News RSS search to
+    top itself up, which is a real network call. Tests that exercise that path install their own
+    stub, which replaces this one.
     """
     monkeypatch.setenv("ENABLE_SOURCE_CHECK", "false")
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: [])
 
 
 def _idea(title, n_sources=2, **over):
@@ -41,10 +46,20 @@ def _idea(title, n_sources=2, **over):
 def _patch(monkeypatch, ideas, pending=None):
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: pending or [])
     monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])  # no network in tests
-    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: [])    # no network in tests
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])      # no network in tests
+    # The search top-up is a REAL rescue path (it is what keeps an under-sourced idea
+    # alive), so it has to be stubbed off here or these fixtures would hit the network and
+    # the "drop the unsourced idea" tests would never see an unsourced idea.
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: [])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])  # no DB in tests
-    # _produce_ideas tries grounded research first; mock that as the primary path.
-    monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": ideas}))
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])         # no Groq in tests
+    # _produce_ideas tries grounded research first; mock that as the primary path. It returns
+    # (text, real citations) since 2026-09-03 — those citations are what stopped ideation
+    # having to ask the model for source URLs it cannot know.
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: (json.dumps({"ideas": ideas}), []))
+    # A thin grounded pass now tops up from the ungrounded call; keep that offline too.
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas",
                         lambda rows: captured.setdefault("rows", rows) or rows)
@@ -100,8 +115,13 @@ def test_thin_digest_raises(monkeypatch):
 def test_parses_fenced_json(monkeypatch):
     ideas = [_idea(f"f{i}") for i in range(6)]
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [])
-    monkeypatch.setattr(fb.llm, "generate_grounded",
-                        lambda *a, **k: "```json\n" + json.dumps({"ideas": ideas}) + "\n```")
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: ("```json\n" + json.dumps({"ideas": ideas}) + "\n```", []))
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     assert fb.run_fallback_ideation() == 6
 
@@ -117,10 +137,13 @@ def test_generate_ideas_on_demand_no_pending_guard(monkeypatch):
     # generate_ideas must NOT skip just because pending ideas already exist
     monkeypatch.setattr(fb.db, "get_pending_ideas", lambda: [{"id": 1}])
     monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
-    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
     ideas = [_idea(f"od{i}", est_score=0.1 * i) for i in range(8)]
-    monkeypatch.setattr(fb.llm, "generate_grounded", lambda *a, **k: json.dumps({"ideas": ideas}))
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: (json.dumps({"ideas": ideas}), []))
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
     n = fb.generate_ideas(3)
@@ -131,10 +154,11 @@ def test_generate_ideas_on_demand_no_pending_guard(monkeypatch):
 
 def test_generate_ideas_raises_when_none_valid(monkeypatch):
     monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
-    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
     empty = lambda *a, **k: json.dumps({"ideas": []})
-    monkeypatch.setattr(fb.llm, "generate_grounded", empty)  # grounded empty → falls back...
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources", empty)  # grounded empty → falls back...
     monkeypatch.setattr(fb.llm, "generate", empty)            # ...ungrounded also empty
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     with pytest.raises(RuntimeError, match="could not generate"):
@@ -150,11 +174,12 @@ def test_parse_ideas_tolerates_raw_control_chars():
 
 def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
     monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: ["NASDAQ", "ISRO"])
-    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
     def _boom(*a, **k):
         raise RuntimeError("grounding unavailable")
-    monkeypatch.setattr(fb.llm, "generate_grounded", _boom)
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources", _boom)
     monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": [_idea("Fallback")]}))
     out = fb._produce_ideas(3)
     assert out and out[0]["title"] == "Fallback"
@@ -162,10 +187,12 @@ def test_produce_ideas_falls_back_when_grounding_fails(monkeypatch):
 
 def test_produce_ideas_falls_back_on_malformed_grounded_json(monkeypatch):
     monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
-    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
     # grounded returns broken JSON (missing comma / truncated) → must fall back, not crash
-    monkeypatch.setattr(fb.llm, "generate_grounded",
-                        lambda *a, **k: '{"ideas": [{"title": "Broken" "hook": "x"}]')
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: ('{"ideas": [{"title": "Broken" "hook": "x"}]', []))
     monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": [_idea("Clean")]}))
     out = fb._produce_ideas(3)
     assert out and out[0]["title"] == "Clean"
@@ -243,7 +270,7 @@ def test_live_real_llm_ideation(monkeypatch):
 
 def test_produce_ideas_runs_two_stages(monkeypatch):
     monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
-    monkeypatch.setattr(fb.news, "fetch_headlines", lambda *a, **k: ["Real headline - PTI"])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [{"title": "Real headline - PTI", "url": "https://feed.example/a", "source": "PTI"}])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
     calls = {"select": 0}
     def _sel(target, headlines, trending, winners):
@@ -253,8 +280,9 @@ def test_produce_ideas_runs_two_stages(monkeypatch):
     captured = {}
     def _grounded(prompt, **k):
         captured["prompt"] = prompt
-        return json.dumps({"ideas": [_idea("Expanded", share_score=0.9)]})
-    monkeypatch.setattr(fb.llm, "generate_grounded", _grounded)
+        return json.dumps({"ideas": [_idea("Expanded", share_score=0.9)]}), []
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources", _grounded)
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
     out = fb._produce_ideas(3)
     assert calls["select"] == 1
     assert out and out[0]["title"] == "Expanded"
@@ -440,3 +468,268 @@ def test_source_check_can_be_disabled(monkeypatch):
     ideas = [{"title": "Unchecked", "hook": "h", "angle": "a",
               "sources": ["https://gone.example/1", "https://gone.example/2"]}]
     assert len(fb._validate_and_clean(ideas)) == 1
+
+
+# --- REAL citations (2026-09-03) ----------------------------------------------------------
+# Root cause of both the failed on-demand run and the one-idea digest: the prompt asked the model
+# for source URLs and the model invented them (`articleshow/115000000.cms`), so `_url_is_dead`
+# culled every idea. Sources must come from things we actually fetched — the grounded search's
+# own citations and the news feed's article links — not from the model's memory.
+
+_STORIES = [
+    {"title": "Rescue efforts continue as Nepal-China flood death toll surpasses 1,270 - Al Jazeera",
+     "url": "https://news.google.com/rss/articles/NEPAL1", "source": "Al Jazeera"},
+    {"title": "Nepal floods: 1,270 dead as rescue teams reach cut-off villages - BBC",
+     "url": "https://news.google.com/rss/articles/NEPAL2", "source": "BBC"},
+    {"title": "Belgian PM explains chocolate India Gate replica for Modi - Moneycontrol",
+     "url": "https://news.google.com/rss/articles/CHOCO", "source": "Moneycontrol"},
+]
+
+
+def test_match_story_urls_finds_the_feed_articles_behind_an_idea():
+    idea = {"title": "Nepal-China Floods: 1,270+ Dead", "hook": "The toll keeps climbing.",
+            "angle": "Why the world looked away."}
+    assert fb._match_story_urls(idea, _STORIES) == [
+        "https://news.google.com/rss/articles/NEPAL1",
+        "https://news.google.com/rss/articles/NEPAL2",
+    ]
+
+
+def test_match_story_urls_ignores_an_unrelated_story():
+    """Citing an article that does not support the claim is still a bad citation (docs/08 §1)."""
+    idea = {"title": "Belgian Chocolate India Gate Snub", "hook": "It never arrived.",
+            "angle": "Diplomatic gifts are never just gifts."}
+    assert fb._match_story_urls(idea, _STORIES) == [
+        "https://news.google.com/rss/articles/CHOCO"]
+
+
+def test_match_story_urls_needs_more_than_one_shared_word():
+    """A single common word ('india') is coincidence, not the same story."""
+    idea = {"title": "India Signs New Trade Pact", "hook": "Tariffs move.",
+            "angle": "Who pays."}
+    assert fb._match_story_urls(idea, _STORIES) == []
+
+
+def test_attach_real_sources_prefers_the_grounded_publisher_url(monkeypatch):
+    """Operator chose 'both, publisher first': a resolved publisher URL reads better in a YouTube
+    description than a news.google.com reader link, but the feed link guarantees we have one."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: "https://aljazeera.com/real-article")
+    ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "h", "angle": "a",
+              "sources": ["https://timesofindia.example/articleshow/115000000.cms"]}]
+    raw = '{"ideas": [{"title": "Nepal-China Floods: 1,270+ Dead"}]}'
+    grounded = [{"uri": "https://redirect/aaa", "domain": "aljazeera.com", "spans": [(10, 40)]}]
+
+    out = fb._attach_real_sources(ideas, raw, grounded, _STORIES)
+
+    assert out[0]["sources"][0] == "https://aljazeera.com/real-article"
+    assert "https://news.google.com/rss/articles/NEPAL1" in out[0]["sources"]
+    # the model's own invented URL is kept last; the liveness probe culls it later
+    assert out[0]["sources"][-1] == "https://timesofindia.example/articleshow/115000000.cms"
+
+
+def test_attach_real_sources_gives_each_idea_only_its_own_citation(monkeypatch):
+    """grounding_supports spans say which part of the reply a citation backs — so a two-idea
+    reply must not cross-contaminate, or every reel cites every story."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    raw = ('{"ideas": [{"title": "Nepal-China Floods: 1,270+ Dead", "x": "AAAAAAAAAA"}, '
+           '{"title": "Belgian Chocolate India Gate Snub", "y": "BBBBBBBBBB"}]}')
+    first, second = raw.index("Nepal"), raw.index("Belgian")
+    ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "h", "angle": "a", "sources": []},
+             {"title": "Belgian Chocolate India Gate Snub", "hook": "h", "angle": "a", "sources": []}]
+    grounded = [{"uri": "https://pub/nepal", "domain": "aljazeera.com", "spans": [(first, first + 5)]},
+                {"uri": "https://pub/choco", "domain": "moneycontrol.com", "spans": [(second, second + 5)]}]
+
+    out = fb._attach_real_sources(ideas, raw, grounded, _STORIES)
+
+    assert "https://pub/nepal" in out[0]["sources"]
+    assert "https://pub/choco" not in out[0]["sources"]
+    assert "https://pub/choco" in out[1]["sources"]
+
+
+def test_attach_real_sources_shares_an_unattributable_citation(monkeypatch):
+    """A chunk with no support span still names a real article. Withholding it entirely is what
+    leaves an idea below MIN_SOURCES and gets it dropped."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "h", "angle": "a", "sources": []}]
+    raw = '{"ideas": [{"title": "Nepal-China Floods: 1,270+ Dead"}]}'
+    grounded = [{"uri": "https://pub/loose", "domain": "bbc.com", "spans": []}]
+
+    out = fb._attach_real_sources(ideas, raw, grounded, _STORIES)
+    assert "https://pub/loose" in out[0]["sources"]
+
+
+def test_produce_ideas_sources_an_idea_whose_model_urls_are_all_dead(monkeypatch):
+    """The exact 2026-09-03 failure: the model cited only invented URLs, every one 404'd, and the
+    idea was dropped — emptying the digest and killing the job. The feed link keeps it alive."""
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "true")
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: _STORIES)
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    # only the invented URL is dead; the feed's own article links are live
+    monkeypatch.setattr(fb, "_url_is_dead", lambda u: "articleshow" in u)
+
+    reply = json.dumps({"ideas": [{
+        "niche": "impact-news", "title": "Nepal-China Floods: 1,270+ Dead",
+        "hook": "The toll keeps climbing.", "angle": "Why the world looked away.",
+        "est_score": 0.8, "share_score": 0.9,
+        "sources": ["https://timesofindia.example/articleshow/115000000.cms"]}]})
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources", lambda *a, **k: (reply, []))
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": []}))
+
+    out = fb._produce_ideas(2)
+
+    assert len(out) == 1, "the idea must survive on real feed sources"
+    assert out[0]["sources"] == ["https://news.google.com/rss/articles/NEPAL1",
+                                 "https://news.google.com/rss/articles/NEPAL2"]
+
+
+def test_produce_ideas_tops_up_from_ungrounded_when_grounded_is_thin(monkeypatch):
+    """Grounded returning ONE valid idea used to be accepted as the whole pool, so a request for
+    3 shipped a digest of 1. Only a total grounded failure triggered the ungrounded pass."""
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "false")
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: (json.dumps({"ideas": [_idea("Grounded One")]}), []))
+    monkeypatch.setattr(fb.llm, "generate",
+                        lambda *a, **k: json.dumps({"ideas": [_idea("Extra Two"),
+                                                              _idea("Extra Three")]}))
+
+    out = fb._produce_ideas(3)
+    assert [i["title"] for i in out] == ["Grounded One", "Extra Two", "Extra Three"]
+
+
+def test_produce_ideas_does_not_spend_the_ungrounded_call_when_grounded_suffices(monkeypatch):
+    """Rule 13: the top-up must not become an extra request on every single run."""
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "false")
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: (json.dumps({"ideas": [_idea("A"), _idea("B")]}), []))
+
+    def _boom(*a, **k):
+        raise AssertionError("ungrounded call must not run when grounded already met the target")
+
+    monkeypatch.setattr(fb.llm, "generate", _boom)
+    assert len(fb._produce_ideas(2)) == 2
+
+
+# --- citation QUALITY (2026-09-03, from a live run) ---------------------------------------
+# The live check produced ideas citing 'https://www.bbc.com/' and 'https://timesofindia.
+# indiatimes.com/'. A homepage always answers 200, so the liveness probe passes it — but it
+# supports no claim, which is the same originality/monetization failure as a dead link
+# (docs/08 §1). A citation has to point at an ARTICLE.
+
+def test_bare_homepages_are_not_citations():
+    assert fb._is_homepage("https://www.bbc.com/") is True
+    assert fb._is_homepage("https://timesofindia.indiatimes.com") is True
+    assert fb._is_homepage("https://www.bbc.com/news/world-asia-123") is False
+    assert fb._is_homepage("https://news.google.com/rss/articles/AAA") is False
+
+
+def test_attach_real_sources_drops_a_model_cited_homepage(monkeypatch):
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: [])
+    ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "h", "angle": "a",
+              "sources": ["https://www.bbc.com/", "https://www.bbc.com/news/real-article"]}]
+    raw = '{"ideas": [{"title": "Nepal-China Floods: 1,270+ Dead"}]}'
+
+    out = fb._attach_real_sources(ideas, raw, [], _STORIES)
+    assert "https://www.bbc.com/" not in out[0]["sources"]
+    assert "https://www.bbc.com/news/real-article" in out[0]["sources"]
+
+
+def test_attach_real_sources_searches_for_an_under_sourced_idea(monkeypatch):
+    """The top-stories feed only holds the front page. When nothing there matches, the free RSS
+    search finds the story — which is what keeps an idea above MIN_SOURCES with no API quota."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    searched = {}
+
+    def _search(query, limit=6):
+        searched["q"] = query
+        return [{"title": "El Nino supersized - BBC", "url": "https://news.google/EL1", "source": "BBC"},
+                {"title": "UN warns on El Nino - Reuters", "url": "https://news.google/EL2", "source": "Reuters"}]
+
+    monkeypatch.setattr(fb.news, "search_stories", _search)
+    ideas = [{"title": "UN Warning: 'Supersized' El Nino Threat", "hook": "h", "angle": "a",
+              "sources": []}]
+    raw = '{"ideas": []}'
+
+    out = fb._attach_real_sources(ideas, raw, [], _STORIES)
+    assert "El Nino" in searched["q"]
+    assert out[0]["sources"] == ["https://news.google/EL1", "https://news.google/EL2"]
+
+
+def test_attach_real_sources_does_not_search_when_already_sourced(monkeypatch):
+    """One HTTP request per under-sourced idea is fine; one per idea always is waste (rule 13)."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+
+    def _never(*a, **k):
+        raise AssertionError("search must not run for an already-sourced idea")
+
+    monkeypatch.setattr(fb.news, "search_stories", _never)
+    ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "The toll keeps climbing.",
+              "angle": "a", "sources": []}]
+    raw = '{"ideas": []}'
+    out = fb._attach_real_sources(ideas, raw, [], _STORIES)
+    assert len(out[0]["sources"]) == 2  # both feed articles about the same event
+
+
+def test_search_prefers_distinct_publishers(monkeypatch):
+    """MIN_SOURCES means INDEPENDENT sources (docs/08 §1). The live 2026-09-03 run came back with
+    two feed links whose ids shared a long prefix — the same story twice reads as two sources but
+    corroborates nothing. The feed names the publisher, so use it."""
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    results = [
+        {"title": "ISRO launch - The Hindu", "url": "https://news.google/A1", "source": "The Hindu"},
+        {"title": "ISRO launch again - The Hindu", "url": "https://news.google/A2", "source": "The Hindu"},
+        {"title": "ISRO launch - Reuters", "url": "https://news.google/B1", "source": "Reuters"},
+    ]
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: results)
+    idea = {"title": "Can 'Naughty Boy' Save ISRO?", "hook": "h", "angle": "a"}
+    assert fb._search_for_more(idea, []) == ["https://news.google/A1", "https://news.google/B1"]
+
+
+def test_search_falls_back_to_a_repeat_publisher_rather_than_leaving_an_idea_short(monkeypatch):
+    """One outlet twice still beats dropping a true story for want of a second link."""
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    results = [
+        {"title": "Only outlet - PTI", "url": "https://news.google/P1", "source": "PTI"},
+        {"title": "Only outlet follow-up - PTI", "url": "https://news.google/P2", "source": "PTI"},
+    ]
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: results)
+    idea = {"title": "A story only PTI covered", "hook": "h", "angle": "a"}
+    assert fb._search_for_more(idea, []) == ["https://news.google/P1", "https://news.google/P2"]
+
+
+def test_search_runs_when_only_the_models_own_urls_make_up_the_count(monkeypatch):
+    """Live 2026-09-03: an idea carrying one feed link plus one INVENTED link counted as 2, so the
+    search top-up was skipped — then the liveness probe killed the invented one and the idea was
+    dropped at 1. Only sources we actually fetched may count toward 'do I need to search?'."""
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    searched = []
+    monkeypatch.setattr(fb.news, "search_stories",
+                        lambda q, limit=6: searched.append(q) or
+                        [{"title": "t", "url": "https://news.google/EXTRA", "source": "BBC"}])
+    ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "The toll keeps climbing.",
+              "angle": "a", "sources": ["https://invented.example/articleshow/115000000.cms"]}]
+
+    out = fb._attach_real_sources(ideas, '{"ideas": []}', [], _STORIES[:1])
+
+    assert searched, "an idea with only one FETCHED source must still be searched"
+    assert "https://news.google/EXTRA" in out[0]["sources"]
+
+
+def test_search_query_keeps_a_number_intact():
+    """'1,250' must not be split into '1 250' — that is a different, much worse search."""
+    assert fb._search_query({"title": "1,250 Dead: Nepal's Warning to South Asia"}) == \
+        "1,250 Dead Nepal's Warning to South Asia"

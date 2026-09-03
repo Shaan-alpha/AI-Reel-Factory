@@ -5,6 +5,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Ideation cited URLs it made up, so the digest starved
+
+The failed run (33755597063) and the "only one idea appears" digest were **the same bug**, and the
+suspected TTS inaccuracy turned out to be the caption layer, not the voice.
+**440 pass, 5 skipped** (was 405 + 5).
+
+### Fixed
+- **Ideation asked the model for source URLs, and a model cannot recall URLs.**
+  `_gen_gemini_grounded` returned `resp.text` and dropped `grounding_metadata` — the real Google
+  Search citations — on the floor, so the prompt had to ask the model to supply sources itself. It
+  answered with plausible-looking inventions (`articleshow/115000000.cms`,
+  `world-asia-68700000`), `_url_is_dead` correctly 404'd them, and `_validate_and_clean` dropped
+  every idea below `MIN_SOURCES`. One survivor meant a **digest of one** (2026-09-01: 3 dropped,
+  `seeding 1 idea(s)`); zero survivors meant `RuntimeError: no fresh ideas to seed` and **exit 1**
+  (2026-09-03: 8 dropped, 0 kept). Sources now come from things we actually fetched:
+  `llm.generate_grounded_with_sources()` exposes the grounded citations (attributed per idea via
+  `grounding_supports` character spans), `news.fetch_stories()` keeps the RSS `<link>`/`<source>`
+  the parser used to discard, and `_attach_real_sources()` assembles them publisher-URL-first.
+- **`news.py` parsed away the article link on every headline.** 38 feed items, each with a live
+  URL and a publisher name, all thrown away — while the pipeline asked an LLM to remember URLs for
+  those same stories.
+- **An under-sourced idea was dropped rather than researched.** `news.search_stories()` queries the
+  free, key-less Google News RSS *search* feed for the idea's own headline and cites what comes
+  back, preferring DISTINCT publishers so `MIN_SOURCES` means independent corroboration. Verified
+  live on a day the grounded quota was fully spent (HTTP 429, `limit: 20`): 3 ideas, 2 real sources
+  each — the precise condition that killed the job.
+- **Bare homepages counted as citations.** `https://www.bbc.com/` always answers 200, so the
+  liveness probe passed it, but it supports no claim and shows different stories tomorrow — the
+  same docs/08 §1 failure as a dead link. Found in a live run and now rejected.
+- **Unverified URLs counted toward "am I sourced enough?".** An idea holding one feed link plus one
+  invented link scored 2, skipped the search top-up, and was then culled at 1 when the probe ran.
+  Only FETCHED sources count toward that decision now.
+- **The search query split figures.** `"1,250 Dead"` became `1 250 Dead`, destroying the most
+  distinctive term in the headline — 2 results instead of 48. Numbers stay intact.
+- **A thin grounded pass was accepted as the whole batch.** Only a TOTAL grounded failure used to
+  trigger the ungrounded pass, so a request for 3 ideas shipped 1. `_produce_ideas` now tops up
+  whenever the grounded pass comes back under target, and skips the extra call entirely when it
+  does not (rule 13).
+- **Captions mangled numbers — this was the "TTS is not accurate" report.** The audio is faithful
+  (measured: 98% word match against the script, the only difference `recognise`/`recognize`, and
+  the PCM sample rate matches the declared `audio/l16; rate=24000`). faster-whisper emits `1,270`
+  as the two word tokens `1` and `,270`, `_clean_caption_word` stripped the leading comma, and the
+  burned captions read **"authority 1" / "270 people died"** and **"and 2 4"** for 2.4 billion — a
+  news channel stating a different number from the one the narrator says and the fact-check gate
+  approved. `_merge_number_tokens()` rejoins them; verified on the real narration.
+- **Ideation coming up dry killed the whole job.** Rule 14 is loud on misconfig, soft on runtime,
+  and "nothing cleared sourcing right now" is runtime. `make_on_demand` now Telegram-alerts and
+  exits 0; `config.validate()` still hard-stops a missing secret.
+
+### Added
+- `ENABLE_SOURCE_SEARCH` (default true) — the free per-story source search described above.
+
 ## [Unreleased] — Audit completed: the narrator, the recycled shots, and a feature that never ran
 
 Third batch from the 2026-09-01 audit, covering what the cut-short fan-out never reached.

@@ -53,6 +53,34 @@ def _load_model(size: str):
     return WhisperModel(size, device="cpu", compute_type="int8")
 
 
+# A whisper token that CONTINUES the previous number rather than starting a new word: a comma or
+# period immediately followed by a digit (",270", ".4").
+_NUMBER_CONTINUATION = re.compile(r"^[.,]\d")
+
+
+def _merge_number_tokens(
+        words: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
+    """Rejoin a figure faster-whisper split across word tokens ('1' + ',270' -> '1,270').
+
+    Word-level timestamps break "1,270" into '1' and ',270' and "2.4" into '2' and '.4'.
+    `_clean_caption_word` then strips the leading punctuation, so the burned captions read
+    "authority 1" / "270 people died" and "and 2 4" — i.e. the reel states a different number
+    from the one the narrator says and the fact-check gate approved. Measured on real narration
+    2026-09-03; the audio itself is faithful, so the fix belongs here and not in voice.py.
+
+    Merges only when the previous token ENDS IN A DIGIT, so an ordinary sentence-ending token
+    ("likes.") never swallows what follows it.
+    """
+    merged: list[tuple[float, float, str]] = []
+    for start, end, text in words:
+        if merged and _NUMBER_CONTINUATION.match(text) and merged[-1][2][-1:].isdigit():
+            prev_start, _prev_end, prev_text = merged[-1]
+            merged[-1] = (prev_start, end, prev_text + text)
+        else:
+            merged.append((start, end, text))
+    return merged
+
+
 def _transcribe_words(audio_path: str) -> list[tuple[float, float, str]]:
     """Return [(start_s, end_s, word)] for the narration. Isolated for testability."""
     model = _load_model(config.get("WHISPER_MODEL", "base"))
@@ -65,7 +93,7 @@ def _transcribe_words(audio_path: str) -> list[tuple[float, float, str]]:
             text = w.word.strip()
             if text:
                 words.append((float(w.start), float(w.end), text))
-    return words
+    return _merge_number_tokens(words)
 
 
 def _format_ts(seconds: float) -> str:

@@ -16,6 +16,13 @@ def test_source_domain_derivation():
     assert production._source_domain([]) is None
 
 
+def _raiser(exc):
+    def _fn(*_args, **_kwargs):
+        raise exc
+
+    return _fn
+
+
 IDEA = {"id": 7, "title": "ISRO rocket, explained", "hook": "h", "angle": "a",
         "sources": ["https://x.example"]}
 SCRIPT = {"script_id": 70, "script_body": "body words " * 20,
@@ -368,3 +375,35 @@ def test_make_on_demand_scopes_production_to_the_ideas_it_offered(monkeypatch):
 
     production.make_on_demand()
     assert sorted(captured["only_ids"]) == [11, 12]
+
+
+# --- ideation failure is a runtime condition, not a misconfig (2026-09-03) ------------------
+# Run 33755597063 died with `RuntimeError: ideation: no fresh ideas to seed` and exit 1. The
+# operator's only signal was a red X in the Actions UI. Rule 14 says fail loud on MISCONFIG and
+# soft on RUNTIME — "no sourced stories right now" is the latter, so it is a Telegram message.
+
+def test_make_on_demand_alerts_and_exits_cleanly_when_ideation_fails(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
+                        _raiser(RuntimeError("ideation: no fresh ideas to seed (source: x).")))
+
+    def _never(*a, **k):
+        raise AssertionError("must not reach the digest with nothing to propose")
+
+    monkeypatch.setattr(production.approval, "send_digest", _never)
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+
+    summary = production.make_on_demand(num_ideas=3, wait_minutes=15)
+
+    assert summary == {"published": [], "failed": []}
+    assert any("no fresh ideas to seed" in n for n in notes), notes
+
+
+def test_make_on_demand_still_raises_on_a_misconfigured_run(monkeypatch):
+    """A missing secret must stay a hard stop — the soft path is only for ideation coming up dry."""
+    monkeypatch.setattr(production.config, "validate",
+                        _raiser(production.config.ConfigError("Missing required settings: X")))
+    with pytest.raises(production.config.ConfigError):
+        production.make_on_demand()
