@@ -127,6 +127,10 @@ jobs:
           GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
           # HTTP-probe ideation's source URLs; drop 404/410 (invented links), keep 401/403.
           ENABLE_SOURCE_CHECK: ${{ vars.ENABLE_SOURCE_CHECK || 'true' }}
+          # Source an under-sourced idea from the free Google News RSS search (no key, no
+          # quota) instead of dropping it. This is what keeps the digest full on a day the
+          # grounded search is out of free calls.
+          ENABLE_SOURCE_SEARCH: ${{ vars.ENABLE_SOURCE_SEARCH || 'true' }}
           IDEAS: ${{ inputs.ideas }}
           WAIT_MIN: ${{ inputs.wait_min }}
         run: python -m src.production make
