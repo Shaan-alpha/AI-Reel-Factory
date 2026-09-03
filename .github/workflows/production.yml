@@ -11,10 +11,13 @@ on:
 jobs:
   produce:
     runs-on: ubuntu-latest
+    # Bounded like make-short. Without this the job inherits GitHub's 6-hour default,
+    # so a wedged render or a hung upload burns Actions minutes until someone notices.
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -22,7 +25,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
 
       - name: Cache TTS/ASR models (Kokoro + faster-whisper)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/kokoro
@@ -30,7 +33,7 @@ jobs:
           key: models-kokoro1.0-whisper-base-v1
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('requirements.txt') }}
@@ -122,4 +125,14 @@ jobs:
           # quota) instead of dropping it. This is what keeps the digest full on a day the
           # grounded search is out of free calls.
           ENABLE_SOURCE_SEARCH: ${{ vars.ENABLE_SOURCE_SEARCH || 'true' }}
+          # The fact-check gate's OWN grounded quota. Ideation + scriptwriter + the gate
+          # share one 20/day budget on gemini-2.5-flash; a 3-reel run spends 7, so a busy
+          # day exhausts it and the gate fails OPEN. A second free key isolates it.
+          FACTCHECK_API_KEY: ${{ secrets.FACTCHECK_API_KEY }}
+          # Set false to skip the scriptwriter's grounded write and hand that request back
+          # to the gate — the gate is worth more, it re-verifies the finished script.
+          ENABLE_GROUNDED_SCRIPT: ${{ vars.ENABLE_GROUNDED_SCRIPT || 'true' }}
+          # Pending ideas older than this are aged out to 'passed' rather than re-offered
+          # as today's digest. 0 disables.
+          IDEA_MAX_AGE_HOURS: ${{ vars.IDEA_MAX_AGE_HOURS || '24' }}
         run: python -m src.production

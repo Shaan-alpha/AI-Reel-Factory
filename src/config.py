@@ -41,14 +41,14 @@ REQUIRED = (
 )
 
 # Settings with sensible defaults (see .env.example for meaning).
+# Only keys something actually READS belong here. CHANNEL_NAME, CONTENT_STYLE and
+# DIGEST_HOUR_UTC were carried for months after their last reader was removed — a default that
+# nothing consults is a setting an operator can tune with no effect, which is worse than absent.
 DEFAULTS = {
-    "CHANNEL_NAME": "But It Matters",
     "NICHE": "impact-news",
     # NICHE_LEAN ("soft-positive") removed 2026-07-27: it was read by nothing, and the operator's
     # policy is now truth-first rather than tone-first. What replaces it is a real gate —
     # factcheck.verify() re-checks every finished script (rule 6).
-    "CONTENT_STYLE": "daily-impact-explainer",
-    "DIGEST_HOUR_UTC": "02",
     "ENABLE_FALLBACK_IDEATION": "true",
     "AI_DISCLOSURE": "true",
     "MIN_SOURCES": "2",

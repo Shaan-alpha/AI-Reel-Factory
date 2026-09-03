@@ -10,12 +10,15 @@ on:
 jobs:
   analytics:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+      # This job only calls the YouTube Data API and writes rows. Installing the full
+      # pipeline (Kokoro, faster-whisper, Pillow, ~hundreds of MB) bought nothing.
+      - run: pip install "google-api-python-client==2.197.0" "google-auth==2.53.0" "supabase==2.31.0" "python-dotenv==1.2.2"
       - name: Collect YouTube stats → Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
