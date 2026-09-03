@@ -5,7 +5,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
-## [Unreleased] — Ideation cited URLs it made up, so the digest starved
+## [0.17.0] - 2026-09-03 — Full audit: the gate that switched itself off
+
+A start-to-end audit of every module, both cron paths, the Vercel bot, the docs and the live
+database. **460 pass, 5 skipped** (was 440 + 5).
+
+### Fixed
+- **The accuracy gate silently failed open on busy days.** Ideation (1/run), the scriptwriter
+  (1/reel) and `factcheck.verify` (1/reel) all spend ONE 20-requests/day free grounded budget on
+  `gemini-2.5-flash`. A 3-reel run costs 7 calls, so a third run in a day exhausts it — verified
+  live on 2026-09-03 (`429 RESOURCE_EXHAUSTED … limit: 20`). With the default
+  `FACTCHECK_STRICT=false` the gate then returns `ok=True` with `reason="checker-failed"`, and
+  `produce_one` only ever read `ok` — so an UNVERIFIED reel published looking exactly like a
+  verified one, with nothing said to the operator. Accuracy is the monetization gate (rule 6).
+  Now: `factcheck.gate_ran()` distinguishes a verdict from an outage, `produce_one` Telegram-alerts
+  when a reel ships unverified, `FACTCHECK_API_KEY` gives the gate a second free key's own
+  allowance, and `ENABLE_GROUNDED_SCRIPT=false` hands the scriptwriter's grounded request back to
+  the gate on a tight day.
+- **The Telegram bot's approval cap disagreed with the pipeline's.** `telegram-bot/api/telegram.py`
+  defaulted `APPROVAL_CAP` to 5 while `src/` and both workflows use 3, so with the variable unset
+  on Vercel you could approve 5, only `DAILY_REEL_CAP=3` would ever be produced, and the surplus
+  sat at 'approved' forever — counting toward the cap and answering "capped" to every later tap.
+  That is precisely the leak `_release_failed_idea` was written to clean up after.
+- **Stale ideas could headline today's digest.** `make_on_demand` PREFERS the existing queue and
+  `_release_failed_idea` returns a failed reel to 'pending', but nothing aged those out — so a
+  two-day-old story could lead the digest on a daily-news channel. `db.expire_stale_pending_ideas()`
+  retires them to 'passed' (`IDEA_MAX_AGE_HOURS`, default 24; 0 disables).
+- **Two reels in one batch could use identical photos.** `_pexels_photo_urls` is lru_cached for the
+  life of the process and `_fetch_image` indexed it by cut number alone, so a shared keyword
+  ("indian flag") produced the same image at the same cut in both reels. Now offset per reel by the
+  work directory, and still deterministic for a given (reel, cut) so a retry re-renders identically
+  (rule 12).
+- **Source blocks were an unreadable wall.** Citations became Google News article links with the
+  2026-09-03 sourcing fix — 249-884 chars each, measured — and `_ensure_sources` joined them with
+  " | ". One per line now. (The publisher's own URL cannot be recovered: the modern Google News id
+  is an opaque `AU_yqL…` token with no embedded URL. Verified, not assumed.)
+- **CI ran three actions GitHub force-runs on Node 24.** `checkout@v4`, `setup-python@v5` and
+  `cache@v4` warned on every run; bumped to v5/v6/v5.
+- **`production.yml` had no job timeout** (make-short caps at 60 min), so a wedged render could
+  burn Actions minutes for six hours. **`analytics.yml` installed the whole pipeline** — Kokoro,
+  faster-whisper, Pillow — to make one YouTube API call.
+- Stale comment in `scriptwriter.py` still credited Groq's `llama-3.3-70b`, retired since
+  2026-08-25 (`llm.py` records it).
+
+### Added
+- `FACTCHECK_API_KEY` — a dedicated free Gemini key for the gate; `llm._gemini_client` is now
+  cached per credential, so a second key carries its own grounded allowance.
+- `ENABLE_GROUNDED_SCRIPT` (default true) — a lever to reclaim the scriptwriter's grounded call
+  for the gate on a busy day. Grounding stays ON by default: this is not a silent quality cut.
+- `IDEA_MAX_AGE_HOURS` (default 24) — age-out for stale pending ideas.
+- `ANALYTICS_KEEP_PER_POST` — OPT-IN retention for the `analytics` time series, off by default.
+  At 4,049 rows for 76 posts (measured) the 500 MB ceiling is far away, and pruning would destroy
+  the history `top_performing_titles` learns from — so it is a lever, not a default.
+- `LLM_RETRY_MAX_WAIT` documented in `.env.example`; it was read by code and declared nowhere.
+
+### Changed
+- **17 stacked `[Unreleased]` blocks became a real version history.** Dates come from git (the
+  commit that first introduced each heading) and bumps from each block's own subsections — patch
+  for Fixed-only, minor for Added/Changed/Removed — walking from the releases already in the file.
+  No retroactive git tags were created: those releases were never cut, and inventing tags for them
+  would be worse than not having them. Only `v0.17.0` is tagged.
+
+### Removed
+- `CHANNEL_NAME`, `CONTENT_STYLE` and `DIGEST_HOUR_UTC` — declared in `.env.example` and carried in
+  `config.DEFAULTS` long after their last reader was deleted. A setting nothing consults is one an
+  operator can tune with no effect, which is worse than an absent one.
+
+## [0.16.0] - 2026-09-03 — Ideation cited URLs it made up, so the digest starved
 
 The failed run (33755597063) and the "only one idea appears" digest were **the same bug**, and the
 suspected TTS inaccuracy turned out to be the caption layer, not the voice.
@@ -57,7 +123,7 @@ suspected TTS inaccuracy turned out to be the caption layer, not the voice.
 ### Added
 - `ENABLE_SOURCE_SEARCH` (default true) — the free per-story source search described above.
 
-## [Unreleased] — Audit completed: the narrator, the recycled shots, and a feature that never ran
+## [0.15.1] - 2026-09-01 — Audit completed: the narrator, the recycled shots, and a feature that never ran
 
 Third batch from the 2026-09-01 audit, covering what the cut-short fan-out never reached.
 **404 pass, 5 skipped** (was 396 + 5). Every module in `src/` is now read or scanned.
@@ -96,7 +162,7 @@ Third batch from the 2026-09-01 audit, covering what the cut-short fan-out never
   live is the wrong trade, and the source-liveness fix already removes what triggered two of the
   three real blocks. The new raw-reply logging is what makes revisiting it measurable.
 
-## [Unreleased] — CI finally runs the tests, and six reliability holes
+## [0.15.0] - 2026-09-01 — CI finally runs the tests, and six reliability holes
 
 Second batch from the 2026-09-01 audit. **396 pass, 5 skipped** (was 383 + 4).
 
@@ -145,7 +211,7 @@ Second batch from the 2026-09-01 audit. **396 pass, 5 skipped** (was 383 + 4).
 - No GCP budget cap (rule 2), untouched on purpose: budgets are a billing-account action.
 - The 75 already-published Shorts still carry dead citations; only new reels are protected.
 
-## [Unreleased] — Invented citations, unapproved re-runs, and one empty string that broke three subsystems
+## [0.14.0] - 2026-09-01 — Invented citations, unapproved re-runs, and one empty string that broke three subsystems
 
 Follow-up to the 2026-09-01 audit (see STATUS.md). Four fixes, each pinned by a test that was
 watched failing first. **383 pass, 4 skipped** (was 366 + 4).
@@ -223,7 +289,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   retired by GitHub (HTTP 410); no Gemini 429 retry despite an explicit `retryDelay`;
   publish→`set_idea_status` is non-atomic; still no GCP budget cap (rule 2).
 
-## [Unreleased] — The Groq fallback had been dead, and nothing noticed
+## [0.13.3] - 2026-08-25 — The Groq fallback had been dead, and nothing noticed
 
 ### Fixed
 - **`llama-3.3-70b-versatile` no longer exists on Groq** — every call returned 404
@@ -248,7 +314,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
 - Verified end to end in the real failure mode: with Gemini 429ing, `generate()` returns `OK` and
   `generate(json=True)` returns valid JSON via Groq. **366 pass, 4 skipped.**
 
-## [Unreleased] — Stop recycling B-roll, and keep one narrator
+## [0.13.2] - 2026-08-25 — Stop recycling B-roll, and keep one narrator
 
 ### Fixed
 - **`visuals` sized its B-roll off a hardcoded 6.0s cut while `assembly` cut at `CLIP_SECONDS`
@@ -271,7 +337,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
 - +7 tests (`assembly.slice_count` contract, per-duration B-roll coverage, cost cap). **364 pass,
   4 skipped.**
 
-## [Unreleased] — The "what wins" loop was learning from 3 videos out of 72
+## [0.13.1] - 2026-08-25 — The "what wins" loop was learning from 3 videos out of 72
 
 ### Fixed
 - **`db.top_performing_titles` ranked analytics *snapshots* instead of videos.** `analytics` is a
@@ -291,7 +357,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   creds. The fake honours `.order()`, since ordering by `views` vs `id` *is* the bug. Confirmed
   they fail against the pre-fix implementation. **357 pass, 4 skipped.**
 
-## [Unreleased] — New channel voice model, chosen by ear
+## [0.13.0] - 2026-08-07 — New channel voice model, chosen by ear
 
 ### Changed
 - **`GEMINI_TTS_MODEL` now defaults to `gemini-3.1-flash-tts-preview`** (was
@@ -308,7 +374,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   would re-ask the same unavailable model and burn two of a 10/day free budget.
 - +1 test (352 pass, 4 skipped).
 
-## [Unreleased] — Guarantee the payoff line is read like it matters
+## [0.12.0] - 2026-08-07 — Guarantee the payoff line is read like it matters
 
 ### Added
 - **`scriptwriter._ensure_delivery_tag` — a floor of one delivery tag**, `[serious]` on the "why
@@ -337,7 +403,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
 - The floor runs **after** the word cap, so truncation cannot cut the tag back off; tags are not
   spoken words, so it cannot push a script over the 25–30s budget.
 
-## [Unreleased] — Wider expressive range, and a voice that survives a preview-model blip
+## [0.11.0] - 2026-08-07 — Wider expressive range, and a voice that survives a preview-model blip
 
 ### Added
 - **Expressive tag vocabulary widened 7 → 12** against Google's documented audio-tag list, which
@@ -363,7 +429,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   so retrying only burns the reel's time before the engine chain can do its job (rules 11, 13).
 - +19 tests (341 pass, 4 skipped).
 
-## [Unreleased] — Gemini 3 for scripts; grounding pinned where it is still free
+## [0.10.0] - 2026-08-07 — Gemini 3 for scripts; grounding pinned where it is still free
 
 ### Changed
 - **Ungrounded text generation moved to `gemini-3.6-flash`** (was `gemini-2.5-flash`). Free-tier
@@ -389,7 +455,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   a Groq call while still appearing to work.
 - +3 tests (324 pass, 4 skipped).
 
-## [Unreleased] — Fact-check gate: stop fabrication, not imprecision
+## [0.9.0] - 2026-08-07 — Fact-check gate: stop fabrication, not imprecision
 
 ### Changed
 - **The fact-check gate now grades findings by severity and blocks only on fabrication.**
@@ -431,7 +497,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   a bare object (`"blocking": {...}`, not a list) had it silently dropped — i.e. a real fabrication
   would have shipped. Bare strings and bare objects are both wrapped now.
 
-## [Unreleased] — Truth over neutrality + a fact-check gate
+## [0.8.0] - 2026-07-27 — Truth over neutrality + a fact-check gate
 
 ### Changed
 - **Editorial policy: truth over neutrality** (operator decision). The `soft-positive` lean and
@@ -462,7 +528,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   passed for the wrong reason (a 429 took the fail-open path). Now mocked — 4.69s to 0.57s.
 - **311 tests pass, 4 skipped** (was 290, 3).
 
-## [Unreleased] — Expressive narration
+## [0.7.0] - 2026-07-27 — Expressive narration
 
 ### Changed
 - **Gemini TTS with the `Zubenelgenubi` ("Casual") voice is now the default narration**, chosen by
@@ -519,7 +585,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
 ### Changed
 - **280 tests pass, 3 skipped** (was 242, 2).
 
-## [Unreleased] — Content-engine audit: provider fixes, SFX retune, opt-in stat cards
+## [0.6.0] - 2026-07-26 — Content-engine audit: provider fixes, SFX retune, opt-in stat cards
 
 ### Fixed
 - **GitHub Models provider was non-functional.** Wrong host (the retired Azure preview
@@ -561,7 +627,7 @@ watched failing first. **383 pass, 4 skipped** (was 366 + 4).
   `import requests` in `llm.py`.
 - **242 tests pass, 2 skipped** (was 215).
 
-## [Unreleased] — Ideation diversity & virality
+## [0.5.0] - 2026-06-29 — Ideation diversity & virality
 
 ### Added
 - **Two-stage news-anchored ideation** (`ideation_fallback.py`): a cheap **Stage 1** (Groq,
@@ -695,7 +761,7 @@ mismatch, and YouTube's Inauthentic-Content policy penalises low-effort automati
 - **Cost target** $0 → ≤ $5/month (CLAUDE.md rule 2, README, docs/01, docs/04, docs/07 synced).
 - **161 tests pass** (was 153; +8).
 
-## [Unreleased] — Virality tuning from first real analytics
+## [0.2.1] - 2026-06-10 — Virality tuning from first real analytics
 
 First real-traffic learning: one Short ("Oil Export Wars", 1,032 views) hugely outperformed dry
 explainers. Retuned the generators toward conflict/curiosity framing (operator chose max hype) and
