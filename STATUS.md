@@ -6,7 +6,7 @@
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
 **Version:** 0.5.0 (**PUBLIC**) · _Content Creation Engine Overhaul_ (witty roasting scriptwriter, procedural SFX engine, expressive per-engine narration tags + opt-in Gemini TTS, opt-in GitHub Models provider, opt-in PIL stat-card overlays; **366 pass, 4 skipped** — re-measured 2026-08-25)
-**Last updated:** 2026-08-25
+**Last updated:** 2026-09-03
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
   ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -96,6 +96,34 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-09-03 — The digest was starving on invented citations (and the captions were wrong)
+
+**Reported:** the job run failed, asking for >1 idea only produced one, and the TTS "might not be
+accurate". The first two were **one bug**; the third was real but not in the voice.
+
+- **Root cause (failures 1 + 2).** `llm._gen_gemini_grounded` returned only `resp.text` and
+  discarded `grounding_metadata` — `grounding_metadata` appeared **nowhere** in the codebase — so
+  the ideation prompt asked the *model* for source URLs. Models invent them
+  (`articleshow/115000000.cms`, `world-asia-68700000`); `_url_is_dead` 404'd them; every idea fell
+  under `MIN_SOURCES` and was dropped. ≥1 survivor → a digest of one. 0 survivors → `RuntimeError:
+  no fresh ideas to seed` → exit 1. Both faces of the same defect.
+- **Fix.** Cite what we actually fetch: grounded citations via
+  `llm.generate_grounded_with_sources()` (per-idea via `grounding_supports` spans), the news feed's
+  own `<link>`/`<source>` via `news.fetch_stories()`, and `news.search_stories()` — the free,
+  key-less Google News RSS *search* — for anything still short, preferring distinct publishers.
+  Homepages are rejected; only FETCHED sources count toward the minimum.
+- **Verified live** with the grounded quota fully exhausted (HTTP 429, `limit: 20`, the worst case
+  and the one that killed the run): **3 ideas, 2 real distinct-publisher sources each.**
+- **Root cause (failure 3) — the captions, not the voice.** TTS output matches the script 98%
+  (only `recognise`/`recognize`) and the PCM rate matches its declared mime type. But
+  faster-whisper splits `1,270` into `1` + `,270`, `_clean_caption_word` stripped the comma, and
+  the reel burned **"authority 1" / "270 people died"** and **"and 2 4"**. Fixed in
+  `subtitles._merge_number_tokens()` and confirmed against the real narration.
+- **Resilience.** A thin grounded pass now tops up instead of shipping one idea, and ideation
+  coming up dry sends a Telegram message and exits 0 rather than a red ✗ (rule 14).
+- **Tests: 440 pass, 5 skipped** (was 405 + 5). The ideation suite is fully offline again (0.7s).
+- **Not changed:** the voice engine, model and Zubenelgenubi voice are untouched — they were fine.
 
 ### 2026-09-01 — Audit complete (batch 3): the coverage gaps the cut-short fan-out left
 **404 pass, 5 skipped.** Every module in `src/` is now read or scanned, plus `telegram-bot/`
