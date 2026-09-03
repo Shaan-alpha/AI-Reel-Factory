@@ -23,6 +23,8 @@ import re
 
 import requests
 
+from urllib.parse import urlparse
+
 from src import config, db, llm, news, trends
 
 log = logging.getLogger(__name__)
@@ -107,9 +109,14 @@ impersonation; graphic tragedy exploitation; medical/financial advice stated as 
 
 Each idea: a PUNCHY, curiosity-driven title honest to the story (NOT a dry "X explained" search \
 title, NOT a bait title the facts can't back); a story that lands in 25-30 seconds (a single \
-development with a sharp angle, not a deep-dive); >= {min_src} reputable, independent source URLs \
-from real outlets (never invent URLs); a "hook" that is a genuine first-2-seconds scroll-stopper \
-(one surprising true fact); and a share_score.
+development with a sharp angle, not a deep-dive); a "hook" that is a genuine first-2-seconds \
+scroll-stopper (one surprising true fact); and a share_score.
+
+SOURCES — READ THIS CAREFULLY: real citations are attached AUTOMATICALLY from the live search \
+and the news feed above, so you do NOT need to supply them. Put a URL in "sources" ONLY if you \
+are certain that exact page exists; otherwise return "sources": []. An empty list is CORRECT \
+and costs nothing. A guessed or pattern-matched URL is worse than none: it 404s, the idea is \
+discarded, and >= {min_src} real sources are needed to ship.
 
 Return ONLY JSON:
 {{"ideas": [{{"niche": "impact-news", "title": "...", "hook": "the first 3 seconds", \
@@ -178,13 +185,202 @@ def _url_is_dead(url: str) -> bool:
         return False
 
 
-def _validate_and_clean(ideas: list[dict]) -> list[dict]:
-    """Keep well-formed, sufficiently-sourced, de-duplicated ideas; coerce fields."""
+# How much of the smaller token set two titles must share to count as the same story, plus a
+# floor on the raw overlap. One common word ("india", "trump") is coincidence; a punchy rewrite
+# of a headline reliably keeps 2+ of its distinctive nouns and numbers.
+_STORY_MATCH_RATIO = 0.4
+_STORY_MATCH_MIN_TOKENS = 2
+
+
+def _match_story_urls(idea: dict, stories: list[dict]) -> list[str]:
+    """Feed article URLs for the story this idea is actually about ([] if none match).
+
+    The news feed carries several outlets per event, so a matched idea usually comes away with
+    two INDEPENDENT publishers — which is exactly what MIN_SOURCES asks for, obtained without
+    spending any quota and without trusting the model to remember a URL.
+    """
+    idea_toks = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
+    if not idea_toks:
+        return []
+    out = []
+    for story in stories:
+        story_toks = _tokens(story.get("title", ""))
+        if not story_toks:
+            continue
+        shared = idea_toks & story_toks
+        if len(shared) >= _STORY_MATCH_MIN_TOKENS and                 len(shared) / min(len(idea_toks), len(story_toks)) >= _STORY_MATCH_RATIO:
+            url = (story.get("url") or "").strip()
+            if url and url not in out:
+                out.append(url)
+    return out
+
+
+def _is_homepage(url: str) -> bool:
+    """True for a bare site root ('https://www.bbc.com/') — never a citation for a claim.
+
+    A homepage always answers 200, so `_url_is_dead` waves it through, but it supports
+    nothing: tomorrow it shows different stories entirely. Seen in the live 2026-09-03 check,
+    where the model answered with bbc.com/ and timesofindia.indiatimes.com/ once it was told
+    not to guess article paths. Citing those is the same docs/08 §1 failure as citing a 404.
+    """
+    try:
+        return urlparse(url).path.strip("/") == "" and not urlparse(url).query
+    except ValueError:  # noqa: BLE001 — an unparseable URL is not a usable citation either
+        return True
+
+
+def _resolve_redirect(url: str) -> str:
+    """Follow a citation redirect to the publisher's own URL; return `url` unchanged on failure.
+
+    Grounded citations arrive as `vertexaisearch.cloud.google.com/grounding-api-redirect/…`
+    links, which work but read as noise in a YouTube description and expire. Resolving them once,
+    here, stores the real article URL instead. Best-effort: a failed probe must never cost us a
+    citation we genuinely have (rule 11).
+    """
+    try:
+        resp = requests.get(url, timeout=_SOURCE_TIMEOUT, allow_redirects=True,
+                            stream=True, headers={"User-Agent": _SOURCE_UA})
+        try:
+            return resp.url or url
+        finally:
+            resp.close()
+    except Exception:  # noqa: BLE001 — keep the redirect rather than lose the source
+        return url
+
+
+def _idea_spans(raw: str, ideas: list[dict]) -> list[tuple[int, int]]:
+    """Character span of each idea's object in the raw reply — its title, up to the next title.
+
+    Grounding supports are offsets into that reply, so this is what lets a citation be pinned to
+    the idea it actually backs instead of being smeared across all of them.
+    """
+    starts = []
+    cursor = 0
+    for idea in ideas:
+        at = raw.find(str(idea.get("title", "")), cursor) if idea.get("title") else -1
+        starts.append(at)
+        if at >= 0:
+            cursor = at + 1
+    spans = []
+    for i, start in enumerate(starts):
+        if start < 0:
+            spans.append((-1, -1))
+            continue
+        nxt = next((s for s in starts[i + 1:] if s > start), len(raw))
+        spans.append((start, nxt))
+    return spans
+
+
+def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
+                         stories: list[dict]) -> list[dict]:
+    """Replace each idea's sources with REAL ones, best first. Mutates and returns `ideas`.
+
+    Order is the operator's choice (2026-09-03): a resolved publisher URL from the grounded
+    search first, then the news feed's own article link for the story the idea came from, then
+    whatever the model wrote — kept last, and only because `_validate_and_clean` still probes it,
+    so a genuine URL the model happened to know is not thrown away while an invented one is.
+    """
+    spans = _idea_spans(raw, ideas)
+    loose = [g for g in grounded if not g.get("spans")]
+    resolved: dict[str, str] = {}
+
+    for idea, (lo, hi) in zip(ideas, spans):
+        # OVERLAP, not containment: a support span covers a sentence, which routinely straddles
+        # the JSON punctuation between one idea object and the next (measured live: a single
+        # support ran [513:1744] across a whole idea object). Requiring the span to START inside
+        # the idea would silently drop most real citations.
+        mine = [g for g in grounded
+                if lo >= 0 and any(s < hi and e > lo for s, e in g.get("spans", []))]
+        publisher = []
+        for g in [*mine, *loose]:
+            uri = g.get("uri", "")
+            if not uri:
+                continue
+            if uri not in resolved:
+                resolved[uri] = _resolve_redirect(uri)
+            if resolved[uri] not in publisher:
+                publisher.append(resolved[uri])
+        # A homepage is dropped wherever it came from: it is live, and it cites nothing.
+        model_written = [u for u in _clean_sources(idea.get("sources")) if not _is_homepage(u)]
+        fetched = [u for u in [*publisher, *_match_story_urls(idea, stories)]
+                   if not _is_homepage(u)]
+        merged: list[str] = []
+        for url in [*fetched, *model_written]:
+            if url not in merged and not _is_homepage(url):
+                merged.append(url)
+        idea["sources"] = _search_for_more(idea, merged,
+                                           trusted=len(dict.fromkeys(fetched)))
+    return ideas
+
+
+def _search_query(idea: dict) -> str:
+    """A news-search query from an idea's title, with figures left intact.
+
+    Splitting on every non-alphanumeric turned "1,250 Dead" into "1 250 Dead" — two useless
+    tokens in place of the single most distinctive term in the headline, which is why that
+    search came back with 2 results instead of dozens (live, 2026-09-03).
+    """
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9',.]*", str(idea.get("title", "")))
+    return " ".join(w.strip(".,'") for w in words if w.strip(".,'"))
+
+
+def _search_for_more(idea: dict, found: list[str], trusted: int | None = None) -> list[str]:
+    """Top `found` up to MIN_SOURCES using the free Google News RSS search. Never raises.
+
+    The top-stories feed only carries the front page, and grounded search has 20 free calls a
+    day (rule 13) — on 2026-09-03 the live check found it already spent. This path costs one
+    key-less HTTP request and only runs for an idea that is actually short, so a well-sourced
+    batch adds no requests at all.
+
+    `trusted` is how many of `found` we actually FETCHED (grounded citations and feed
+    articles). It exists because a URL the model merely asserted is not evidence of anything:
+    counting one toward the minimum let an idea skip this search and then be dropped moments
+    later when the liveness probe 404'd that same URL — the exact shape of the live failure.
+    """
+    min_src = int(config.get("MIN_SOURCES", "2"))
+    have = len(found) if trusted is None else trusted
+    if have >= min_src or not config.get_bool("ENABLE_SOURCE_SEARCH", True):
+        return found
+    query = _search_query(idea)
+    results = news.search_stories(query, limit=max(min_src * 4, 8))
+    out = list(found)
+    # Two passes: one publisher at most on the first, so ">= MIN_SOURCES sources" means
+    # INDEPENDENT outlets corroborating each other (docs/08 §1) rather than one outlet's story
+    # counted twice. The second pass then fills from repeats rather than leave a true story
+    # unsourced — for a domestic item only PTI ran, one outlet twice still beats dropping it.
+    for unique_publishers in (True, False):
+        seen_publishers: set[str] = set()
+        for story in results:
+            url = (story.get("url") or "").strip()
+            publisher = (story.get("source") or "").strip().lower()
+            if not url or url in out or _is_homepage(url):
+                continue
+            if unique_publishers and publisher and publisher in seen_publishers:
+                continue
+            seen_publishers.add(publisher)
+            out.append(url)
+            if len(out) >= min_src:
+                break
+        if len(out) >= min_src:
+            break
+    if len(out) > len(found):
+        log.info("ideation: search found %d more source(s) for %r",
+                 len(out) - len(found), idea.get("title"))
+    return out
+
+
+def _validate_and_clean(ideas: list[dict], existing: list[dict] | None = None) -> list[dict]:
+    """Keep well-formed, sufficiently-sourced, de-duplicated ideas; coerce fields.
+
+    `existing` seeds the de-duplication with an earlier batch, so a second pass topping up a
+    thin grounded result cannot re-propose what the first pass already kept — and the sources
+    already probed in that first pass are not probed again (rule 13).
+    """
     min_src = int(config.get("MIN_SOURCES", "2"))
     niche = config.get("NICHE", "impact-news")
     check_sources = config.get_bool("ENABLE_SOURCE_CHECK", True)
-    seen_titles: set[str] = set()
-    kept_tokens: list[set[str]] = []
+    seen_titles: set[str] = {str(i.get("title", "")).lower() for i in (existing or [])}
+    kept_tokens: list[set[str]] = [_tokens(str(i.get("title", ""))) for i in (existing or [])]
     clean: list[dict] = []
 
     for idea in ideas:
@@ -310,7 +506,10 @@ def _produce_ideas(target: int) -> list[dict]:
     topics = trends.fetch_trending(15)
     trending_block = "\n".join(f"- {t}" for t in topics) or \
         "- (live trends unavailable — rely on the headlines below)"
-    headlines = news.fetch_headlines(12)
+    # Stories, not bare headlines: each carries the feed's own live article URL, which is what
+    # lets an idea be cited from something we actually fetched instead of from model memory.
+    feed_stories = news.fetch_stories(12)
+    headlines = [s["title"] for s in feed_stories]
     headlines_block = "\n".join(f"- {h}" for h in headlines) or \
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"
     try:
@@ -335,17 +534,30 @@ def _produce_ideas(target: int) -> list[dict]:
                             headlines=headlines_block, winners=winners_block)
     # Stage 2: web-grounded first, INCLUDING the parse — grounded JSON is sometimes
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
+    clean: list[dict] = []
     try:
-        raw = llm.generate_grounded(prompt, max_tokens=8192)
-        ideas = _validate_and_clean(_parse_ideas(raw))
-        if ideas:
-            return ideas
-        raise ValueError("grounded response yielded no valid ideas")
+        raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192)
+        parsed = _parse_ideas(raw)
+        clean = _validate_and_clean(_attach_real_sources(parsed, raw, grounded, feed_stories))
+        if not clean:
+            raise ValueError("grounded response yielded no valid ideas")
     except Exception as e:  # noqa: BLE001 — grounding is best-effort; never block ideation
         log.warning("ideation: grounded research unusable (%s); using ungrounded JSON mode", e)
 
-    raw = llm.generate(prompt, json=True, max_tokens=4096)
-    return _validate_and_clean(_parse_ideas(raw))
+    # Top up on a THIN result, not only an empty one. Accepting whatever the grounded pass
+    # happened to yield is how a request for 3 ideas shipped a digest of 1 (STATUS 2026-09-01):
+    # validation legitimately culls ideas, yet only a TOTAL grounded failure used to trigger the
+    # second pass. Skipped entirely when grounding already met the target (rule 13).
+    if len(clean) >= target:
+        return clean
+    log.info("ideation: grounded pass yielded %d of %d; topping up ungrounded.", len(clean), target)
+    try:
+        raw = llm.generate(prompt, json=True, max_tokens=4096)
+        parsed = _attach_real_sources(_parse_ideas(raw), raw, [], feed_stories)
+        clean = clean + _validate_and_clean(parsed, existing=clean)
+    except Exception as e:  # noqa: BLE001 — the top-up is a bonus; keep what we already have
+        log.warning("ideation: ungrounded top-up failed (%s); keeping %d idea(s)", e, len(clean))
+    return clean[:_MAX_IDEAS]
 
 
 def run_fallback_ideation() -> int:
