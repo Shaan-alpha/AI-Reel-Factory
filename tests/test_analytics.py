@@ -47,3 +47,35 @@ def test_collect_stats_records_each_post(monkeypatch):
 def test_collect_stats_no_posts(monkeypatch):
     monkeypatch.setattr(analytics.db, "get_published_posts", lambda plat="youtube": [])
     assert analytics.collect_stats() == 0
+
+
+def test_collect_stats_applies_the_retention_lever(monkeypatch):
+    """prune_analytics is a no-op unless ANALYTICS_KEEP_PER_POST is set — but it has to be CALLED
+    from somewhere, or it is exactly the dead setting this audit complained about."""
+    monkeypatch.setattr(analytics.db, "get_published_posts",
+                        lambda platform="youtube": [{"id": 1, "external_id": "v1"}])
+    monkeypatch.setattr(analytics, "_youtube_client", lambda: object())
+    monkeypatch.setattr(analytics, "_fetch_stats",
+                        lambda yt, ids: {"v1": {"views": 5, "likes": 1, "comments": 0}})
+    monkeypatch.setattr(analytics.db, "insert_analytics", lambda *a, **k: None)
+    pruned = []
+    monkeypatch.setattr(analytics.db, "prune_analytics", lambda: pruned.append(True) or 0)
+
+    assert analytics.collect_stats() == 1
+    assert pruned, "collect_stats must give the retention lever a chance to run"
+
+
+def test_a_failing_prune_never_loses_the_snapshots(monkeypatch):
+    """Retention is housekeeping; the stats pull is the point (rule 14)."""
+    monkeypatch.setattr(analytics.db, "get_published_posts",
+                        lambda platform="youtube": [{"id": 1, "external_id": "v1"}])
+    monkeypatch.setattr(analytics, "_youtube_client", lambda: object())
+    monkeypatch.setattr(analytics, "_fetch_stats",
+                        lambda yt, ids: {"v1": {"views": 5, "likes": None, "comments": None}})
+    monkeypatch.setattr(analytics.db, "insert_analytics", lambda *a, **k: None)
+
+    def _boom():
+        raise RuntimeError("delete failed")
+
+    monkeypatch.setattr(analytics.db, "prune_analytics", _boom)
+    assert analytics.collect_stats() == 1

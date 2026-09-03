@@ -12,7 +12,7 @@ here — only rows/metadata (rule 15).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 from supabase import Client, create_client
@@ -61,6 +61,32 @@ def get_approved_ideas() -> list[dict]:
         get_client().table("ideas").select("*")
         .eq("status", "approved").order("est_score", desc=True).execute().data
     )
+
+
+def expire_stale_pending_ideas(max_age_hours: int | None = None) -> int:
+    """Mark pending ideas older than `max_age_hours` as 'passed'. Returns how many. 0 = disabled.
+
+    `make_on_demand` PREFERS whatever is already pending, and `_release_failed_idea` puts a reel
+    that died mid-chain back to 'pending'. Nothing ever aged those out, so a story from two days
+    ago could be re-proposed as today's digest — on a channel whose entire premise is "today".
+    'passed' rather than 'rejected': it was never judged bad, it just went cold, and the
+    distinction is what keeps `rejected` meaningful as a signal (IDEA_STATUSES).
+
+    Set IDEA_MAX_AGE_HOURS=0 to switch it off.
+    """
+    if max_age_hours is None:
+        try:
+            max_age_hours = int(config.get("IDEA_MAX_AGE_HOURS", "24"))
+        except (TypeError, ValueError):
+            max_age_hours = 24
+    if max_age_hours <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    rows = (
+        get_client().table("ideas").update({"status": "passed"})
+        .eq("status", "pending").lt("created_at", cutoff).execute().data
+    )
+    return len(rows or [])
 
 
 def existing_idea_titles() -> set[str]:
@@ -173,6 +199,40 @@ def top_performing_titles(limit: int = 8) -> list[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def prune_analytics(keep_per_post: int | None = None) -> int:
+    """Keep only the newest `keep_per_post` snapshots per post. Returns rows deleted.
+
+    OPT-IN and off by default: `analytics` is a time series and deleting it destroys the history
+    `top_performing_titles` learns from. Measured on the live DB 2026-09-03 — 4,049 rows for 76
+    posts, growing ~76/day — which is nowhere near Supabase's 500 MB ceiling (rule 13), so this
+    exists as a lever for later rather than a default that quietly bins data. Set
+    ANALYTICS_KEEP_PER_POST to switch it on.
+    """
+    if keep_per_post is None:
+        raw = (config.get("ANALYTICS_KEEP_PER_POST") or "").strip()
+        if not raw:
+            return 0
+        try:
+            keep_per_post = int(raw)
+        except ValueError:
+            return 0
+    if keep_per_post < 1:
+        return 0
+
+    client = get_client()
+    rows = client.table("analytics").select("id, post_id").order("id", desc=True).execute().data
+    seen: dict = {}
+    doomed: list[int] = []
+    for r in rows:  # newest first, so anything past the keep-window for its post is surplus
+        pid = r.get("post_id")
+        seen[pid] = seen.get(pid, 0) + 1
+        if seen[pid] > keep_per_post:
+            doomed.append(r["id"])
+    for i in range(0, len(doomed), 200):  # chunked: a huge `in_` filter blows the URL length
+        client.table("analytics").delete().in_("id", doomed[i : i + 200]).execute()
+    return len(doomed)
 
 
 def get_published_post_for_idea(idea_id: int, platform: str = "youtube") -> dict | None:
