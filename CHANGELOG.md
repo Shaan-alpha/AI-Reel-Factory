@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.18.0] - 2026-09-04 — Vertex AI: the grounded-search ceiling is gone
+
+The audit's P1 stops being a risk to manage and becomes a non-problem. Ideation, the scriptwriter
+and the fact-check gate were sharing **20 grounded requests/day** against ~21/day of demand, so
+the budget ran dry and the gate — the thing that fails open — was what broke. **469 pass,
+5 skipped** (was 465 + 5).
+
+### Added
+- **A Vertex AI backend for Gemini** (`GEMINI_USE_VERTEX`, `GCP_PROJECT`, `GCP_LOCATION`).
+  Vertex serves the same models with **1,500 grounded requests/day free** on 2.5 — 71× the
+  headroom at current volume — and still serves `gemini-2.5-flash`, which the Developer API now
+  404s for new projects. Measured working end to end on 2026-09-04: real citations returned and
+  `factcheck.verify` reaching a genuine verdict (`gate_ran=True`) rather than failing open.
+- **Keyless CI authentication via Workload Identity Federation.** This Google Cloud organization
+  enforces `iam.disableServiceAccountKeyCreation` and disallows API keys, so there is no
+  credential to store: GitHub's OIDC token is exchanged for a short-lived Google one. The jobs
+  gained `permissions: id-token: write` and a `google-github-actions/auth@v3` step.
+- `verify-vertex` workflow + `tools/verify_vertex.py` — proves credentials and grounded search
+  separately, so "the runner got no token" is never reported as "Vertex is broken".
+
+### Changed
+- `_gemini_client` picks its backend from `GEMINI_USE_VERTEX`. On Vertex a per-caller `api_key`
+  is ignored, because quota there is per PROJECT rather than per key — which is also why
+  `FACTCHECK_API_KEY` becomes unnecessary once Vertex is on.
+
 ## [0.17.1] - 2026-09-04 — A second free key cannot isolate the gate
 
 Measured while setting up 0.17.0's `FACTCHECK_API_KEY`: **free grounded search is closed to new

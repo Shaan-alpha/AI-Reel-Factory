@@ -1,0 +1,44 @@
+# Diagnostic: proves the runner can reach Vertex AI grounded search with NO stored credential.
+#
+# This org's policy blocks both API keys and service-account keys, so CI authenticates via
+# Workload Identity Federation — GitHub's OIDC token is exchanged for a short-lived Google one.
+# There is nothing to inspect by hand, which is exactly why this exists: run it after any change
+# to the WIF pool, the service account, or the auth step, BEFORE trusting a real run.
+#
+# No Short, no approval, no upload. One grounded request.
+name: verify-vertex
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write        # mints the OIDC token WIF exchanges; without it auth cannot run
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Authenticate to Google Cloud (keyless)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/892249248253/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: reel-factory-ci@but-it-matters-tts.iam.gserviceaccount.com
+
+      # google-genai talks to Vertex; google-auth resolves the federated credentials the auth
+      # step wrote out. Both are already pinned in requirements.txt.
+      - run: pip install "google-genai==2.8.0" "google-auth==2.53.0" "python-dotenv==1.2.2"
+
+      - name: Vertex grounded search from CI
+        env:
+          GEMINI_USE_VERTEX: "true"
+          GCP_PROJECT: but-it-matters-tts
+          GCP_LOCATION: global
+          GEMINI_GROUNDED_MODEL: gemini-2.5-flash
+        run: python tools/verify_vertex.py

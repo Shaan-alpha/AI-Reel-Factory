@@ -20,8 +20,20 @@ jobs:
   make:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v5
+
+      # Keyless auth to Google Cloud. This org's policy blocks BOTH API keys and service-account
+      # keys, so there is no credential to store — GitHub's OIDC token is exchanged for a short
+      # lived one via Workload Identity Federation. `id-token: write` below is what mints it.
+      - name: Authenticate to Google Cloud (keyless)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/892249248253/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: reel-factory-ci@but-it-matters-tts.iam.gserviceaccount.com
 
       - uses: actions/setup-python@v6
         with:
@@ -52,6 +64,14 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.6-flash' }}              # ungrounded text; own per-model free budget
           GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-2.5-flash' }} # ONLY model with free grounded search — do not bump
+          # Serve Gemini through Vertex AI rather than the Developer API. The free
+          # Developer tier is 20 grounded requests/DAY shared by ideation, the scriptwriter and
+          # the fact-check gate (~21/day of demand, so it runs dry and the GATE is what breaks).
+          # Vertex serves the same models with 1,500 grounded requests/DAY free, and still serves
+          # gemini-2.5-flash, which the Developer API now 404s for new projects.
+          GEMINI_USE_VERTEX: ${{ vars.GEMINI_USE_VERTEX || 'true' }}
+          GCP_PROJECT: ${{ vars.GCP_PROJECT || 'but-it-matters-tts' }}
+          GCP_LOCATION: ${{ vars.GCP_LOCATION || 'global' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

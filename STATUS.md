@@ -98,6 +98,33 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-09-04 — Vertex AI removes the grounded-search ceiling entirely
+
+Yesterday's audit found the fact-check gate silently failing open once the shared 20/day grounded
+budget ran out. A second free API key turned out not to fix it (grounded search is closed to new
+projects). Google Cloud does.
+
+- **Vertex AI serves the same Gemini models with 1,500 grounded requests/day free** on 2.5,
+  against ~21/day of demand — 71× headroom, ₹0. It also still serves `gemini-2.5-flash`, which
+  the Developer API 404s for new projects. Verified end to end through the real pipeline code:
+  citations returned, and `factcheck.verify` reaching a real verdict instead of failing open.
+- **Auth is keyless.** The org enforces `iam.disableServiceAccountKeyCreation` and disallows API
+  keys (AI Studio refuses to mint one for an org project), so ADC locally and Workload Identity
+  Federation in CI. Nothing is stored: `permissions: id-token: write` + `auth@v3` exchange
+  GitHub's OIDC token for a short-lived Google one.
+- **Cloud objects created** (all in `but-it-matters-tts`, which was already billed for TTS):
+  service account `reel-factory-ci` with `roles/aiplatform.user`; WIF pool `github`; OIDC
+  provider `github-oidc`, restricted to `assertion.repository_owner=='Shaan-alpha'` and bound to
+  this repo only. A ₹450/month budget with 50/90/100% alerts now guards the billing account.
+- **Dead ends, recorded so nobody re-walks them:** gcloud-minted API keys are rejected by the
+  Gemini API unless `--api-target=generativelanguage.googleapis.com` is set, and are blocked
+  outright on org projects; the billing account is at its 5-project cap; Custom Search JSON API
+  is closed to new customers and shuts down 2027-01-01.
+- `GEMINI_USE_VERTEX` defaults to **false** in code (a fresh clone still works with just an API
+  key) and **true** in both pipeline workflows. `tools/verify_vertex.py` and the `verify-vertex`
+  workflow prove the path before a real run depends on it.
+- Tests: **469 pass, 5 skipped**.
+
 ### 2026-09-04 — A second free key cannot give the fact-check gate its own quota
 
 Setting up 0.17.0's `FACTCHECK_API_KEY` with a real second key turned up a hard limit:

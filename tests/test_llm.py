@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from src import llm
+from src import config, llm
 
 
 def _raise(msg):
@@ -570,3 +570,64 @@ def test_generate_grounded_threads_an_api_key_through(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded_full", _fake)
     llm.generate_grounded("x", api_key="checker-key")
     assert seen["api_key"] == "checker-key"
+
+
+# --- Vertex AI path (2026-09-04) -----------------------------------------------------------
+# The Developer API free tier gives 20 grounded requests/DAY on gemini-2.5-flash, shared by
+# ideation, the scriptwriter and the fact-check gate — ~21/day of demand, so it runs dry. Vertex
+# AI serves the same models with 1,500 grounded requests/DAY free on 2.5, and authenticates with
+# ADC instead of an API key, which is what this Google Cloud org's policy permits (it blocks both
+# API keys and service-account keys). Measured working 2026-09-04 on but-it-matters-tts.
+
+def test_vertex_is_off_by_default(monkeypatch):
+    monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
+    assert llm._use_vertex() is False
+
+
+def test_vertex_client_needs_no_api_key(monkeypatch):
+    built = {}
+
+    class _FakeGenai:
+        @staticmethod
+        def Client(**kw):
+            built.update(kw)
+            return "vertex-client"
+
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT", "but-it-matters-tts")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)  # must not be required in Vertex mode
+    monkeypatch.setattr(llm, "_gemini_client", llm._gemini_client.__wrapped__)
+    monkeypatch.setitem(__import__("sys").modules, "google", type("m", (), {"genai": _FakeGenai}))
+
+    assert llm._gemini_client(None) == "vertex-client"
+    assert built == {"vertexai": True, "project": "but-it-matters-tts", "location": "global"}
+
+
+def test_vertex_ignores_a_per_caller_api_key(monkeypatch):
+    """FACTCHECK_API_KEY is meaningless on Vertex — quota there is per PROJECT, not per key."""
+    built = {}
+
+    class _FakeGenai:
+        @staticmethod
+        def Client(**kw):
+            built.update(kw)
+            return "vertex-client"
+
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT", "p")
+    monkeypatch.setenv("GCP_LOCATION", "us-central1")
+    monkeypatch.setattr(llm, "_gemini_client", llm._gemini_client.__wrapped__)
+    monkeypatch.setitem(__import__("sys").modules, "google", type("m", (), {"genai": _FakeGenai}))
+
+    llm._gemini_client("some-key")
+    assert "api_key" not in built
+    assert built["location"] == "us-central1"
+
+
+def test_vertex_without_a_project_fails_loudly(monkeypatch):
+    """Rule 14: a half-configured Vertex switch must not silently fall back to a spent key."""
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.delenv("GCP_PROJECT", raising=False)
+    monkeypatch.setattr(llm, "_gemini_client", llm._gemini_client.__wrapped__)
+    with pytest.raises(config.ConfigError):
+        llm._gemini_client(None)

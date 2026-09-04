@@ -65,17 +65,42 @@ _GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
 _GROQ_MODEL = config.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
+def _use_vertex() -> bool:
+    """Serve Gemini through Vertex AI (ADC) instead of the Developer API (API key)?
+
+    Off by default: the API-key path needs no cloud setup and is what a fresh clone can run.
+    """
+    return config.get_bool("GEMINI_USE_VERTEX", False)
+
+
 @lru_cache(maxsize=4)
 def _gemini_client(api_key: str | None = None):
-    """Cached google-genai client, one per API key. Imported lazily (no SDK at import time).
+    """Cached google-genai client. Imported lazily (no SDK at import time).
 
-    Keyed by credential because the free tier is metered per PROJECT as well as per model:
-    a second free key carries its own 20/day grounded allowance. That matters because
-    ideation, the scriptwriter and the fact-check gate all draw on one budget today — see
-    `generate_grounded`.
+    TWO backends, because their grounded-search economics differ by two orders of magnitude
+    (measured 2026-09-04):
+
+      · Developer API (API key) — free tier is **20 grounded requests/day** on gemini-2.5-flash,
+        and that one bucket is shared by ideation, the scriptwriter and `factcheck.verify`. At
+        ~21/day of demand it runs dry, and the fact-check gate is what stops working. A second
+        free key does not help: grounded search is closed to new projects entirely.
+      · Vertex AI (ADC) — the same models with **1,500 grounded requests/day free** on 2.5, and
+        gemini-2.5-flash is still served here even though the Developer API 404s it for new
+        projects. Auth is Application Default Credentials, so no API key exists to leak — which
+        is also the only thing this Google Cloud org allows: its policy blocks BOTH API keys and
+        service-account keys, leaving ADC locally and Workload Identity Federation in CI.
+
+    Vertex quota is per PROJECT, so a per-caller `api_key` is meaningless there and ignored.
+    Keyed by credential in API-key mode so a dedicated key keeps its own allowance.
     """
     from google import genai
 
+    if _use_vertex():
+        return genai.Client(
+            vertexai=True,
+            project=config.require("GCP_PROJECT"),
+            location=config.get("GCP_LOCATION", "global"),
+        )
     return genai.Client(api_key=api_key or config.require("GEMINI_API_KEY"))
 
 
