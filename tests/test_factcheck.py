@@ -342,3 +342,64 @@ def test_gate_ran_is_true_for_a_real_verdict(monkeypatch):
     assert factcheck.gate_ran({"reason": "pass"}) is True
     assert factcheck.gate_ran({"reason": "fail"}) is True
     assert factcheck.gate_ran({"reason": "disabled"}) is False
+
+
+# --- a MISCONFIGURED dedicated key must not disable the gate (2026-09-04) ------------------
+# Measured live: a Gemini key from a NEW Google Cloud project cannot do grounded search at all —
+# gemini-2.5-flash 404s ("no longer available to new users") and every other model 429s with no
+# allowance. Pointing the gate at such a key made it fail on EVERY reel, i.e. permanently
+# fail-open — strictly worse than sharing one budget. A wrong key must degrade to today, not to
+# no gate.
+
+_PASS = '{"checked": 2, "blocking": [], "minor": [], "verdict": "pass"}'
+
+
+def test_a_dedicated_key_that_404s_falls_back_to_the_shared_one(monkeypatch):
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.setenv("FACTCHECK_API_KEY", "key-from-a-project-with-no-grounding")
+    tried = []
+
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+        tried.append(api_key)
+        if api_key is not None:
+            raise RuntimeError("404 NOT_FOUND. models/gemini-2.5-flash is no longer available")
+        return _PASS
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    out = factcheck.verify("a body")
+
+    assert out["ok"] is True
+    assert factcheck.gate_ran(out) is True, "the gate must actually run, not fail open"
+    assert tried == ["key-from-a-project-with-no-grounding", None]
+
+
+def test_an_exhausted_dedicated_key_does_not_spend_the_shared_budget(monkeypatch):
+    """429 means the isolation is WORKING and merely spent. Falling back would re-introduce the
+    competition the dedicated key exists to remove."""
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.setenv("FACTCHECK_API_KEY", "checker-key")
+    tried = []
+
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+        tried.append(api_key)
+        raise RuntimeError("429 RESOURCE_EXHAUSTED quotaValue: 20")
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    out = factcheck.verify("a body")
+
+    assert tried == ["checker-key"], "a spent dedicated key must not fall back"
+    assert factcheck.gate_ran(out) is False
+
+
+def test_no_dedicated_key_means_exactly_one_attempt(monkeypatch):
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.delenv("FACTCHECK_API_KEY", raising=False)
+    tried = []
+
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+        tried.append(api_key)
+        raise RuntimeError("404 NOT_FOUND")
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    factcheck.verify("a body")
+    assert tried == [None]

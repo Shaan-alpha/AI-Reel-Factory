@@ -199,6 +199,40 @@ def _findings(data: dict, *keys: str) -> list[str]:
     return out
 
 
+# Errors that mean the CREDENTIAL is wrong rather than merely spent. Measured 2026-09-04: a
+# key from a NEW Google Cloud project cannot do grounded search at all — gemini-2.5-flash
+# answers 404 "no longer available to new users" (it is grandfathered to projects that
+# already had it) and every other model 429s with an empty violation list, i.e. no allowance.
+# So a well-meant FACTCHECK_API_KEY can be a key that never works, and pointing the gate at
+# one made it fail on EVERY reel — permanently fail-open, strictly worse than sharing one
+# budget with ideation. A wrong key must cost us the isolation, never the gate.
+_MISCONFIGURED = ("404", "not_found", "403", "permission_denied", "api key not valid",
+                  "invalid_argument", "api_key_invalid")
+
+
+def _is_misconfigured(exc: Exception) -> bool:
+    """True when the dedicated key/project is wrong, as opposed to out of quota."""
+    text = str(exc).lower()
+    if "429" in text or "resource_exhausted" in text:
+        return False  # the isolation is working and merely spent — do NOT spend the shared key
+    return any(m in text for m in _MISCONFIGURED)
+
+
+def _ask_checker(prompt: str) -> str:
+    """Run the grounded check on the dedicated key, falling back to the shared one if that
+    key is misconfigured (never if it is merely exhausted — see `_is_misconfigured`)."""
+    key = _api_key()
+    try:
+        return llm.generate_grounded(prompt, max_tokens=2048, model=_model(), api_key=key)
+    except Exception as e:  # noqa: BLE001 — decide fall-back-vs-propagate from the error
+        if key is None or not _is_misconfigured(e):
+            raise
+        log.warning("factcheck: FACTCHECK_API_KEY cannot run the check (%s); falling back to "
+                    "the shared GEMINI_API_KEY. That key has no grounded search — a key from a "
+                    "NEW Google Cloud project does not get one.", str(e)[:160])
+        return llm.generate_grounded(prompt, max_tokens=2048, model=_model(), api_key=None)
+
+
 def verify(script_body: str, sources: list[str] | None = None, title: str = "") -> dict:
     """Re-check a finished script. Returns {ok, unsupported, checked, reason}.
 
@@ -218,8 +252,7 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
 
     raw = ""
     try:
-        raw = llm.generate_grounded(prompt, max_tokens=2048, model=_model(),
-                                    api_key=_api_key())
+        raw = _ask_checker(prompt)
         data = _parse(raw)
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
         # Grounded search shares one free-tier bucket with ideation and the scriptwriter, so a

@@ -46,6 +46,12 @@ log = logging.getLogger(__name__)
 # Keeping these on one knob was a live footgun: `_gen_gemini_grounded` defaulted to GEMINI_MODEL,
 # so "bump GEMINI_MODEL if RPD gets tight" — which .env.example actively advised — would have
 # silently killed grounded ideation, the grounded scriptwriter AND the fact-check gate at once.
+#
+# 2026-09-04, measured on a second key: free grounded search is now CLOSED TO NEW PROJECTS.
+# `gemini-2.5-flash` 404s with "no longer available to new users" on a fresh key while still
+# serving the original project, and every other model 429s with no allowance on BOTH keys. So
+# the 20/day on this one project is the entire grounded budget the pipeline will ever have for
+# free — it cannot be widened by minting more keys, only by paying.
 _GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.6-flash")
 _GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
 # Groq retired `llama-3.3-70b-versatile` — it 404s `model_not_found` (found 2026-08-25, live).

@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [0.17.1] - 2026-09-04 — A second free key cannot isolate the gate
+
+Measured while setting up 0.17.0's `FACTCHECK_API_KEY`: **free grounded search is closed to new
+Google Cloud projects.** On a fresh key `gemini-2.5-flash` answers `404 … no longer available to
+new users` (existing projects are grandfathered), and every other model answers `429` with an
+empty quota-violation list — the signature of no allowance at all. Both keys were probed across
+five models; only the original project has a grounded budget.
+
+### Fixed
+- **A misconfigured `FACTCHECK_API_KEY` disabled the gate entirely.** Because such a key fails on
+  every call, pointing the gate at one made it fail-open on EVERY reel — strictly worse than
+  sharing one budget with ideation, which is what the setting exists to avoid.
+  `factcheck._ask_checker` now falls back to `GEMINI_API_KEY` when the dedicated key is
+  *misconfigured* (404 / 403 / invalid key), and deliberately does NOT fall back on a 429 —
+  a spent dedicated key means the isolation is working, and falling back would re-introduce the
+  competition it was added to remove. A wrong key now costs the isolation, never the gate.
+
+### Changed
+- `.env.example` and `llm.py` record the measurement: the 20/day on the original project is the
+  entire free grounded budget this pipeline can have. It cannot be widened by minting more keys,
+  only by paying. The knob stays for a paid key or a future free tier.
+
 ## [0.17.0] - 2026-09-03 — Full audit: the gate that switched itself off
 
 A start-to-end audit of every module, both cron paths, the Vercel bot, the docs and the live

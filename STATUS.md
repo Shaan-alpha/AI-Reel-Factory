@@ -98,6 +98,26 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-09-04 — A second free key cannot give the fact-check gate its own quota
+
+Setting up 0.17.0's `FACTCHECK_API_KEY` with a real second key turned up a hard limit:
+**free grounded search is closed to new Google Cloud projects.** Probed both keys across five
+models — on the new key `gemini-2.5-flash` 404s ("no longer available to new users") while every
+other model 429s with an empty violation list (no allowance); on the original key
+`gemini-2.5-flash` 429s with `quotaValue: 20`, i.e. a real budget merely spent.
+
+- **So the gate cannot be isolated for free.** The 20/day on the original project is the whole
+  grounded budget the pipeline gets. `FACTCHECK_API_KEY` stays wired for a PAID key or a future
+  free tier, but it is not a fix available today.
+- **Worse, a wrong key was actively harmful:** it fails on every call, so the gate fail-opened on
+  every reel. `factcheck._ask_checker` now falls back to `GEMINI_API_KEY` on a misconfigured key
+  (404/403/invalid) and NOT on a 429 — a spent dedicated key means isolation is working.
+- **What actually protects the gate today** is the other two levers from the audit, both live:
+  the fail-open Telegram alert (you now hear about every unverified reel) and
+  `ENABLE_GROUNDED_SCRIPT=false`, which hands the scriptwriter's grounded call to the gate and
+  cuts a 3-reel run from 7 grounded calls to 4.
+- Tests: **465 pass, 5 skipped.** `tools/verify_factcheck_key.py` reports this situation directly.
+
 ### 2026-09-03 — Full audit, start to end
 
 Read every module, both cron paths, the Vercel bot, the docs, the workflows and the live
