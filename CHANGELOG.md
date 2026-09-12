@@ -5,6 +5,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
+## [Unreleased] — Every idea cited every story, and the gate fell open on a quote mark
+
+Run 34703685567 (2026-09-12) published two Shorts wrongly. Ideas 291 (Modi-Xi) and 292 (Houthis)
+each carried the same 15 grounded citations, which also covered a Nagpur bank robbery and a
+California murder. Those citations went into the scripts' source lists, both public YouTube
+descriptions, and the Houthi Short's burned-in "Source:" label (`voanews.com`, a 2024 Modi-Xi
+article). Idea 291 then shipped **UNVERIFIED** because the fact-check reply would not parse. Re-run
+on that exact script, the gate **blocks it 6 times out of 6**: "first bilateral talks in five
+years" is false, since Modi and Xi met in Kazan (Oct 2024) and Tianjin (Aug 2025).
+**486 pass, 5 skipped** (was 469 + 5).
+
+### Fixed
+- **Grounded citations were smeared across every idea in a batch** (`llm._grounded_sources`).
+  Three misreadings of `grounding_supports`, each measured live on Vertex and each stated in the
+  SDK's own `Segment` docstring:
+  - `start_index` is omitted when it is 0, so the SDK returns `None`. `int(None)` on the reply's
+    first support raised, and the handler around the loop threw away every span. With all
+    citations "loose", `_attach_real_sources` gave each one to every idea.
+  - Offsets are UTF-8 bytes, not characters, so each ₹, em dash or curly quote shifted later
+    citations toward the next idea.
+  - Offsets are relative to the part named by `part_index`, not the joined text.
+
+  A malformed support now costs only itself. Replaying the captured live reply (6 ideas,
+  26 citations) through the old code gave every idea all 26 or 27 sources. The fixed code gives
+  each idea only its own 2–5.
+- **A support that straddled two ideas was credited to both** (`ideation_fallback`). Live
+  supports run from one idea's JSON tail into the next idea's title and hook. Each support now
+  goes to the one idea whose own words (title, hook or angle) it covers most.
+- **A citation with no span went to every idea.** It is now kept only in a one-idea reply. In a
+  multi-idea reply it is dropped, and the idea-specific news search tops up any idea left short.
+- **The fact-check gate fell open on a verdict it had reached** (`factcheck`). The checker
+  quoted the script with raw double quotes, `json.loads` failed with `Expecting ',' delimiter`,
+  and that parse error took the outage path. Now:
+  - the prompt asks for single quotes inside findings;
+  - `_parse` repairs stray interior quotes, which is a no-op on the 6 real valid replies and
+    exact on every broken variant of them;
+  - an unreadable reply is asked for once more;
+  - the reply that defeated the parser is logged. Before this change it was lost, which is why
+    this failure could not be diagnosed from the run log.
+- **Approving an idea wiped its formatting, and could silently fail** (`approval`, Vercel bot).
+  The edit re-sent Telegram's plain text with `parse_mode=HTML`. That dropped every link, and
+  it 400'd on any `&` or `<`, so the tap looked ignored. The edit now sends back the original
+  entities, shifted past the decision label in UTF-16 units. Verified against the live Bot API.
+
+### Changed
+- **The Telegram digest is compact.** Sources used to take one `🔗 <full URL>` line each, at up to
+  884 characters per Google News link and 17 links per idea. They now fit on one line: up to three
+  publisher names as tappable links, then `+N more`. Link previews are off for sends and edits.
+  The worst real idea (291) went from 17 URL lines to 4 lines / 534 characters. The full source
+  list still ships in the YouTube description.
+- The Vercel bot's decision labels now match `src/approval.py` (✅ Approved / ❌ Rejected /
+  ⏭️ Passed). **The bot needs a redeploy** for its half of the fix.
+
 ## [0.18.0] - 2026-09-04 — Vertex AI: the grounded-search ceiling is gone
 
 The audit's P1 stops being a risk to manage and becomes a non-problem. Ideation, the scriptwriter

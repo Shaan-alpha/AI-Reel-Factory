@@ -5,9 +5,9 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.17.0 (**PUBLIC**) · _Full audit: the gate that switched itself off_ (fact-check fail-open now alerts + can hold its own quota; stale-idea age-out; per-reel photo variety; 17 stacked `[Unreleased]` blocks turned into a real version history; **460 pass, 5 skipped** — measured 2026-09-03)
-  ↳ the 0.5.0 label was a STATUS-only number: the last git tag was `v0.2.0`. `v0.17.0` is tagged.
-**Last updated:** 2026-09-03
+**Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased fixes (2026-09-13)**: per-idea citations, a fact-check gate that no longer falls open on a quote mark, a compact Telegram digest (**486 pass, 5 skipped** — measured 2026-09-13)
+  ↳ this line said 0.17.0 until 2026-09-13, one tag behind `v0.18.0`.
+**Last updated:** 2026-09-13
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
   ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -53,7 +53,12 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-- ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**460 pass, 5 skipped** — 2026-09-03).
+- ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**486 pass, 5 skipped** — 2026-09-13).
+- ⚠️ **Operator action (2026-09-13):** Short `NKPb-InUoJU` (idea 291, Modi-Xi) is public with a
+  claim the gate blocks every time. Both 2026-09-12 Shorts (`NKPb-InUoJU`, `bMc2Kq_7-wg`) list
+  unrelated stories as sources, and the Houthi one burns "Source: voanews.com" on screen. The
+  2026-09-13 fixes are **not committed or deployed** yet: they need a push (pipeline) and a
+  Vercel redeploy (bot).
 
 ### Operating model: ON-DEMAND (chosen 2026-06-09)
 Instead of (or before) scheduled crons, the primary trigger is the **`make-short` workflow**
@@ -97,6 +102,55 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-09-13 — Every idea cited every story, and the gate fell open on a quote mark
+
+Run 34703685567 (2026-09-12) produced ideas 291 (Modi-Xi) and 292 (Houthis). Both shipped with the
+**same 15 grounded citations**, which also covered a Nagpur bank robbery and a California murder.
+Idea 291 also shipped **UNVERIFIED** (`checker-failed: Expecting ',' delimiter`).
+
+- **Why the citations smeared.** It was reproduced live on Vertex and replayed offline from the
+  captured reply. The first support segment starts at offset 0, which the API omits, so the SDK
+  returns `start_index=None`. `int(None)` raised, and one `except` around the whole loop threw
+  away every span. With every citation "loose", each one was attached to every idea. Two more
+  bugs were underneath:
+  - offsets are UTF-8 **bytes** (measured: `byte_match=True`, `char_match=False` once ₹ and — are
+    in the text) and relative to their `part_index`;
+  - a support that straddled two ideas was credited to both.
+
+  Fixed in `llm._text_parts`/`_support_span` and `ideation_fallback._citations_by_idea`. Each
+  support goes to the one idea whose own words it covers most. A spanless citation is kept only
+  in a one-idea reply.
+- **Why the gate fell open.** The checker put raw `"` inside a finding, `json.loads` died, and a
+  parse error takes the same fail-open path as a quota outage. The actual reply is gone: it was
+  never logged, and six live re-runs did not reproduce it. But the error signature is exactly
+  that of an unescaped quote, and a synthetic reply of that shape reproduces the production error
+  verbatim on the old code. Now:
+  - the prompt asks for single quotes;
+  - `_escape_stray_quotes` repairs the JSON (a no-op on all 6 real valid replies, exact on every
+    broken variant);
+  - an unreadable reply is asked for **once** more;
+  - the unreadable raw reply is logged.
+- **What the gate would have said.** Re-run on script 258 it **blocks 6/6**: Modi and Xi did not
+  just hold their "first bilateral talks in five years". They met in Kazan (Oct 2024) and Tianjin
+  (Aug 2025). The idea's first "source" was a 2024-10-23 VOA article about Kazan.
+- **Telegram digest.** Each idea listed every source as its own full-URL line (17 of them, up to
+  884 characters each), with a link-preview card. Sources now fit on one line: three publisher
+  names as links, `+N more`, previews off. Tapping a button used to re-send the plain text as
+  HTML, which lost every link and 400'd on `&` or `<`. It now re-sends the original entities,
+  shifted by UTF-16 length. Both halves were verified against the live Bot API: one labelled
+  preview message was sent to the operator chat.
+- **Blast radius.** Only the 2026-09-12 batch. Every batch since the Vertex switch was checked,
+  and none of the others share sources, because the bug fires only when the reply starts with `{`
+  instead of a code fence.
+- **Verified live after the fix:** a fresh grounded ideation on Vertex gave each of 6 ideas its
+  own story's sources. The fact-check still blocks script 258. Tests: **486 pass, 5 skipped**.
+- **Not done (needs the operator):**
+  - commit + push;
+  - redeploy the Vercel bot;
+  - decide what to do about `NKPb-InUoJU` (false claim, public) and both Shorts' descriptions;
+  - consider `FACTCHECK_STRICT=true`. On Vertex the quota worry behind fail-open is gone, so an
+    unrunnable gate is now more likely a real fault than a spent budget.
 
 ### 2026-09-04 — Vertex AI removes the grounded-search ceiling entirely
 
