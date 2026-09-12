@@ -548,7 +548,8 @@ def test_attach_real_sources_gives_each_idea_only_its_own_citation(monkeypatch):
 
 def test_attach_real_sources_shares_an_unattributable_citation(monkeypatch):
     """A chunk with no support span still names a real article. Withholding it entirely is what
-    leaves an idea below MIN_SOURCES and gets it dropped."""
+    leaves an idea below MIN_SOURCES and gets it dropped. Only safe in a ONE-idea reply, where
+    there is no other story it could belong to — see the multi-idea case below."""
     monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
     ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "h", "angle": "a", "sources": []}]
     raw = '{"ideas": [{"title": "Nepal-China Floods: 1,270+ Dead"}]}'
@@ -556,6 +557,57 @@ def test_attach_real_sources_shares_an_unattributable_citation(monkeypatch):
 
     out = fb._attach_real_sources(ideas, raw, grounded, _STORIES)
     assert "https://pub/loose" in out[0]["sources"]
+
+
+# --- attribution across a MULTI-idea reply (2026-09-12: ideas 291/292 shared 15 citations) --
+
+def _two_idea_reply():
+    """The layout Vertex actually returned, pretty-printed, one idea after another."""
+    ideas = [
+        {"niche": "impact-news", "title": "Modi-Xi Talks Signal a Thaw",
+         "hook": "Modi and Xi met on the BRICS sidelines in New Delhi.",
+         "angle": "Two nuclear neighbours talking lowers the temperature on the border.",
+         "est_score": 0.85, "share_score": 0.8, "sources": []},
+        {"niche": "impact-news", "title": "Houthis Seize a Red Sea Island",
+         "hook": "The Houthis took Mayun Island at the mouth of Bab al-Mandab.",
+         "angle": "A chokepoint for a tenth of world trade just changed hands.",
+         "est_score": 0.9, "share_score": 0.9, "sources": []},
+    ]
+    raw = json.dumps({"ideas": ideas}, indent=2)
+    return [dict(i) for i in ideas], raw
+
+
+def test_a_support_straddling_two_ideas_goes_to_the_one_whose_words_it_covers(monkeypatch):
+    """Live supports run from one idea's JSON tail (est_score, sources, niche) into the next
+    idea's title and hook. Crediting every idea the span touched gave idea 1 idea 2's articles."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    ideas, raw = _two_idea_reply()
+    first_angle_end = raw.index("on the border.") + len("on the border.")
+    second_hook_end = raw.index("Bab al-Mandab.") + len("Bab al-Mandab.")
+    grounded = [
+        {"uri": "https://pub/modi", "domain": "scmp.com", "spans": [(0, first_angle_end)]},
+        {"uri": "https://pub/houthi", "domain": "theguardian.com",
+         "spans": [(first_angle_end, second_hook_end)]},
+    ]
+
+    out = fb._attach_real_sources(ideas, raw, grounded, [])
+
+    assert "https://pub/modi" in out[0]["sources"]
+    assert "https://pub/houthi" not in out[0]["sources"], "a neighbour's article leaked in"
+    assert "https://pub/houthi" in out[1]["sources"]
+    assert "https://pub/modi" not in out[1]["sources"]
+
+
+def test_an_unattributable_citation_is_not_handed_to_every_idea(monkeypatch):
+    """A citation with no span, in a reply holding several ideas, cannot be pinned on any one of
+    them. Giving it to all of them is exactly how a Houthi Short came to cite a bank robbery."""
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    ideas, raw = _two_idea_reply()
+    grounded = [{"uri": "https://pub/nagpur-bank-robbery", "domain": "indiatoday.in", "spans": []}]
+
+    out = fb._attach_real_sources(ideas, raw, grounded, [])
+
+    assert all("https://pub/nagpur-bank-robbery" not in i["sources"] for i in out)
 
 
 def test_produce_ideas_sources_an_idea_whose_model_urls_are_all_dead(monkeypatch):

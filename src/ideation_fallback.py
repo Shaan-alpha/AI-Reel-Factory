@@ -271,6 +271,66 @@ def _idea_spans(raw: str, ideas: list[dict]) -> list[tuple[int, int]]:
     return spans
 
 
+def _content_ranges(raw: str, idea: dict, lo: int, hi: int) -> list[tuple[int, int]]:
+    """Where this idea's OWN words — title, hook, angle — sit inside its span of the raw reply.
+
+    Tried verbatim and then JSON-escaped, because the parsed value of a string holding a quote
+    or a newline is not what appears in the reply text.
+    """
+    out = []
+    for key in ("title", "hook", "angle"):
+        val = str(idea.get(key) or "")
+        if not val:
+            continue
+        for needle in (val, json.dumps(val, ensure_ascii=False)[1:-1]):
+            at = raw.find(needle, lo, hi)
+            if at >= 0:
+                out.append((at, at + len(needle)))
+                break
+    return out
+
+
+def _overlap(s: int, e: int, ranges: list[tuple[int, int]]) -> int:
+    return sum(max(0, min(e, b) - max(s, a)) for a, b in ranges)
+
+
+def _citations_by_idea(ideas: list[dict], raw: str, grounded: list[dict]) -> list[list[dict]]:
+    """Which grounded citations back which idea — each support credited to ONE idea.
+
+    A support segment is a run of the reply text, and those runs do not respect JSON object
+    boundaries: measured live on 2026-09-13, supports ran from the tail of one idea
+    (`"est_score": 0.85, "sources": [] }, { "niche": …`) into the next idea's title and hook. The
+    old rule credited a citation to every idea its span merely TOUCHED, so an idea kept picking
+    up its neighbour's articles. A support now goes to the idea whose own words it covers most,
+    falling back to raw span overlap only for a support that covers no idea's words at all.
+
+    A citation with no span at all is unattributable. It belongs to the idea only when the reply
+    holds exactly one; in a multi-idea reply it is dropped, because a citation for the wrong
+    story is worse than none (docs/08 §1) and `_search_for_more` tops up an idea that runs short
+    from a search for ITS title. Handing such citations to every idea is what shipped a Houthi
+    Short citing a Nagpur bank robbery (ideas 291/292, 2026-09-12).
+    """
+    owned: list[list[dict]] = [[] for _ in ideas]
+    if len(ideas) == 1:
+        owned[0] = list(grounded)
+        return owned
+    spans = _idea_spans(raw, ideas)
+    content = [_content_ranges(raw, idea, lo, hi) if lo >= 0 else []
+               for idea, (lo, hi) in zip(ideas, spans)]
+    for g in grounded:
+        owners: set[int] = set()
+        for s, e in g.get("spans", []):
+            scores = [_overlap(s, e, ranges) for ranges in content]
+            if not any(scores):
+                scores = [_overlap(s, e, [span]) if span[0] >= 0 else 0 for span in spans]
+            best = max(scores, default=0)
+            if best > 0:
+                owners.update(i for i, score in enumerate(scores) if score == best)
+        for i in sorted(owners):
+            owned[i].append(g)
+    return owned
+
+
 def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
                          stories: list[dict]) -> list[dict]:
     """Replace each idea's sources with REAL ones, best first. Mutates and returns `ideas`.
@@ -279,20 +339,13 @@ def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
     search first, then the news feed's own article link for the story the idea came from, then
     whatever the model wrote — kept last, and only because `_validate_and_clean` still probes it,
     so a genuine URL the model happened to know is not thrown away while an invented one is.
+    Which grounded citation belongs to which idea is `_citations_by_idea`'s call.
     """
-    spans = _idea_spans(raw, ideas)
-    loose = [g for g in grounded if not g.get("spans")]
     resolved: dict[str, str] = {}
 
-    for idea, (lo, hi) in zip(ideas, spans):
-        # OVERLAP, not containment: a support span covers a sentence, which routinely straddles
-        # the JSON punctuation between one idea object and the next (measured live: a single
-        # support ran [513:1744] across a whole idea object). Requiring the span to START inside
-        # the idea would silently drop most real citations.
-        mine = [g for g in grounded
-                if lo >= 0 and any(s < hi and e > lo for s, e in g.get("spans", []))]
+    for idea, mine in zip(ideas, _citations_by_idea(ideas, raw, grounded)):
         publisher = []
-        for g in [*mine, *loose]:
+        for g in mine:
             uri = g.get("uri", "")
             if not uri:
                 continue
