@@ -172,6 +172,58 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = No
                                      api_key=api_key)[0]
 
 
+def _text_parts(resp) -> dict[int, tuple[int, str]]:
+    """{part index: (character offset of that part in `resp.text`, part text)}.
+
+    Mirrors how the SDK builds `resp.text`: text parts concatenated in order, thought parts
+    skipped. Falls back to treating the whole reply as part 0 when the parts are not reachable.
+    """
+    try:
+        raw_parts = list(resp.candidates[0].content.parts or [])
+    except (AttributeError, IndexError, TypeError):
+        raw_parts = []
+    out: dict[int, tuple[int, str]] = {}
+    base = 0
+    for i, part in enumerate(raw_parts):
+        text = getattr(part, "text", None)
+        if not isinstance(text, str) or getattr(part, "thought", None) is True:
+            continue
+        out[i] = (base, text)
+        base += len(text)
+    if not out:
+        out[0] = (0, getattr(resp, "text", "") or "")
+    return out
+
+
+def _support_span(seg, parts: dict[int, tuple[int, str]]) -> tuple[int, int] | None:
+    """One support segment as (start, end) character offsets into `resp.text`, or None.
+
+    Three things about the API's numbers, all measured live on Vertex 2026-09-13 and all stated
+    in the SDK's own `Segment` docstring:
+      · `start_index` is OMITTED when it is 0 (proto3 default), so the SDK hands back None. The
+        old `int(None)` raised TypeError on the reply's first support — and the handler around
+        the loop then discarded EVERY span, turning all citations "loose" and giving each idea
+        in the batch the whole batch's sources (ideas 291/292: 15 shared citations each).
+      · offsets are UTF-8 BYTES, not characters. Identical on ASCII, but every ₹, em dash or
+        curly quote before the segment (3 bytes, 1 character) pushes it two characters right —
+        a few of those and a citation lands on the neighbouring idea.
+      · offsets are relative to the PART named by `part_index`, not to the joined text.
+    """
+    end_b = getattr(seg, "end_index", None)
+    if end_b is None:
+        return None
+    start_b = getattr(seg, "start_index", None) or 0
+    part_i = getattr(seg, "part_index", None) or 0
+    base, text = parts.get(int(part_i), parts.get(0, (0, "")))
+    data = text.encode("utf-8")
+
+    def _chars(n: int) -> int:  # bytes -> characters; a cut mid-codepoint rounds down
+        return len(data[: max(0, int(n))].decode("utf-8", "ignore"))
+
+    start, end = base + _chars(start_b), base + _chars(end_b)
+    return (start, end) if end > start else None
+
+
 def _grounded_sources(resp) -> list[dict]:
     """The REAL Google Search citations behind a grounded reply: [{uri, domain, spans}].
 
@@ -182,10 +234,13 @@ def _grounded_sources(resp) -> list[dict]:
     404'd, the liveness probe dropped the ideas, and the on-demand run either shipped a digest of
     one or died with "no fresh ideas to seed".
 
-    `spans` are (start, end) character offsets into the reply text, from `grounding_supports`, so
+    `spans` are (start, end) CHARACTER offsets into `resp.text`, from `grounding_supports`, so
     a caller emitting several objects in one reply can attribute each citation to the right one.
     A chunk with no support keeps an empty span list: it is still a real article, merely
     unattributable. Fail-soft (rule 11) — a reply with no grounding metadata yields [].
+
+    The API does not hand over character offsets, and reading its numbers as if it did is how
+    every idea in the 2026-09-12 digest came to cite every story (see `_support_span`).
     """
     try:
         gm = resp.candidates[0].grounding_metadata
@@ -193,14 +248,17 @@ def _grounded_sources(resp) -> list[dict]:
     except (AttributeError, IndexError, TypeError):
         return []
 
+    parts = _text_parts(resp)
     spans: dict[int, list[tuple[int, int]]] = {}
-    try:
-        for sup in gm.grounding_supports or []:
-            seg = sup.segment
+    for sup in getattr(gm, "grounding_supports", None) or []:
+        try:  # per support: one malformed segment must not cost the others their attribution
+            span = _support_span(sup.segment, parts)
+            if span is None:
+                continue
             for idx in sup.grounding_chunk_indices or []:
-                spans.setdefault(int(idx), []).append((int(seg.start_index), int(seg.end_index)))
-    except (AttributeError, TypeError):  # noqa: BLE001 — spans are a bonus, citations are not
-        spans = {}
+                spans.setdefault(int(idx), []).append(span)
+        except (AttributeError, TypeError, ValueError):  # noqa: BLE001 — spans are a bonus
+            continue
 
     out: list[dict] = []
     for i, chunk in enumerate(chunks):

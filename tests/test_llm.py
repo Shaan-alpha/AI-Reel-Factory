@@ -519,6 +519,76 @@ def test_grounded_sources_is_empty_when_metadata_is_absent():
     assert llm._grounded_sources(_FakeResponse("t", [])) == []
 
 
+# --- what the API's offsets actually MEAN (2026-09-13, measured live on Vertex) ------------
+# Ideas 291 and 292 each shipped citing the same 15 articles — Modi-Xi, the Houthis, a Nagpur
+# robbery and a California murder — because every one of these was misread.
+
+class _FakePart:
+    def __init__(self, text, thought=None):
+        self.text, self.thought = text, thought
+
+
+class _FakeContent:
+    def __init__(self, parts):
+        self.parts = list(parts)
+
+
+class _FakePartsCandidate(_FakeCandidate):
+    def __init__(self, meta, parts):
+        super().__init__(meta)
+        self.content = _FakeContent(parts)
+
+
+def _seg_support(start, end, idxs, part_index=None):
+    sup = _FakeSupport(start, end, idxs)
+    sup.segment.part_index = part_index
+    return sup
+
+
+def test_a_support_at_offset_zero_keeps_every_span():
+    """proto3 omits a 0, so the reply's FIRST support arrives with start_index=None. `int(None)`
+    used to throw away the spans of ALL supports, making every citation unattributable."""
+    text = '{"ideas": [{"title": "A"}, {"title": "B"}]}'
+    resp = _fake_grounded_response(
+        text,
+        chunks=[_FakeChunk("https://r/a", "a.com"), _FakeChunk("https://r/b", "b.com")],
+        supports=[_FakeSupport(None, 24, [0]), _FakeSupport(26, 42, [1])])
+    out = llm._grounded_sources(resp)
+    assert out[0]["spans"] == [(0, 24)]
+    assert out[1]["spans"] == [(26, 42)], "one None must not wipe the other supports"
+
+
+def test_support_offsets_are_bytes_and_become_character_offsets():
+    """Vertex counts UTF-8 bytes. '₹' is 3 bytes and '—' is 3, so reading bytes as characters
+    lands a later citation 4 characters to the right — on the neighbouring idea, in a digest."""
+    text = "₹5 cr — first. Second claim."
+    start_b = len("₹5 cr — first. ".encode("utf-8"))
+    resp = _fake_grounded_response(
+        text, chunks=[_FakeChunk("https://r/a", "a.com")],
+        supports=[_FakeSupport(start_b, len(text.encode("utf-8")), [0])])
+    (s, e), = llm._grounded_sources(resp)[0]["spans"]
+    assert text[s:e] == "Second claim."
+
+
+def test_support_offsets_are_relative_to_their_part():
+    parts = [_FakePart("thinking…", thought=True), _FakePart("First part. "), _FakePart("Second.")]
+    text = "First part. Second."
+    meta = _FakeMeta([_FakeChunk("https://r/a", "a.com")], [_seg_support(0, 7, [0], part_index=2)])
+    resp = _FakeResponse(text, [_FakePartsCandidate(meta, parts)])
+    (s, e), = llm._grounded_sources(resp)[0]["spans"]
+    assert text[s:e] == "Second."
+
+
+def test_a_malformed_support_costs_only_itself():
+    text = "alpha beta"
+    resp = _fake_grounded_response(
+        text, chunks=[_FakeChunk("https://r/a", "a.com"), _FakeChunk("https://r/b", "b.com")],
+        supports=[_FakeSupport(0, None, [0]), _FakeSupport(6, 10, [1])])
+    out = llm._grounded_sources(resp)
+    assert out[0]["spans"] == []
+    assert out[1]["spans"] == [(6, 10)]
+
+
 def test_generate_grounded_with_sources_returns_text_and_citations(monkeypatch):
     monkeypatch.setattr(
         llm, "_gen_gemini_grounded_full",
