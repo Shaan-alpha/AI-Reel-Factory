@@ -45,6 +45,8 @@ Failure semantics differ on purpose (rules 11, 14):
   · a BLOCKING finding                          -> the reel is BLOCKED (this is the point of the gate)
   · only MINOR findings                         -> logged loudly, and the reel proceeds
   · the checker ITSELF errors or is out of quota -> logged, and the reel proceeds
+  · the checker answers but its JSON is broken  -> repaired if it is only stray quotes, else asked
+                                                   ONCE more; only then treated as an outage
 A grounding outage must not silently halt the day's batch; only a real verdict may.
 """
 from __future__ import annotations
@@ -110,15 +112,71 @@ Return ONLY a JSON object, no markdown fences:
 {{"checked": <how many claims you examined>, "blocking": ["the exact claim, and what contradicts \
 it"], "minor": ["the exact claim, and what is imprecise about it"], "verdict": "pass" or "fail"}}
 "verdict" is "fail" if and only if "blocking" is non-empty. Both lists may be empty.
+When a finding quotes the script, use SINGLE quotes ('like this') — a double quote inside a \
+string ends the string and breaks the JSON.
 """
 
 
+def _escape_stray_quotes(blob: str) -> str:
+    """Escape double quotes that sit INSIDE a JSON string instead of ending it.
+
+    The checker's findings quote the script, and a model writing JSON by hand routinely leaves
+    those quotes raw: `["The script says "first talks in five years" — they met in 2024"]`.
+    json.loads reads the inner quote as the end of the string and dies with "Expecting ','
+    delimiter", which is the exact error that shipped idea 291 unverified on 2026-09-12 — with a
+    claim this gate blocks every single time it gets to read it.
+
+    A quote inside a string is taken as CLOSING only when what follows can legally follow a
+    string in this schema: `:` `]` `}` or the end, or `,` followed by the start of another value.
+    Anything else — a letter, a space and then a word — means it was a quote in prose.
+    """
+    out: list[str] = []
+    in_string = escaped = False
+    n = len(blob)
+    for i, ch in enumerate(blob):
+        if not in_string:
+            in_string = ch == '"'
+            out.append(ch)
+            continue
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == '"':
+            j = i + 1
+            while j < n and blob[j].isspace():
+                j += 1
+            nxt = blob[j] if j < n else ""
+            if nxt == ",":
+                k = j + 1
+                while k < n and blob[k].isspace():
+                    k += 1
+                closes = k >= n or blob[k] in '"{['
+            else:
+                closes = nxt in ("", ":", "]", "}")
+            if closes:
+                in_string = False
+            else:
+                out.append('\\"')
+                continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _parse(raw: str) -> dict:
-    """Pull the JSON object out of the model's reply. Tolerates fences and stray prose."""
+    """Pull the JSON object out of the model's reply. Tolerates fences, stray prose, and raw
+    double quotes inside a finding (see `_escape_stray_quotes`). Raises ValueError if unusable."""
     start, end = raw.find("{"), raw.rfind("}")
     if start == -1 or end <= start:
         raise ValueError("fact check: no JSON object in response")
-    return json.loads(raw[start : end + 1], strict=False)
+    blob = raw[start : end + 1]
+    try:
+        data = json.loads(blob, strict=False)
+    except json.JSONDecodeError:
+        data = json.loads(_escape_stray_quotes(blob), strict=False)  # still bad -> raises
+    if not isinstance(data, dict):
+        raise ValueError("fact check: reply is not a JSON object")
+    return data
 
 
 def _model() -> str | None:
@@ -253,7 +311,17 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
     raw = ""
     try:
         raw = _ask_checker(prompt)
-        data = _parse(raw)
+        try:
+            data = _parse(raw)
+        except ValueError as e:  # JSONDecodeError included
+            # A reply we cannot read is not an outage: the checker RAN and reached a verdict we
+            # failed to parse. Falling open on it shipped idea 291 unverified (2026-09-12) with a
+            # claim the gate blocks 6 times out of 6. One more ask is cheap — Vertex allows 1,500
+            # grounded requests a day — and far cheaper than a public false claim.
+            log.warning("factcheck: could not parse the checker's reply (%s); asking once more. "
+                        "Raw reply: %s", e, raw.strip()[:1500])
+            raw = _ask_checker(prompt)
+            data = _parse(raw)
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
         # Grounded search shares one free-tier bucket with ideation and the scriptwriter, so a
         # busy day can exhaust it and leave the gate unable to run. FACTCHECK_STRICT decides
@@ -263,6 +331,9 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
         log.warning("factcheck: verification UNAVAILABLE (%s) — %s", e,
                     "blocking (FACTCHECK_STRICT)" if strict else
                     "allowing through UNVERIFIED; set FACTCHECK_STRICT=true to block instead")
+        if raw.strip():  # without this the reply that defeated the parser is lost for good
+            log.warning("factcheck: raw checker reply that could not be used: %s",
+                        raw.strip()[:1500])
         return {"ok": not strict, "unsupported": [] if not strict else [f"checker unavailable: {e}"],
                 "minor": [], "checked": 0, "reason": f"checker-failed: {e}"}
 

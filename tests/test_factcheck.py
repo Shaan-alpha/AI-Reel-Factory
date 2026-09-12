@@ -195,6 +195,72 @@ def test_tolerates_json_in_markdown_fences(monkeypatch):
     assert factcheck.verify("Body.", [])["ok"] is True
 
 
+# --- a reply the parser could not read (2026-09-12, idea 291) -------------------------------
+# The checker ran and — as re-running it on the real script showed, 6 times out of 6 — found the
+# story false. But it quoted the script with raw double quotes, json.loads died with "Expecting
+# ',' delimiter", and that parse error took the OUTAGE path: the reel shipped unverified.
+
+_RAW_QUOTES = ('{"checked": 6, "blocking": ["The script says Modi and Xi "just held their first '
+               'bilateral talks in five years" at BRICS. False: they met in Kazan in October 2024 '
+               'and in Tianjin in August 2025."], "minor": ["calls relations "icy", which is '
+               'editorial"], "verdict": "fail"}')
+
+
+def test_the_live_failure_shape_really_is_unparseable_as_plain_json():
+    import json
+    with pytest.raises(json.JSONDecodeError, match="Expecting ',' delimiter"):
+        json.loads(_RAW_QUOTES, strict=False)
+
+
+def test_raw_quotes_inside_a_finding_still_reach_a_verdict(monkeypatch):
+    _mock_grounded(monkeypatch, _RAW_QUOTES)
+    r = factcheck.verify("PM Modi and Xi just held their first bilateral talks in five years.", [])
+    assert factcheck.gate_ran(r), f"the gate must not fail open on a readable verdict: {r}"
+    assert r["ok"] is False
+    assert "first bilateral talks in five years" in r["unsupported"][0]
+    assert r["minor"] == ["calls relations \"icy\", which is editorial"]
+
+
+def test_quote_repair_leaves_valid_json_untouched():
+    valid = ('{"checked": 2, "blocking": [], "minor": ["says \\"12,000\\", filing says 12,400",'
+             ' "a, b"], "verdict": "pass"}')
+    assert factcheck._escape_stray_quotes(valid) == valid
+
+
+def test_an_unreadable_reply_is_asked_again_once(monkeypatch):
+    replies = iter(["Let me check that... the claim is false.",
+                    '{"checked": 1, "blocking": ["invented"], "minor": [], "verdict": "fail"}'])
+    calls = []
+    monkeypatch.setattr(factcheck.llm, "generate_grounded",
+                        lambda *a, **k: calls.append(1) or next(replies))
+    r = factcheck.verify("Body.", [])
+    assert len(calls) == 2
+    assert factcheck.gate_ran(r) and r["ok"] is False
+
+
+def test_two_unreadable_replies_fail_open_and_log_what_the_checker_said(monkeypatch, caplog):
+    calls = []
+    monkeypatch.setattr(factcheck.llm, "generate_grounded",
+                        lambda *a, **k: calls.append(1) or "no json here, sorry")
+    with caplog.at_level("WARNING"):
+        r = factcheck.verify("Body.", [])
+    assert len(calls) == 2, "exactly one re-ask — never a loop"
+    assert r["ok"] is True and not factcheck.gate_ran(r)
+    assert any("no json here, sorry" in rec.getMessage() for rec in caplog.records), \
+        "the unreadable reply must be in the log, or the next failure is undiagnosable too"
+
+
+def test_prompt_asks_for_single_quotes_inside_findings(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(factcheck.llm, "generate_grounded",
+                        lambda p, **k: seen.setdefault("p", p) and _PASS_REPLY)
+    factcheck.verify("Body.", [])
+    assert "SINGLE quotes" in seen["p"]
+
+
+_PASS_REPLY = '{"checked": 1, "blocking": [], "minor": [], "verdict": "pass"}'
+
+
 def test_tolerates_a_junk_checked_count(monkeypatch):
     _mock_grounded(monkeypatch, '{"checked": "several", "unsupported": [], "verdict": "pass"}')
     r = factcheck.verify("Body.", [])
