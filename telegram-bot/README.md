@@ -50,6 +50,16 @@ python tools/set_telegram_webhook.py --info   # confirm url + pending_update_cou
 
 Done — message the bot `/help`.
 
+## Redeploying after a change
+The live project (`telegram-bot`) is **CLI-deployed, not connected to git**: pushing to `main`
+does NOT update the bot. After changing `api/telegram.py`:
+```powershell
+cd telegram-bot; vercel deploy --prod --yes
+```
+The webhook points at the stable production alias `telegram-bot-gilt-omega.vercel.app`, which
+follows each production deploy, so the webhook does not need to be set again. (The 2026-09-13
+redeploy found the live bot 94 days behind `main`.)
+
 ## Security
 - Requests without the matching `X-Telegram-Bot-Api-Secret-Token` header are rejected (401).
 - Messages from any chat other than `TELEGRAM_CHAT_ID` are ignored.

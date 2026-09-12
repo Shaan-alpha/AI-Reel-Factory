@@ -57,8 +57,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - ⚠️ **Operator action (2026-09-13):** Short `NKPb-InUoJU` (idea 291, Modi-Xi) is public with a
   claim the gate blocks every time. Both 2026-09-12 Shorts (`NKPb-InUoJU`, `bMc2Kq_7-wg`) list
   unrelated stories as sources, and the Houthi one burns "Source: voanews.com" on screen. The
-  2026-09-13 fixes are **not committed or deployed** yet: they need a push (pipeline) and a
-  Vercel redeploy (bot).
+  2026-09-13 fixes are **pushed** (`a24bddf`, CI green) and the **Vercel bot is redeployed**.
+  Vercel is CLI-deployed, not git-connected, so **every bot change needs `vercel deploy --prod`
+  from `telegram-bot/`**. The previous deploy was 94 days old and had missed the 2026-09-03 bot
+  fixes too.
 
 ### Operating model: ON-DEMAND (chosen 2026-06-09)
 Instead of (or before) scheduled crons, the primary trigger is the **`make-short` workflow**
@@ -145,9 +147,12 @@ Idea 291 also shipped **UNVERIFIED** (`checker-failed: Expecting ',' delimiter`)
   instead of a code fence.
 - **Verified live after the fix:** a fresh grounded ideation on Vertex gave each of 6 ideas its
   own story's sources. The fact-check still blocks script 258. Tests: **486 pass, 5 skipped**.
-- **Not done (needs the operator):**
-  - commit + push;
-  - redeploy the Vercel bot;
+- **Shipped:** pushed to `main` (5 commits, `tests` workflow green on `a24bddf`). The Vercel bot
+  was redeployed to production (`telegram-k6us6ouk7`, aliased to the webhook's
+  `telegram-bot-gilt-omega.vercel.app`, health check OK). That deploy also carried the
+  2026-09-03 bot fixes (approval cap 3, `/latest` nulls-last), which had never been deployed:
+  the previous deploy was 94 days old. The project is CLI-deployed, not git-connected.
+- **Still open (needs the operator):**
   - decide what to do about `NKPb-InUoJU` (false claim, public) and both Shorts' descriptions;
   - consider `FACTCHECK_STRICT=true`. On Vertex the quota worry behind fail-open is gone, so an
     unrunnable gate is now more likely a real fault than a spent budget.
