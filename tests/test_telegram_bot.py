@@ -96,8 +96,36 @@ def test_handle_callback_approves_authorized_chat(bot, monkeypatch):
 
     assert writes == [(7, "approved")]
     assert [method for method, _ in calls] == ["answerCallbackQuery", "editMessageText"]
-    assert calls[-1][1]["text"].startswith("Approved")
-    assert calls[-1][1]["parse_mode"] == "HTML"
+    assert calls[-1][1]["text"].startswith("✅ Approved")
+    # plain text + entities, never plain text re-parsed as HTML (see the next test)
+    assert "parse_mode" not in calls[-1][1]
+    assert calls[-1][1]["link_preview_options"] == {"is_disabled": True}
+
+
+def test_a_decision_keeps_the_digest_links_and_survives_an_ampersand(bot, monkeypatch):
+    """Telegram returns the digest as plain `text` + `entities`. Re-sending that text with
+    parse_mode=HTML threw away every source link on the first tap — and 400'd on any '&', so the
+    tap looked ignored. The entities must come back, shifted past the new label (UTF-16 units)."""
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
+    monkeypatch.setattr(bot, "approved_count", lambda: 0)
+    monkeypatch.setattr(bot, "set_idea_status", lambda i, s: True)
+    calls = []
+    monkeypatch.setattr(bot, "tg_api", lambda method, payload: calls.append((method, payload)))
+    text = "AT&T 🚀 deal\n📰 reuters.com"
+    link_at = len(text[: text.index("reuters")].encode("utf-16-le")) // 2
+    entities = [{"type": "bold", "offset": 0, "length": 12},
+                {"type": "text_link", "offset": link_at, "length": 11, "url": "https://reuters.com/a"}]
+
+    bot.handle_update({"callback_query": {"id": "cb1", "data": "a:7", "message": {
+        "message_id": 50, "text": text, "entities": entities, "chat": {"id": 111}}}})
+
+    edit = calls[-1][1]
+    new_text = edit["text"]
+    link = next(e for e in edit["entities"] if e["type"] == "text_link")
+    as_utf16 = new_text.encode("utf-16-le")
+    covered = as_utf16[link["offset"] * 2:(link["offset"] + link["length"]) * 2].decode("utf-16-le")
+    assert covered == "reuters.com" and link["url"] == "https://reuters.com/a"
+    assert "AT&T" in new_text
 
 
 def test_handle_callback_ignores_foreign_chat(bot, monkeypatch):

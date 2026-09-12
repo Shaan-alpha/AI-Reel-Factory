@@ -20,6 +20,7 @@ from __future__ import annotations
 import html
 import logging
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -58,22 +59,83 @@ def _keyboard(idea_id: int) -> dict:
     ]]}
 
 
+# How many publishers the digest names before collapsing the rest into "+N more". The operator
+# needs enough to see the idea is sourced from real outlets, not a wall of URLs to read.
+_SOURCES_SHOWN = 3
+# Every digest message is sent and edited with previews off: the preview card is the biggest
+# thing in the chat, and it previews only the first link, which says nothing about the idea.
+_NO_PREVIEW = {"is_disabled": True}
+
+
+def _source_label(url: str) -> str:
+    """'https://www.theguardian.com/world/…' -> 'theguardian.com'. Readable, never a raw URL."""
+    host = urlparse(url if "://" in url else "http://" + url).netloc.lower()
+    host = host.split("@")[-1].split(":")[0]
+    for prefix in ("www.", "m.", "amp."):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+    return "Google News" if host == "news.google.com" else (host or "link")
+
+
+def _format_sources(sources: list[str]) -> str:
+    """One line: up to _SOURCES_SHOWN publishers as tappable names, then '+N more'.
+
+    Each source used to get its own '🔗 <full URL>' line. Google News reader links run 249-884
+    characters, and a digest idea carried up to 17 of them (2026-09-12), so one idea filled the
+    screen. The full list still ships in the YouTube description; the digest only needs the
+    publishers at a glance and a tap-through to check one.
+    """
+    firsts: dict[str, str] = {}  # label -> first URL from that publisher
+    for s in sources:
+        firsts.setdefault(_source_label(str(s)), str(s))
+    if not firsts:
+        return "📰 <b>no sources!</b>"
+    shown = list(firsts.items())[:_SOURCES_SHOWN]
+    links = " · ".join(f'<a href="{html.escape(u, quote=True)}">{html.escape(label)}</a>'
+                       for label, u in shown)
+    rest = len(sources) - len(shown)
+    return f"📰 {links}" + (f" <i>+{rest} more</i>" if rest > 0 else "")
+
+
 def _format_idea(idea: dict) -> str:
-    """HTML message body for one idea, with clickable source links (operator sanity-check)."""
+    """Compact HTML message body for one idea: title, hook, angle, then score + sources on ONE
+    line. Sources stay tappable so the operator can still sanity-check one (docs/08 §6)."""
     def esc(x):
         return html.escape(str(x or ""))
 
-    sources = idea.get("sources") or []
-    src_lines = "\n".join(f"🔗 {esc(s)}" for s in sources) or "🔗 (no sources!)"
     score = idea.get("est_score")
     score_str = f"{float(score):.2f}" if score is not None else "—"
     return (
         f"<b>{esc(idea.get('title'))}</b>\n"
         f"<i>Hook:</i> {esc(idea.get('hook'))}\n"
         f"<i>Why it matters:</i> {esc(idea.get('angle'))}\n"
-        f"<i>Score:</i> {score_str}\n\n"
-        f"{src_lines}"
+        f"⭐ {score_str}  {_format_sources(idea.get('sources') or [])}"
     )
+
+
+def _utf16_len(text: str) -> int:
+    """Telegram measures entity offsets in UTF-16 code units, not Python characters."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _decided_message(label: str, msg: dict) -> dict:
+    """editMessageText params that put the decision on top and KEEP the idea's formatting.
+
+    Telegram hands the message back as plain `text` plus `entities` (bold, italic, links). This
+    used to re-send that plain text with parse_mode=HTML, which (a) dropped every link and all
+    formatting on the first tap and (b) failed outright — so the tap looked ignored — whenever
+    the text held '&' or '<', e.g. a title like "AT&T" or "S&P 500". Re-sending the entities,
+    shifted past the new label, keeps the message exactly as it was.
+    """
+    original = msg.get("text") or msg.get("caption") or ""
+    prefix = f"{label}\n\n" if original else label
+    shift = _utf16_len(prefix)
+    entities = [{"type": "bold", "offset": 0, "length": _utf16_len(label)}]
+    for ent in msg.get("entities") or msg.get("caption_entities") or []:
+        if isinstance(ent, dict) and "offset" in ent:
+            entities.append({**ent, "offset": int(ent["offset"]) + shift})
+    return {"text": prefix + original, "entities": entities,
+            "link_preview_options": _NO_PREVIEW}
 
 
 def send_digest() -> int:
@@ -85,7 +147,7 @@ def send_digest() -> int:
     chat = config.require("TELEGRAM_CHAT_ID")
     for idea in ideas:
         _api("sendMessage", chat_id=chat, text=_format_idea(idea), parse_mode="HTML",
-             reply_markup=_keyboard(idea["id"]))
+             link_preview_options=_NO_PREVIEW, reply_markup=_keyboard(idea["id"]))
     log.info("approval: sent %d ideas to the digest.", len(ideas))
     return len(ideas)
 
@@ -127,7 +189,7 @@ def _handle_update(update: dict, cap: int) -> str | None:
     _api("answerCallbackQuery", callback_query_id=cq["id"], text=_DECISION_TEXT[decision])
     if msg.get("message_id"):
         _api("editMessageText", chat_id=chat_id, message_id=msg["message_id"],
-             text=f"{_DECISION_TEXT[decision]}\n\n{msg.get('text', '')}", parse_mode="HTML")
+             **_decided_message(_DECISION_TEXT[decision], msg))
     return decision
 
 

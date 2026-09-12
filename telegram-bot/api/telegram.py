@@ -188,13 +188,36 @@ def pending_ideas() -> list:
 
 # --- approval callbacks ---------------------------------------------------------------
 
-_DECISION_TEXT = {
-    "approved": "Approved",
-    "rejected": "Rejected",
-    "passed": "Passed",
-    "capped": "Daily approval cap reached - not approved",
+_DECISION_TEXT = {  # same labels as src/approval.py, so both approval modes look identical
+    "approved": "✅ Approved",
+    "rejected": "❌ Rejected",
+    "passed": "⏭️ Passed",
+    "capped": "⚠️ Daily approval cap reached — not approved",
     "unknown": "Could not process that.",
 }
+
+
+def _utf16_len(text: str) -> int:
+    """Telegram measures entity offsets in UTF-16 code units, not Python characters."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def decided_message(label: str, msg: dict) -> dict:
+    """editMessageText params that put the decision on top and KEEP the idea's formatting.
+
+    Mirror of src/approval.py::_decided_message (this function cannot import the pipeline).
+    Telegram returns the digest message as plain `text` plus `entities`; re-sending that plain
+    text with parse_mode=HTML dropped the source links and failed outright on any '&' or '<'.
+    """
+    original = msg.get("text") or msg.get("caption") or ""
+    prefix = f"{label}\n\n" if original else label
+    shift = _utf16_len(prefix)
+    entities = [{"type": "bold", "offset": 0, "length": _utf16_len(label)}]
+    for ent in msg.get("entities") or msg.get("caption_entities") or []:
+        if isinstance(ent, dict) and "offset" in ent:
+            entities.append({**ent, "offset": int(ent["offset"]) + shift})
+    return {"text": prefix + original, "entities": entities,
+            "link_preview_options": {"is_disabled": True}}
 
 
 # Must match the pipeline: src/approval.py and both workflows default APPROVAL_CAP to 3, and
@@ -249,10 +272,8 @@ def handle_callback(cq: dict) -> None:
     if cq.get("id"):
         tg_api("answerCallbackQuery", {"callback_query_id": cq["id"], "text": label})
     if chat_id and msg.get("message_id"):
-        original = msg.get("text") or msg.get("caption") or ""
-        text = f"{label}\n\n{original}" if original else label
         tg_api("editMessageText", {"chat_id": chat_id, "message_id": msg["message_id"],
-                                   "text": text, "parse_mode": "HTML"})
+                                   **decided_message(label, msg)})
 
 
 # --- command parsing + dispatch (pure-ish; network fns above are monkeypatchable) ------

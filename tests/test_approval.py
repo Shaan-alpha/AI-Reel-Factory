@@ -7,6 +7,7 @@ chat-id security check. A real digest send is gated behind TELEGRAM_LIVE_TEST=1.
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -33,6 +34,33 @@ def test_format_idea_escapes_and_lists_sources():
     assert "0.82" in body
 
 
+def test_digest_sources_fit_on_one_line_however_many_there_are():
+    """2026-09-12: one idea carried 17 sources, each on its own '🔗 <full URL>' line — Google News
+    reader links run up to 884 characters — so a single idea filled the screen."""
+    many = ([f"https://news.google.com/rss/articles/{'X' * 600}{i}?oc=5" for i in range(2)]
+            + ["https://www.theguardian.com/world/2026/sep/11/houthis",
+               "https://m.timesofindia.indiatimes.com/city/a.cms",
+               "https://www.theguardian.com/world/2026/sep/12/houthis-2"]
+            + [f"https://outlet{i}.example/story" for i in range(12)])
+    body = approval._format_idea({**IDEA, "sources": many})
+
+    assert body.count("<a href=") == 3, "at most three publishers are named"
+    assert "+14 more" in body
+    assert "📰" in body and body.count("\n") == 3, "title, hook, angle, then ONE score+sources line"
+    assert ">Google News<" in body and ">theguardian.com<" in body
+    visible = re.sub(r"<[^>]+>", "", body)
+    assert len(visible) < 400 and "news.google.com/rss" not in visible
+
+
+def test_digest_sources_escape_the_link_target():
+    body = approval._format_idea({**IDEA, "sources": ['https://x.example/a?b=1&c="2"']})
+    assert 'href="https://x.example/a?b=1&amp;c=&quot;2&quot;"' in body
+
+
+def test_an_unsourced_idea_is_still_flagged_loudly():
+    assert "no sources!" in approval._format_idea({**IDEA, "sources": []})
+
+
 def test_keyboard_encodes_action_and_id():
     kb = approval._keyboard(7)
     btns = kb["inline_keyboard"][0]
@@ -47,6 +75,8 @@ def test_send_digest_one_message_per_idea(monkeypatch):
     calls = _mock_api(monkeypatch)
     assert approval.send_digest() == 2
     assert all(m == "sendMessage" and "reply_markup" in p for m, p in calls)
+    assert all(p["link_preview_options"] == {"is_disabled": True} for _, p in calls), \
+        "a preview card of the first link is the biggest thing in the chat and says nothing"
 
 
 def test_send_digest_empty_noop(monkeypatch):
@@ -102,6 +132,30 @@ def test_handle_update_approves_and_acks(monkeypatch):
     assert approval._handle_update(_update(), cap=5) == "approved"
     methods = [m for m, _ in calls]
     assert "answerCallbackQuery" in methods and "editMessageText" in methods
+
+
+def test_a_decision_keeps_the_idea_formatting(monkeypatch):
+    """The edit re-sent Telegram's PLAIN text with parse_mode=HTML: links gone after one tap, and
+    a 400 on any '&' or '<' (this very fixture's title) so the tap looked ignored."""
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
+    monkeypatch.setattr(approval.db, "get_approved_ideas", lambda: [])
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: None)
+    calls = _mock_api(monkeypatch)
+    up = _update()
+    text = "ISRO <reusable> & rocket\n📰 isro.gov.in"
+    at = len(text[: text.index("isro.gov")].encode("utf-16-le")) // 2  # 📰 is TWO units
+    up["callback_query"]["message"].update(
+        text=text,
+        entities=[{"type": "text_link", "offset": at, "length": 11, "url": "https://isro.gov.in/x"}])
+
+    approval._handle_update(up, cap=5)
+
+    edit = next(p for m, p in calls if m == "editMessageText")
+    assert "parse_mode" not in edit
+    assert edit["text"] == "✅ Approved\n\nISRO <reusable> & rocket\n📰 isro.gov.in"
+    link = next(e for e in edit["entities"] if e["type"] == "text_link")
+    units = edit["text"].encode("utf-16-le")
+    assert units[link["offset"] * 2:(link["offset"] + 11) * 2].decode("utf-16-le") == "isro.gov.in"
 
 
 def test_handle_update_ignores_foreign_chat(monkeypatch):
