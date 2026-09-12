@@ -48,6 +48,12 @@ class FactCheckFailed(RuntimeError):
     (rule 14). A distinct type so the alert says WHY rather than 'RuntimeError'."""
 
 
+class FactCheckUnavailable(RuntimeError):
+    """The check could not RUN (outage, unreadable reply) and FACTCHECK_STRICT blocks unverified
+    reels. Deliberately NOT a FactCheckFailed: nothing was judged, so the idea must go back to the
+    digest rather than be rejected as if the story were false (`_release_failed_idea`)."""
+
+
 def _source_domain(sources: list[str] | None) -> str | None:
     """Bare domain of the first source URL (for an on-screen citation), or None."""
     for s in sources or []:
@@ -148,6 +154,11 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         _notify(f"⚠️ Idea {idea_id} ({idea.get('title')!r}) shipped UNVERIFIED — the fact-check "
                 f"gate could not run ({check.get('reason')}). Set FACTCHECK_API_KEY to give it "
                 f"its own quota, or FACTCHECK_STRICT=true to block instead.")
+    if not check["ok"] and str(check.get("reason", "")).startswith("checker-failed"):
+        raise FactCheckUnavailable(
+            f"idea {idea_id} held back: the fact-check could not run ({check.get('reason')}). "
+            f"FACTCHECK_STRICT is on, so it was not published unverified; it goes back to the "
+            f"digest.")
     if not check["ok"]:
         db.set_idea_status(idea_id, "rejected")
         raise FactCheckFailed(

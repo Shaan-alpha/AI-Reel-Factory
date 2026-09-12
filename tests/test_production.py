@@ -256,6 +256,60 @@ def test_factcheck_failure_blocks_the_reel_before_any_render(monkeypatch, tmp_pa
     assert (7, "rejected") in produced, "the idea must drop out of the queue, not retry forever"
 
 
+def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(monkeypatch, tmp_path):
+    """FACTCHECK_STRICT=true (operator, 2026-09-13) blocks a reel whose check could not RUN.
+
+    That is not a verdict on the story. Treating it as FactCheckFailed marked a good idea
+    'rejected' forever over a 503 or an unreadable reply, and the alert said "failed fact check"
+    about a story nobody had checked.
+    """
+    produced = _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.factcheck, "verify", lambda body, sources=None, title="": {
+        "ok": False, "unsupported": ["checker unavailable: 503 UNAVAILABLE"], "minor": [],
+        "checked": 0, "reason": "checker-failed: 503 UNAVAILABLE"})
+    rendered = []
+    monkeypatch.setattr(production.voice, "synthesize",
+                        lambda body, d: rendered.append("voice") or ("a.mp3", 30.0))
+
+    with pytest.raises(production.FactCheckUnavailable, match="could not run"):
+        production.produce_one(IDEA, str(tmp_path))
+
+    assert rendered == [], "an unverified reel must not render or publish in strict mode"
+    assert (7, "rejected") not in produced
+
+
+_REAL_VERIFY = production.factcheck.verify
+
+
+def test_strict_mode_contract_with_the_real_gate(monkeypatch, tmp_path):
+    """Pins the handshake the test above mocks: factcheck's strict outage result must be what
+    produce_one recognises. If the reason string ever drifts, this fails instead of the idea
+    silently being rejected again."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.factcheck, "verify", _REAL_VERIFY)
+    monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
+    monkeypatch.setenv("FACTCHECK_STRICT", "true")
+    monkeypatch.setattr(production.factcheck.llm, "generate_grounded",
+                        _raiser(RuntimeError("503 UNAVAILABLE")))
+    with pytest.raises(production.FactCheckUnavailable):
+        production.produce_one(IDEA, str(tmp_path))
+
+
+def test_an_unchecked_reel_goes_back_to_the_digest(monkeypatch):
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 8, "title": "z"}])
+    alerts = []
+    monkeypatch.setattr(production, "_notify_failure",
+                        lambda idea, e: alerts.append(f"{type(e).__name__}: {e}"))
+    monkeypatch.setattr(production, "produce_one", lambda idea, root: (_ for _ in ()).throw(
+        production.FactCheckUnavailable("idea 8 held back: the fact-check could not run")))
+    statuses = []
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+
+    production.run_production()
+    assert (8, "pending") in statuses
+    assert "could not run" in alerts[0] and "FactCheckFailed" not in alerts[0]
+
+
 def test_factcheck_pass_lets_the_reel_through(monkeypatch, tmp_path):
     produced = _wire_happy(monkeypatch, factcheck_ok=True)
     vid, url = production.produce_one(IDEA, str(tmp_path))
