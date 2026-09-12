@@ -56,7 +56,17 @@ years" is false, since Modi and Xi met in Kazan (Oct 2024) and Tianjin (Aug 2025
   The worst real idea (291) went from 17 URL lines to 4 lines / 534 characters. The full source
   list still ships in the YouTube description.
 - The Vercel bot's decision labels now match `src/approval.py` (✅ Approved / ❌ Rejected /
-  ⏭️ Passed). **The bot needs a redeploy** for its half of the fix.
+  ⏭️ Passed). The bot is CLI-deployed, so it needed a redeploy for its half of the fix.
+- **Strict fact-check is on.** The operator set the repo variable `FACTCHECK_STRICT=true`, so a
+  reel whose check cannot run is blocked rather than published unverified.
+
+### Fixed (strict mode)
+- **Strict mode rejected ideas nobody had judged.** A checker outage in strict mode returned
+  `ok=False`, and `produce_one` treated that like a real verdict: the idea was marked `rejected`
+  permanently, and the alert read "failed fact check". It now raises `FactCheckUnavailable`, and
+  the idea goes back to `pending` like any other transient failure. A contract test runs the real
+  gate, so a drift in its reason string cannot quietly bring the bug back.
+  **489 pass, 5 skipped.**
 
 ## [0.18.0] - 2026-09-04 — Vertex AI: the grounded-search ceiling is gone
 

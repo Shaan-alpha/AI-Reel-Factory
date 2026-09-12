@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
 **Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased fixes (2026-09-13)**: per-idea citations, a fact-check gate that no longer falls open on a quote mark, a compact Telegram digest (**486 pass, 5 skipped** — measured 2026-09-13)
   ↳ this line said 0.17.0 until 2026-09-13, one tag behind `v0.18.0`.
-**Last updated:** 2026-09-13
+**Last updated:** 2026-09-13 · **Fact-check:** `FACTCHECK_STRICT=true` (unverified reels are blocked and released back to the digest)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
   ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -105,6 +105,21 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 
 ## Log
 
+### 2026-09-13 — Strict fact-check is ON: no reel ships unverified
+
+- **Operator decision:** repo variable `FACTCHECK_STRICT=true`, read by both `make-short.yml`
+  and `production.yml`. When the gate cannot run (outage, or a reply unreadable even after the
+  repair and the re-ask), the reel is **blocked** instead of published unverified. Why: idea 291
+  shipped unverified with a claim the gate blocks every time. On Vertex, the quota exhaustion
+  that fail-open was built to survive is gone.
+- **Bug fixed before switching it on.** Strict mode took the same path as a real verdict:
+  `produce_one` marked the idea `rejected` for good, and the alert said "failed fact check" about
+  a story nobody had checked. It now raises `FactCheckUnavailable`, which is not a
+  `FactCheckFailed`, so `_release_failed_idea` puts the idea back to `pending`. The alert
+  explains it was held back, not judged. A contract test runs the real `factcheck.verify` in
+  strict mode, so if the reason string drifts the test fails instead of ideas being rejected.
+- Tests: **489 pass, 5 skipped**.
+
 ### 2026-09-13 — Every idea cited every story, and the gate fell open on a quote mark
 
 Run 34703685567 (2026-09-12) produced ideas 291 (Modi-Xi) and 292 (Houthis). Both shipped with the
@@ -154,8 +169,8 @@ Idea 291 also shipped **UNVERIFIED** (`checker-failed: Expecting ',' delimiter`)
   the previous deploy was 94 days old. The project is CLI-deployed, not git-connected.
 - **Still open (needs the operator):**
   - decide what to do about `NKPb-InUoJU` (false claim, public) and both Shorts' descriptions;
-  - consider `FACTCHECK_STRICT=true`. On Vertex the quota worry behind fail-open is gone, so an
-    unrunnable gate is now more likely a real fault than a spent budget.
+  - ~~consider `FACTCHECK_STRICT=true`~~ — **done**: the operator chose it, and the repo variable
+    is `true` (see the strict-mode entry above).
 
 ### 2026-09-04 — Vertex AI removes the grounded-search ceiling entirely
 
