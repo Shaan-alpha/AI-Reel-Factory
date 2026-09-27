@@ -238,11 +238,16 @@ _COMPOSITIONS = ("wide establishing shot", "close-up detail", "medium shot", "lo
                  "overhead view", "silhouette against the light")
 
 
-def _img_prompt(keyword: str, index: int = 0) -> str:
-    """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look."""
+def _img_prompt(keyword: str, index: int = 0, setting: str | None = None) -> str:
+    """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look.
+
+    `setting` places the scene: an Indian bank-strike story came out with dollar bills and "$"
+    coins because the narration never said "India" (local render, 2026-09-28)."""
     style = config.get("IMAGE_STYLE", _DEFAULT_IMAGE_STYLE)
     framing = _COMPOSITIONS[index % len(_COMPOSITIONS)]
-    return f"{keyword}, {framing}, {style}, vertical 9:16 composition"
+    place = f", set in {setting}" + (", Indian rupee currency" if setting == "India" else "") \
+        if setting else ""
+    return f"{keyword}{place}, {framing}, {style}, vertical 9:16 composition"
 
 
 def _image_seed(variant: str, index: int) -> int:
@@ -331,7 +336,7 @@ def _cloudflare_run(model: str, prompt: str, dest: str, token: str, acct: str,
 
 
 def _fetch_image(keyword: str, dest: str, seed: int, source: str,
-                 variant: str = "") -> bool:
+                 variant: str = "", setting: str | None = None) -> bool:
     """Put one image at dest: AI (if source='ai' and CF set) else a Pexels photo. Bool = success.
 
     `variant` distinguishes one reel from another. `_pexels_photo_urls` is lru_cached for the
@@ -341,7 +346,7 @@ def _fetch_image(keyword: str, dest: str, seed: int, source: str,
     each reel its own starting point — and stays deterministic for a given (variant, cut), so
     a retry re-renders the same reel rather than a different one (rule 12).
     """
-    if source == "ai" and _cloudflare_image(_img_prompt(keyword, seed), dest,
+    if source == "ai" and _cloudflare_image(_img_prompt(keyword, seed, setting), dest,
                                             seed=_image_seed(variant, seed)):
         return True
     urls = _pexels_photo_urls(keyword)
@@ -386,7 +391,7 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
 
 
 def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str,
-                       variant: str = "") -> list[str]:
+                       variant: str = "", setting: str | None = None) -> list[str]:
     """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made.
 
     One image per cut the assembler will actually make. Sizing this off a local guess (it was
@@ -401,7 +406,7 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
     for i in range(n):
         kw = keywords[i % len(keywords)]
         img = os.path.join(out_dir, f"img_{i:02d}.jpg")
-        if not _fetch_image(kw, img, i, source, variant=variant):
+        if not _fetch_image(kw, img, i, source, variant=variant, setting=setting):
             continue
         clip = os.path.join(out_dir, f"imgclip_{i:02d}.mp4")
         try:
@@ -415,7 +420,8 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
     return clips
 
 
-def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> list[str]:
+def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str,
+                setting: str | None = None) -> list[str]:
     """Return vertical clip paths covering target_seconds. VISUAL_SOURCE picks the strategy:
     'photos' (default, Pexels stock photos + Ken Burns), 'ai' (Cloudflare Flux + Ken Burns),
     or 'video' (Pexels/Pixabay stock video). Image sources fall back to stock video on failure.
@@ -433,7 +439,8 @@ def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> lis
             # already-available identifier for "which reel is this" — no new parameter needed
             # at the call site, and identical across a retry of the same reel.
             return _fetch_image_broll(keywords, target_seconds, out_dir, source,
-                                      variant=os.path.basename(os.path.normpath(out_dir)))
+                                      variant=os.path.basename(os.path.normpath(out_dir)),
+                                      setting=setting)
         except Exception as e:  # noqa: BLE001 — fall back to stock video (rule 11)
             log.warning("visuals: %s source failed (%s); falling back to stock video", source, e)
 

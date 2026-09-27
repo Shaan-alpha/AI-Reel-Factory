@@ -625,3 +625,10 @@ def test_copying_the_angle_is_detected():
 def test_the_script_prompt_carries_todays_date():
     """A grounded draft dated September news to June, and another called a signed law pending."""
     assert scriptwriter._build_prompt(IDEA, "N").startswith("TODAY'S DATE: 20")
+
+
+def test_a_long_title_is_cut_at_its_dash():
+    t = "Nationwide Bank Strike Cancelled at the Last Minute—Why It Almost Crashed the System"
+    assert scriptwriter._fit_title(t) == "Nationwide Bank Strike Cancelled at the Last Minute"
+    assert len(scriptwriter._fit_title("word " * 30)) <= 70
+    assert scriptwriter._fit_title("Short title") == "Short title"

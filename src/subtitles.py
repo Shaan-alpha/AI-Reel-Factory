@@ -205,6 +205,8 @@ def _hook_banner_text(title: str, max_chars: int = 16, max_lines: int = 3,
     # "[SARCASTIC]" — brackets are plain ASCII, so _NON_RENDERABLE does not catch them.
     cleaned = _DELIVERY_TAG.sub(" ", title or "")
     cleaned = _NON_RENDERABLE.sub("", cleaned)
+    # "MINUTE—WHY" is one unbreakable word to the wrapper; spaced, the dash can end a line.
+    cleaned = re.sub(r"\s*[—–]\s*", " — ", cleaned)
     cleaned = _ass_escape(re.sub(r"\s+", " ", cleaned)).upper()
     if not cleaned:
         return ""

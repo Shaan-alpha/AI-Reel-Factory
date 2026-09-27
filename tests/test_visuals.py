@@ -121,7 +121,7 @@ def test_fetch_broll_no_results_raises(monkeypatch, tmp_path):
 def test_fetch_broll_photos_makes_kenburns_clips(monkeypatch, tmp_path):
     monkeypatch.delenv("VISUAL_SOURCE", raising=False)  # default = photos
 
-    def fake_fetch_image(kw, dest, seed, source, variant=""):
+    def fake_fetch_image(kw, dest, seed, source, variant="", setting=None):
         with open(dest, "wb") as f:
             f.write(b"\xff" * 2048)
         return True
@@ -200,7 +200,7 @@ def test_live_pexels_fetch(tmp_path):
 # --- B-roll must cover every cut, not recycle ---------------------------------------------
 
 def _stub_image_pipeline(monkeypatch):
-    def fake_fetch_image(kw, dest, seed, source, variant=""):
+    def fake_fetch_image(kw, dest, seed, source, variant="", setting=None):
         with open(dest, "wb") as f:
             f.write(b"\xff" * 2048)
         return True
@@ -343,3 +343,10 @@ def test_klein_is_asked_for_a_native_portrait_with_a_seed(monkeypatch, tmp_path)
     assert visuals._cloudflare_image("p", str(tmp_path / "i.jpg"), seed=42)
     assert "flux-2-klein-4b" in sent["url"]
     assert sent["files"]["height"] == (None, "1344") and sent["files"]["seed"] == (None, "42")
+
+
+def test_an_indian_story_gets_an_indian_setting():
+    """An Indian bank-strike story was illustrated with dollar bills."""
+    p = visuals._img_prompt("atm cash", 0, "India")
+    assert "set in India" in p and "rupee" in p
+    assert "set in" not in visuals._img_prompt("atm cash", 0)

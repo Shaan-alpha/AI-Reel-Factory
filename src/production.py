@@ -55,15 +55,24 @@ class FactCheckUnavailable(RuntimeError):
     digest rather than be rejected as if the story were false (`_release_failed_idea`)."""
 
 
+# Aggregator and redirect hosts: they carry a story, they are not its source.
+_NOT_A_PUBLISHER = ("news.google.com", "vertexaisearch.cloud.google.com")
+
+
 def _source_domain(sources: list[str] | None) -> str | None:
-    """Bare domain of the first source URL (for an on-screen citation), or None."""
+    """Bare domain of the first PUBLISHER source (for the on-screen citation), or None.
+
+    It burned "Source: news.google.com" when every source was a Google News link (local render,
+    2026-09-28). Publishers come first; with only aggregator links the label says Google News,
+    which is at least what it is."""
+    hosts = []
     for s in sources or []:
         host = urlparse(s if "://" in str(s) else "http://" + str(s)).netloc.lower()
-        if host.startswith("www."):
-            host = host[4:]
-        if host:
+        hosts.append(host[4:] if host.startswith("www.") else host)
+    for host in hosts:
+        if host and not host.endswith(_NOT_A_PUBLISHER):
             return host
-    return None
+    return "Google News" if any(h.endswith("news.google.com") for h in hosts) else None
 
 _PLATFORM = "youtube"
 
@@ -209,7 +218,9 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
                     f"{spoke.get('voice')} fallback, not the channel voice: every Gemini "
                     f"attempt failed. It will sound different from the other Shorts.")
         keywords = visuals.extract_keywords(script["script_body"])
-        clips = visuals.fetch_broll(keywords, duration, work)
+        story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+        clips = visuals.fetch_broll(keywords, duration, work,
+                                    setting="India" if _INDIA_RE.search(story) else None)
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
         # Pass the punchy title so subtitles burn it as a frame-1 hook banner (the first frame
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.

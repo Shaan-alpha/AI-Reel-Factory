@@ -51,7 +51,7 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
                         lambda idea_id, plat="youtube": existing_post)
     monkeypatch.setattr(production.voice, "synthesize", _fake_synth)
     monkeypatch.setattr(production.visuals, "extract_keywords", lambda body: ["rocket"])
-    monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d: ["c1.mp4"])
+    monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d, setting=None: ["c1.mp4"])
     monkeypatch.setattr(production.assembly, "assemble", lambda a, c, o: o)
     monkeypatch.setattr(production.subtitles, "burn_captions", lambda v, a, o, **k: o)
     monkeypatch.setattr(production.publish_youtube, "publish",
@@ -640,3 +640,10 @@ def test_the_india_tag_only_goes_on_india_stories():
 
 def test_the_footer_matches_the_real_length():
     assert "in 30 seconds" in production._DEFAULT_FOOTER
+
+
+def test_the_on_screen_source_is_a_publisher_not_the_aggregator():
+    assert production._source_domain(["https://news.google.com/rss/articles/X",
+                                      "https://www.thehindu.com/news/a"]) == "thehindu.com"
+    assert production._source_domain(["https://news.google.com/rss/articles/X"]) == "Google News"
+    assert production._source_domain([]) is None

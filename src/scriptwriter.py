@@ -184,6 +184,23 @@ def _build_prompt(idea: dict, template: str) -> str:
     return llm.today_line() + prompt
 
 
+_TITLE_MAX = 70
+
+
+def _fit_title(title: str, limit: int = _TITLE_MAX) -> str:
+    """Hold the title to `limit` characters: the prompt asks, this makes it true. An 84-character
+    title ("...Last Minute—Why It Almost Crashed the System") overflowed even the smallest hook
+    banner. Cut at the first dash or colon when the head still reads as a title, else at a word."""
+    title = re.sub(r"\s+", " ", title or "").strip()
+    if len(title) <= limit:
+        return title
+    for sep in ("—", " – ", " - ", ": "):
+        head = title.split(sep)[0].strip()
+        if 20 <= len(head) <= limit:
+            return head
+    return title[:limit].rsplit(" ", 1)[0].rstrip(" :,;-—")
+
+
 def _max_words() -> int:
     try:
         return max(30, int(config.get("SCRIPT_MAX_WORDS", "80")))
@@ -668,7 +685,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
         raise ValueError(f"scriptwriter: empty script_body for idea {idea_id}.")
 
     # SEO extras (used by publish for title + tags; fall back to the idea title downstream).
-    title = (data.get("title") or "").strip()
+    title = _fit_title((data.get("title") or "").strip())
 
     # Fit the cap BEFORE the punch-up: the punch-up only accepts a rewrite that is under the cap,
     # so on the 100-word drafts every run was producing it could not act (9 of 16 logged
