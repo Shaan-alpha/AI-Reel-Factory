@@ -48,11 +48,19 @@ def get_pending_ideas() -> list[dict]:
     )
 
 
-def set_idea_status(idea_id: int, status: str) -> None:
-    """Set an idea's status. Valid: pending | approved | rejected | produced."""
+def set_idea_status(idea_id: int, status: str, from_status: str | None = None) -> bool:
+    """Set an idea's status. Valid: pending | approved | rejected | produced.
+
+    With `from_status`, only an idea currently in that status changes, and the return value
+    says whether one did. A digest tap uses it: an old, still-tappable digest message could
+    otherwise move a rejected, passed or already-produced idea back to 'approved'."""
     if status not in IDEA_STATUSES:
         raise ValueError(f"invalid idea status: {status!r} (allowed: {IDEA_STATUSES})")
-    get_client().table("ideas").update({"status": status}).eq("id", idea_id).execute()
+    q = get_client().table("ideas").update({"status": status}).eq("id", idea_id)
+    if from_status:
+        q = q.eq("status", from_status)
+    result = q.execute()  # always executed; only the RETURN depends on from_status
+    return bool(result.data) if from_status else True
 
 
 def get_approved_ideas() -> list[dict]:
@@ -90,9 +98,30 @@ def expire_stale_pending_ideas(max_age_hours: int | None = None) -> int:
 
 
 def existing_idea_titles() -> set[str]:
-    """Lowercased titles of every idea already in the table (any status) — for dedup."""
-    rows = get_client().table("ideas").select("title").execute().data
-    return {r["title"].lower() for r in rows if r.get("title")}
+    """Lowercased titles of every idea already in the table (any status) — for dedup.
+
+    Paged: PostgREST caps a response at 1,000 rows by default, and past that an unpaged read
+    silently stops deduplicating against the oldest ideas."""
+    titles: set[str] = set()
+    page, start = 1000, 0
+    while True:
+        rows = (get_client().table("ideas").select("title").order("id")
+                .range(start, start + page - 1).execute().data) or []
+        titles.update(r["title"].lower() for r in rows if r.get("title"))
+        if len(rows) < page:
+            return titles
+        start += page
+
+
+def recent_ideas(days: int = 10) -> list[dict]:
+    """Ideas created in the last `days` days, any status: {id, title, hook, sources, status}.
+
+    For STORY-level dedup. Titles alone miss a re-pitch: the fact-check blocked idea 314 ('US
+    Media Boycotts White House Coverage!') and 47 minutes later idea 315 ('US Networks Blackout
+    Trump Coverage!') shipped the same claim, citing the same article."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return (get_client().table("ideas").select("id,title,hook,sources,status")
+            .gte("created_at", since).execute().data) or []
 
 
 # --- scripts / posts ------------------------------------------------------------------

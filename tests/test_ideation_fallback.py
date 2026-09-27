@@ -218,6 +218,7 @@ def test_seed_ideas_prefers_routine_file(monkeypatch):
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [_idea(f"R{i}", est_score=0.1 * i) for i in range(6)])
     monkeypatch.setattr(fb, "_produce_ideas", lambda t: pytest.fail("must not call LLM when routine file present"))
     monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
     assert fb.seed_ideas(3) == 3
@@ -228,6 +229,7 @@ def test_seed_ideas_falls_back_to_llm(monkeypatch):
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
     monkeypatch.setattr(fb, "_produce_ideas", lambda t: [_idea(f"G{i}") for i in range(5)])
     monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     assert fb.seed_ideas(2) == 2
 
@@ -235,6 +237,7 @@ def test_seed_ideas_falls_back_to_llm(monkeypatch):
 def test_seed_ideas_dedupes_against_db(monkeypatch):
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [_idea("Dup"), _idea("New1"), _idea("New2")])
     monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: {"dup"})
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
     fb.seed_ideas(5)
@@ -785,3 +788,62 @@ def test_search_query_keeps_a_number_intact():
     """'1,250' must not be split into '1 250' — that is a different, much worse search."""
     assert fb._search_query({"title": "1,250 Dead: Nepal's Warning to South Asia"}) == \
         "1,250 Dead Nepal's Warning to South Asia"
+
+
+# --- 2026-09-27 audit: redirects, citation relevance, story-level dedup -------------------
+
+class _Resp:
+    def __init__(self, status, location=None):
+        self.status_code, self.headers = status, ({"Location": location} if location else {})
+
+    def close(self):
+        pass
+
+
+def test_a_grounding_redirect_resolves_from_googles_own_location_header(monkeypatch):
+    """One hop: the publisher never has to answer. WaPo resets bot traffic, which used to leave
+    the raw vertexaisearch link in idea 315's published sources."""
+    seen = {}
+
+    def _get(url, **kw):
+        seen.update(kw)
+        return _Resp(302, "https://www.washingtonpost.com/business/2026/09/21/cnn-sue/")
+
+    monkeypatch.setattr(fb.requests, "get", _get)
+    out = fb._resolve_redirect("https://vertexaisearch.cloud.google.com/grounding-api-redirect/X")
+    assert out == "https://www.washingtonpost.com/business/2026/09/21/cnn-sue/"
+    assert seen["allow_redirects"] is False
+
+
+def test_an_unresolvable_redirect_is_returned_unchanged(monkeypatch):
+    monkeypatch.setattr(fb.requests, "get", lambda url, **kw: _Resp(404))
+    url = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/X"
+    assert fb._resolve_redirect(url) == url
+
+
+def test_a_citation_about_another_story_is_not_credited():
+    """Published idea 301 (Iran-UAE) cited three UCC articles from the same batch."""
+    idea = {"title": "Iran & UAE: A BRICS Truce in West Asia?", "hook": "Rivals shake hands."}
+    ucc = "https://www.hindustantimes.com/india-news/ucc-in-all-21-states-ruled-by-nda-amit-shah"
+    assert fb._cites_this_story(idea, ucc) is False
+    own = "https://www.thenationalnews.com/gulf/iran-uae-brics-talks-truce"
+    assert fb._cites_this_story(idea, own) is True
+    assert fb._cites_this_story(idea, "https://example.com/a/123456") is True  # says nothing
+
+
+def test_a_blocked_story_cannot_return_under_a_new_title():
+    """Idea 314 was blocked by the fact-check; 315, the same story, shipped 47 minutes later."""
+    link = "https://news.google.com/rss/articles/CBMiswFBVV95cUxNSUxs"
+    recent = [{"id": 314, "status": "rejected", "title": "US Media Boycotts White House Coverage!",
+               "hook": "Networks turned their cameras off.", "sources": [link]}]
+    again = {"title": "US Networks Blackout Trump Coverage!", "hook": "The cameras went dark.",
+             "sources": [link, "https://www.afp.com/en/us-networks-halt"]}
+    assert fb._repeats_recent_story(again, recent) is True
+
+
+def test_an_unrelated_story_is_not_mistaken_for_a_repeat():
+    recent = [{"id": 1, "status": "produced", "title": "UCC by 2029: Amit Shah's Promise",
+               "hook": "A uniform code.", "sources": ["https://a.example/ucc"]}]
+    other = {"title": "Iran & UAE: A BRICS Truce?", "hook": "Rivals shake hands.",
+             "sources": ["https://b.example/iran"]}
+    assert fb._repeats_recent_story(other, recent) is False

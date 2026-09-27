@@ -23,7 +23,7 @@ import re
 
 import requests
 
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from src import config, db, llm, news, trends
 
@@ -126,12 +126,13 @@ Return ONLY JSON:
 
 
 def _parse_ideas(raw: str) -> list[dict]:
-    start, end = raw.find("{"), raw.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError(f"ideation_fallback: no JSON object in reply: {raw[:200]!r}")
-    # strict=False: grounded LLM JSON often has raw newlines/tabs inside string values.
-    data = json.loads(raw[start : end + 1], strict=False)
-    ideas = data.get("ideas", data if isinstance(data, list) else [])
+    # llm.parse_json: a bare array, text after the JSON and raw quotes inside strings all parse
+    # (the old first-{-to-last-} slice turned a bare array into "Extra data").
+    try:
+        data = llm.parse_json(raw)
+    except ValueError as e:
+        raise ValueError(f"ideation_fallback: {e}") from e
+    ideas = data.get("ideas", []) if isinstance(data, dict) else data
     if not isinstance(ideas, list):
         raise ValueError("ideation_fallback: 'ideas' is not a list.")
     return ideas
@@ -230,22 +231,57 @@ def _is_homepage(url: str) -> bool:
 
 
 def _resolve_redirect(url: str) -> str:
-    """Follow a citation redirect to the publisher's own URL; return `url` unchanged on failure.
+    """The publisher URL a citation redirect points to; `url` unchanged on failure.
 
     Grounded citations arrive as `vertexaisearch.cloud.google.com/grounding-api-redirect/…`
-    links, which work but read as noise in a YouTube description and expire. Resolving them once,
-    here, stores the real article URL instead. Best-effort: a failed probe must never cost us a
+    links, which read as noise in a YouTube description and expire. Resolving them once, here,
+    stores the real article URL instead. Best-effort: a failed probe must never cost us a
     citation we genuinely have (rule 11).
+
+    ONE hop, read from Google's own `Location` header. Following the whole chain meant the
+    publisher had to answer too, and a slow or bot-blocking one (the Washington Post resets bot
+    traffic) left the raw redirect in stored and published sources even though Google had
+    already said where it pointed (probed 2026-09-27: 302 with the WaPo URL).
     """
     try:
-        resp = requests.get(url, timeout=_SOURCE_TIMEOUT, allow_redirects=True,
-                            stream=True, headers={"User-Agent": _SOURCE_UA})
+        resp = requests.get(url, timeout=_SOURCE_TIMEOUT, allow_redirects=False,
+                            headers={"User-Agent": _SOURCE_UA})
         try:
-            return resp.url or url
+            location = resp.headers.get("Location") if 300 <= resp.status_code < 400 else None
         finally:
             resp.close()
+        return urljoin(url, location) if location else url
     except Exception:  # noqa: BLE001 — keep the redirect rather than lose the source
         return url
+
+
+# Words too common in news slugs to show that an article is about THIS story.
+_GENERIC_SLUG_TOKENS = {"news", "india", "world", "live", "latest", "update", "updates", "article",
+                        "story", "report", "says", "said", "amp", "html", "htm", "cms", "php",
+                        "articleshow", "business", "politics", "national", "international"}
+
+
+def _slug_tokens(url: str) -> set[str]:
+    try:
+        path = urlparse(url).path
+    except ValueError:
+        return set()
+    return {t for t in _tokens(re.sub(r"[-_/.]+", " ", path))
+            if len(t) > 1 and not t.isdigit() and t not in _GENERIC_SLUG_TOKENS}
+
+
+def _cites_this_story(idea: dict, url: str) -> bool:
+    """False when a descriptive article slug shares no distinctive word with the idea.
+
+    Published idea 301 (Iran and the UAE) went out citing three UCC articles from the same batch,
+    after the 2026-09-13 attribution fix. Grounding offsets are approximate, so a resolved URL
+    whose slug plainly names another story is dropped. A slug with fewer than three words (an id,
+    '/a/12345') says nothing either way and is kept."""
+    slug = _slug_tokens(url)
+    if len(slug) < 3:
+        return True
+    idea_toks = _tokens(" ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle")))
+    return bool(slug & (idea_toks - _GENERIC_SLUG_TOKENS))
 
 
 def _idea_spans(raw: str, ideas: list[dict]) -> list[tuple[int, int]]:
@@ -351,6 +387,10 @@ def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
                 continue
             if uri not in resolved:
                 resolved[uri] = _resolve_redirect(uri)
+            if not _cites_this_story(idea, resolved[uri]):
+                log.info("ideation_fallback: %r: dropped a citation about another story: %s",
+                         idea.get("title"), resolved[uri][:120])
+                continue
             if resolved[uri] not in publisher:
                 publisher.append(resolved[uri])
         # A homepage is dropped wherever it came from: it is live, and it cites nothing.
@@ -531,9 +571,9 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
     )
     try:
         raw = llm.generate(prompt, json=True, max_tokens=2048, prefer_groq=True)
-        start, end = raw.find("{"), raw.rfind("}")
-        data = json.loads(raw[start : end + 1], strict=False)
-        stories = data.get("stories", []) if isinstance(data, dict) else []
+        data = llm.parse_json(raw)
+        stories = (data.get("stories", []) if isinstance(data, dict)
+                   else data if isinstance(data, list) else [])
         out: list[dict] = []
         for s in stories:
             if isinstance(s, dict) and str(s.get("story", "")).strip():
@@ -664,6 +704,37 @@ def load_routine_ideas() -> list[dict]:
     return _validate_and_clean(ideas if isinstance(ideas, list) else [])
 
 
+def _recent_ideas() -> list[dict]:
+    try:
+        return db.recent_ideas(int(config.get("IDEA_DEDUP_DAYS", "10")))
+    except Exception as e:  # noqa: BLE001 — story dedup is a guard, not a dependency (rule 14)
+        log.warning("ideation: could not load recent ideas for story dedup (%s)", e)
+        return []
+
+
+def _repeats_recent_story(idea: dict, recent: list[dict]) -> bool:
+    """True if `idea` is a story already pitched in the last IDEA_DEDUP_DAYS, under any title.
+
+    Title-only dedup let a story the fact-check had BLOCKED (314) return 47 minutes later under
+    a new title (315) and ship the same claim; the Telegram/NEET story came back three times.
+    A shared source link, or the same distinctive words, is the same story. Rejected, blocked,
+    produced or still pending, it does not come back."""
+    mine_src = {u for u in _clean_sources(idea.get("sources")) if not _is_homepage(u)}
+    mine = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
+    for old in recent:
+        theirs_src = {u for u in _clean_sources(old.get("sources")) if not _is_homepage(u)}
+        shared_src = mine_src & theirs_src
+        theirs = _tokens(f"{old.get('title', '')} {old.get('hook', '')}")
+        shared = mine & theirs
+        same_words = (mine and theirs and len(shared) >= _STORY_MATCH_MIN_TOKENS + 1
+                      and len(shared) / min(len(mine), len(theirs)) >= _STORY_MATCH_RATIO)
+        if shared_src or same_words:
+            log.info("ideation: %r repeats recent idea %s (%s, %s); skipped.", idea.get("title"),
+                     old.get("id"), old.get("status"), "same source" if shared_src else "same story")
+            return True
+    return False
+
+
 def seed_ideas(n: int = 3) -> int:
     """Seed ~n fresh 'pending' ideas for the on-demand digest. Return the count inserted.
 
@@ -677,6 +748,8 @@ def seed_ideas(n: int = 3) -> int:
     source = "routine file" if routine else "gemini/groq fallback"
 
     seen = db.existing_idea_titles()
+    recent = _recent_ideas()
+    pool = [i for i in pool if not _repeats_recent_story(i, recent)]
     fresh = sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key)[:n]
     if not fresh:
         raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")

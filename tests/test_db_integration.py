@@ -61,3 +61,17 @@ def test_full_idea_to_post_cycle():
 def test_set_idea_status_rejects_unknown():
     with pytest.raises(ValueError):
         db.set_idea_status(1, "bogus")
+
+
+def test_a_conditional_status_change_only_moves_a_pending_idea():
+    """The digest-tap guard: a decided idea must not move again, a pending one must."""
+    client = db.get_client()
+    idea_id = db.insert_ideas([{"niche": "impact-news", "title": _MARK + " cond", "hook": "h",
+                                "angle": "a", "est_score": 0.1, "sources": []}])[0]["id"]
+    try:
+        assert db.set_idea_status(idea_id, "approved", from_status="pending") is True
+        assert db.set_idea_status(idea_id, "rejected", from_status="pending") is False
+        row = client.table("ideas").select("status").eq("id", idea_id).execute().data[0]
+        assert row["status"] == "approved"
+    finally:
+        client.table("ideas").delete().eq("id", idea_id).execute()
