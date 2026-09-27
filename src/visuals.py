@@ -92,12 +92,12 @@ def _keywords_via_llm(script_body: str, n: int) -> list[str]:
         f'Output ONE valid JSON object and nothing else, no markdown or fences: '
         f'{{"keywords": ["query one", "query two"]}}'
     )
-    import json
-
     # prefer_groq: no web needed → reserve Gemini's free RPD for grounded research (rule 13).
-    raw = llm.generate(prompt, json=True, max_tokens=200, prefer_groq=True)
-    start, end = raw.find("{"), raw.rfind("}")
-    data = json.loads(raw[start : end + 1], strict=False)
+    # 512, not 200: Groq's gpt-oss bills its reasoning trace against this budget (39-118 tokens
+    # measured) and at 200 an occasional completion came back EMPTY, which json_object mode
+    # rejects as `400 json_validate_failed` (run 34954327606).
+    raw = llm.generate(prompt, json=True, max_tokens=512, prefer_groq=True)
+    data = llm.parse_json_object(raw)
     kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
     if not kws:
         raise ValueError("llm returned no keywords")
@@ -262,6 +262,12 @@ def _cloudflare_image(prompt: str, dest: str) -> bool:
             headers={"Authorization": f"Bearer {token}"},
             json={"prompt": prompt[:2000]}, timeout=90,
         )
+        if r.status_code >= 400:
+            # The body carries the reason (for example 3030, an NSFW false positive on a benign
+            # prompt); raise_for_status alone threw it away, so two 400s in September could not
+            # be diagnosed.
+            log.warning("visuals: Cloudflare image gen HTTP %d for %r: %s",
+                        r.status_code, prompt[:80], r.text[:300])
         r.raise_for_status()
         if "application/json" in r.headers.get("content-type", ""):
             b64 = (r.json().get("result") or {}).get("image")
@@ -308,7 +314,7 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
 
     Motion alternates by index for variety (rule 16): even = slow zoom IN, odd = slow zoom OUT.
     Deterministic per index so cron retries are stable (rule 12)."""
-    from src.assembly import _ffmpeg
+    from src.assembly import BT709_TAGS, _ffmpeg, x264_args
 
     frames = int(seconds * 30)
     if index % 2 == 0:
@@ -318,11 +324,14 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
     vf = (
         "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
         f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={frames}:s=1080x1920:fps=30,setsar=1"
+        f"d={frames}:s=1080x1920:fps=30,setsar=1,"
+        # RGB stills -> YUV with the BT.709 matrix the tags declare (swscale defaults to 601).
+        "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
+        + BT709_TAGS
     )
     proc = subprocess.run(
         [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
-         "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30", dest],
+         "-vf", vf, *x264_args(), "-r", "30", dest],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
