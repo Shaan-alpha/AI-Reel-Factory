@@ -257,17 +257,48 @@ def _ask_checker(prompt: str) -> str:
 
 
 def _samples() -> int:
-    """How many independent checks to run; a finding from ANY of them counts (1-3, default 1).
+    """How many independent checks to run; a finding from ANY of them counts (1-3, default 2).
 
     The verdict is one sample of a search-backed model, and it varies: measured 2026-09-27, the
     same script passed 2 of 5 runs and another 3 of 5, and temperature 0 does not fix it because
     the search results differ run to run. That is how idea 314 was blocked for a claim that
     idea 315 then shipped with. Two samples roughly halve the chance a real contradiction slips
-    through, at one extra grounded call (well inside Vertex's free allowance)."""
+    through, at one extra grounded call (well inside Vertex's free allowance). Default 2 since
+    2026-09-27: on gemini-3.5-flash the Modi-Xi claim was waived on one run and blocked on the
+    next; with two samples that pair blocks."""
     try:
-        return max(1, min(3, int(config.get("FACTCHECK_SAMPLES", "1"))))
+        return max(1, min(3, int(config.get("FACTCHECK_SAMPLES", "2"))))
     except (TypeError, ValueError):
-        return 1
+        return 2
+
+
+# "I could not confirm this" with nothing contradicting it is MINOR by the prompt's own rule, but
+# a model marking its homework still files some of those under "blocking". Enforced here: a
+# blocking finding phrased only as non-confirmation, with no word of contradiction, is waived.
+_NON_CONFIRMATION = re.compile(
+    r"(?i)\b(?:could not|couldn't|unable to|cannot|can't|was not able to|no (?:source|article|"
+    r"report|evidence)s? (?:was |were )?(?:found|located))\b.{0,50}?"
+    r"\b(?:confirm|verif|find|locate|corroborat|substantiat)")
+_CONTRADICTION = re.compile(
+    r"(?i)\b(?:false|incorrect|inaccurate|wrong|contradict|in fact|actually|not true|never|"
+    r"did not happen|didn't happen|misattribut|fabricat|no such|does not exist|invented|"
+    r"misrepresent|debunk)")
+
+
+def _only_unconfirmed(finding: str) -> bool:
+    return bool(_NON_CONFIRMATION.search(finding)) and not _CONTRADICTION.search(finding)
+
+
+def _checker_sources(sources: list[str] | None) -> list[str]:
+    """What to show the checker: publisher links first, then Google News links; unresolved
+    grounding redirects are left out (opaque, and they expire)."""
+    publisher, gnews = [], []
+    for raw in sources or []:
+        url = str(raw).strip()
+        if not url or "grounding-api-redirect" in url:
+            continue
+        (gnews if "news.google.com" in url else publisher).append(url)
+    return publisher + gnews
 
 
 def _check_once(prompt: str) -> tuple[dict, str]:
@@ -306,7 +337,7 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
 
     from datetime import datetime, timezone
 
-    src_block = "\n".join(f"- {s}" for s in (sources or [])) or "- (none provided)"
+    src_block = "\n".join(f"- {s}" for s in _checker_sources(sources)) or "- (none provided)"
     extra = [str(t).strip() for t in (on_screen or []) if str(t).strip()]
     screen_block = ("\nALSO PUBLISHED WITH IT (on-screen cards and the description; check these "
                     "claims too):\n" + "\n".join(f"- {t}" for t in extra) + "\n") if extra else ""
@@ -345,6 +376,12 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
     # behaviour rather than silently waving an ungraded fabrication through.
     blocking = _findings(data, "blocking", "critical", "unsupported")
     minor = [m for m in _findings(data, "minor", "waived") if m not in blocking]
+    unconfirmed = [b for b in blocking if _only_unconfirmed(b)]
+    if unconfirmed:
+        log.info("factcheck: %d 'could not confirm' finding(s) moved to minor: nothing "
+                 "contradicts them (the prompt's own rule).", len(unconfirmed))
+        blocking = [b for b in blocking if b not in unconfirmed]
+        minor = unconfirmed + minor
     if severity_gate() == "any":  # escape hatch: restore block-on-every-discrepancy
         blocking, minor = blocking + minor, []
 

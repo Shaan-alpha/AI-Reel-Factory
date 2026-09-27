@@ -560,3 +560,37 @@ def test_the_approval_wait_ignores_other_runs_pending_ideas(monkeypatch):
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [])
     monkeypatch.setattr(production.time, "sleep", lambda s: pytest.fail("must not keep waiting"))
     production._wait_for_webhook_decisions(600, offered=[1, 2])
+
+
+def _verdicts(monkeypatch, *results):
+    it = iter(results)
+    monkeypatch.setattr(production.factcheck, "verify", lambda *a, **k: next(it))
+
+
+_BLOCK = {"ok": False, "unsupported": ["the bill was already signed"], "minor": [], "checked": 3,
+          "reason": "fail"}
+_OK = {"ok": True, "unsupported": [], "minor": [], "checked": 3, "reason": "pass"}
+
+
+def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
+    """Idea 308's block said exactly what was true ('already signed into law'); the reel used to
+    be thrown away anyway. The rewrite must pass the same gate before it is used."""
+    _wire_happy(monkeypatch)
+    _verdicts(monkeypatch, _BLOCK, _OK)
+    saved, voiced = [], []
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "FIXED BODY")
+    monkeypatch.setattr(production.db, "update_script_body", lambda sid, b: saved.append(b))
+    monkeypatch.setattr(production.voice, "synthesize",
+                        lambda body, d, meta=None: voiced.append(body) or _fake_synth(body, d, meta))
+    production.produce_one(IDEA, str(tmp_path))
+    assert saved == ["FIXED BODY"] and voiced == ["FIXED BODY"]
+
+
+def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    _verdicts(monkeypatch, _BLOCK, _BLOCK)
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "STILL WRONG")
+    monkeypatch.setattr(production.db, "update_script_body",
+                        lambda *a: pytest.fail("a failed repair must not be saved"))
+    with pytest.raises(production.FactCheckFailed):
+        production.produce_one(IDEA, str(tmp_path))

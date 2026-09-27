@@ -148,7 +148,8 @@ jobs:
           APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it
           ENABLE_FACT_CHECK: ${{ vars.ENABLE_FACT_CHECK || 'true' }}   # re-verify every script pre-render
           FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
-          FACTCHECK_SAMPLES: ${{ vars.FACTCHECK_SAMPLES || '1' }}      # 2 = a finding from either of two checks blocks
+          FACTCHECK_SAMPLES: ${{ vars.FACTCHECK_SAMPLES || '2' }}      # a finding from either of two checks blocks
+          ENABLE_FACTCHECK_REPAIR: ${{ vars.ENABLE_FACTCHECK_REPAIR || 'true' }}  # rewrite blocked claims once, re-check
           ENABLE_SCRIPT_TIGHTEN: ${{ vars.ENABLE_SCRIPT_TIGHTEN || 'true' }}  # LLM cut to the word cap before truncation
           IDEA_DEDUP_DAYS: ${{ vars.IDEA_DEDUP_DAYS || '10' }}           # story-level dedup window
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run

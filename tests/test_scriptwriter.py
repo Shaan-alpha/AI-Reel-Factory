@@ -578,3 +578,23 @@ def test_punch_up_may_not_delete_the_why_it_matters_turn(monkeypatch):
     monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k:
                         '{"hook_score": 3, "title": "T2", "script_body": "%s"}' % rewrite)
     assert scriptwriter._punch_up_hook("T", body) == ("T", body)
+
+
+def test_a_repair_that_loses_the_hook_is_refused(monkeypatch):
+    """Live 2026-09-27: the first repair of idea 308 opened "[pause] [sarcastic] Because..."."""
+    broken = ("[pause] [sarcastic] Because nothing screams harmony like threats. " +
+              " ".join(["Word"] * 45) + ". Here's why it matters: prices rise.")
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded",
+                        lambda *a, **k: '{"script_body": "%s"}' % broken)
+    body = "The US passed a tariff law. " + " ".join(["Word"] * 45) + ". Here's why it matters: x."
+    assert scriptwriter.repair_script(body, ["the law claim is false"], topic="tariffs") is None
+
+
+def test_a_repair_with_a_corrected_opening_is_accepted(monkeypatch):
+    good = ("The US House passed a bill allowing tariffs of up to 100 percent. " +
+            " ".join(["Word"] * 45) + ". Here's why it matters: prices rise.")
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded",
+                        lambda *a, **k: '{"script_body": "%s"}' % good)
+    body = "The US passed a tariff law. " + " ".join(["Word"] * 45) + ". Here's why it matters: x."
+    out = scriptwriter.repair_script(body, ["the law claim is false"], topic="tariffs")
+    assert out and out.startswith("The US House passed")

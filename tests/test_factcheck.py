@@ -228,6 +228,7 @@ def test_quote_repair_leaves_valid_json_untouched():
 
 
 def test_an_unreadable_reply_is_asked_again_once(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "1")  # counts calls for ONE sample
     replies = iter(["Let me check that... the claim is false.",
                     '{"checked": 1, "blocking": ["invented"], "minor": [], "verdict": "fail"}'])
     calls = []
@@ -422,6 +423,7 @@ _PASS = '{"checked": 2, "blocking": [], "minor": [], "verdict": "pass"}'
 
 
 def test_a_dedicated_key_that_404s_falls_back_to_the_shared_one(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "1")  # counts calls for ONE sample
     monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
     monkeypatch.setenv("FACTCHECK_API_KEY", "key-from-a-project-with-no-grounding")
     tried = []
@@ -498,10 +500,26 @@ def test_on_screen_text_is_checked_too(monkeypatch):
     assert "100% TARIFFS" in seen[0] and "Summary line." in seen[0]
 
 
-def test_one_sample_is_the_default(monkeypatch):
+def test_two_samples_are_the_default(monkeypatch):
+    """2026-09-27 on gemini-3.5-flash: the Modi-Xi claim was waived on one run and blocked on
+    the next. With two samples, where either blocking counts, that pair blocks."""
+    monkeypatch.delenv("FACTCHECK_SAMPLES", raising=False)
     seen = _capture_prompt(monkeypatch, [_PASS, _FAIL])
-    assert factcheck.verify("A claim.", [])["ok"] is True
-    assert len(seen) == 1
+    assert factcheck.verify("A claim.", [])["ok"] is False
+    assert len(seen) == 2
+
+
+def test_a_could_not_confirm_finding_does_not_block():
+    assert factcheck._only_unconfirmed("Could not independently confirm the 40% figure.")
+    assert not factcheck._only_unconfirmed("Could not confirm; in fact the bill was signed.")
+    assert not factcheck._only_unconfirmed("The quote is invented: no such speech exists.")
+
+
+def test_the_checker_gets_publisher_links_first_and_no_redirects():
+    got = factcheck._checker_sources(["https://news.google.com/rss/articles/X",
+                                      "https://vertexaisearch.cloud.google.com/grounding-api-redirect/Y",
+                                      "https://www.afp.com/en/story"])
+    assert got == ["https://www.afp.com/en/story", "https://news.google.com/rss/articles/X"]
 
 
 def test_a_second_sample_that_finds_a_contradiction_blocks(monkeypatch):

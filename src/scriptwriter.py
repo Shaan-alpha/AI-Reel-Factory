@@ -539,6 +539,77 @@ def _ensure_shorts(hashtags: list[str]) -> list[str]:
     return [*hashtags, "#Shorts"]
 
 
+_REPAIR_PROMPT = """A fact-checker blocked this YouTube Shorts narration about: {topic}
+Its findings (each quotes a claim it judged false, sometimes with what is true instead):
+{findings}
+
+NARRATION:
+{body}
+
+Use web search to establish what is actually true about each flagged claim, then rewrite ONLY
+those sentences so they are accurate. Keep every other sentence word for word, including its
+delivery tags. The narration must still OPEN with a complete, accurate hook sentence that says
+what happened: if the flagged claim was the opening, replace it with a corrected opening, never
+just delete it. Never start with a delivery tag or with "Because", "And", "But" or "So". Keep the
+"why it matters" turn. At most {max_words} spoken words. Plain text, no markdown.
+
+Return ONLY a JSON object, no fences. Put any quoted word in SINGLE quotes:
+{{"script_body": "the corrected narration"}}
+"""
+
+
+def repair_script(body: str, findings: list[str], topic: str | None = None) -> str | None:
+    """Rewrite only what the fact-check blocked; None if the rewrite is unusable.
+
+    A block used to throw the whole reel away, although the checker's findings usually say
+    exactly what is true instead (idea 308: "the bill has already been signed into law"). The
+    caller re-verifies the result with the gate, so this can only ever make a reel eligible, never
+    wave a false claim through."""
+    if not findings:
+        return None
+    max_words = _max_words()
+    prompt = _REPAIR_PROMPT.format(topic=topic or "the news story",
+                                   findings="\n".join(f"- {f}" for f in findings[:6]),
+                                   body=body, max_words=max_words)
+    try:
+        # Grounded: a finding often names the false claim without saying what is true, so the
+        # rewrite has to look it up. Ungrounded JSON mode is the fallback.
+        try:
+            raw = llm.generate_grounded(prompt, max_tokens=2048)
+        except Exception as e:  # noqa: BLE001
+            log.warning("scriptwriter: grounded repair unavailable (%s); ungrounded", e)
+            raw = llm.generate(prompt, json=True, max_tokens=1024)
+        data = _parse_llm_json(raw)
+    except Exception as e:  # noqa: BLE001 — the block stands
+        log.warning("scriptwriter: repair pass failed (%s)", e)
+        return None
+    new = _enforce_length(_strip_markdown(str(data.get("script_body") or "").strip()), "repair")
+    if not _opens_with_a_hook(new):
+        # Live 2026-09-27 (idea 308): the first repair deleted the flagged opening and left the
+        # reel starting "[pause] [sarcastic] Because nothing screams...". It passed the gate.
+        log.warning("scriptwriter: repair lost the opening hook; the block stands.")
+        return None
+    if len(_visible_words(new)) < 40:
+        return None
+    if _WHY_IT_MATTERS_RE.search(body) and not _WHY_IT_MATTERS_RE.search(new):
+        return None
+    return _ensure_delivery_tag(new)
+
+
+_DANGLING_OPENERS = ("because", "and", "but", "so", "which", "or")
+
+
+def _opens_with_a_hook(body: str) -> bool:
+    """True if the narration starts with a real sentence: no leading tag, no dangling
+    conjunction, at least five spoken words before the first full stop."""
+    text = (body or "").lstrip()
+    if not text or text.startswith("["):
+        return False
+    first = _sentences(text)[0] if _sentences(text) else text
+    words = _visible_words(first)
+    return len(words) >= 5 and words[0].strip("'\"").lower() not in _DANGLING_OPENERS
+
+
 def write_script(idea: dict, template: str = "N") -> dict:
     """Generate {script_body, caption, hashtags[]} for an approved idea and persist it.
 

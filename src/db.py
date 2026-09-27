@@ -126,6 +126,11 @@ def recent_ideas(days: int = 10) -> list[dict]:
 
 # --- scripts / posts ------------------------------------------------------------------
 
+def update_script_body(script_id: int, body: str) -> None:
+    """Replace a script's narration (the fact-check repair pass rewrote it)."""
+    get_client().table("scripts").update({"body": body}).eq("id", script_id).execute()
+
+
 def insert_script(idea_id: int, template: str, body: str, caption: str,
                   hashtags: list[str], title: str | None = None) -> int:
     """Persist a generated script; return its id.

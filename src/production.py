@@ -162,6 +162,23 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
             f"idea {idea_id} held back: the fact-check could not run ({check.get('reason')}). "
             f"FACTCHECK_STRICT is on, so it was not published unverified; it goes back to the "
             f"digest.")
+    if not check["ok"] and check.get("unsupported") and \
+            config.get_bool("ENABLE_FACTCHECK_REPAIR", True):
+        # One repair pass, then the SAME gate again. It can only make a reel eligible: the
+        # rewrite is re-verified, and a second block stands.
+        fixed = scriptwriter.repair_script(script["script_body"], check["unsupported"],
+                                           topic=idea.get("title"))
+        if fixed:
+            recheck = factcheck.verify(fixed, idea.get("sources"), script.get("title") or "",
+                                       on_screen=[*(script.get("key_points") or []), summary_text])
+            if recheck["ok"] and factcheck.gate_ran(recheck):
+                log.warning("produce: idea %s repaired after the fact-check block (%s)",
+                            idea_id, factcheck.summary(check))
+                script["script_body"] = fixed
+                db.update_script_body(script["script_id"], fixed)
+                check = recheck
+            else:
+                log.warning("produce: idea %s repair did not pass the gate either", idea_id)
     if not check["ok"]:
         db.set_idea_status(idea_id, "rejected")
         raise FactCheckFailed(
