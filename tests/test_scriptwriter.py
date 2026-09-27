@@ -257,7 +257,9 @@ def test_key_points_default_empty_when_absent(monkeypatch):
 def test_prompt_targets_25_30s_sarcastic():
     prompt = scriptwriter._build_prompt(IDEA, "N").lower()
     assert "25-30 second" in prompt          # explicit length
-    assert "65-75 words" in prompt           # word budget for ~25-30s
+    assert "55-70 words" in prompt           # word budget for ~25-30s
+    assert "never more than 80" in prompt    # the cap itself is stated (it never was)
+    assert "don't end early" not in prompt and "do not cut it short" not in prompt
     assert "sarcastic" in prompt             # tone
     assert "12-20 second" not in prompt      # old short-form target gone
 
@@ -481,4 +483,98 @@ def test_sources_are_listed_one_per_line(monkeypatch):
 
 def test_sources_already_cited_are_not_repeated():
     caption = scriptwriter._ensure_sources("See https://a.example/1", ["https://a.example/1"])
-    assert caption == "See https://a.example/1"
+    assert caption.count("https://a.example/1") == 1
+
+
+# --- 2026-09-27 audit: length, sources, markdown, disclosure --------------------------------
+
+_SCRIPT_267_SHAPE = (
+    "Iran and the UAE just shook hands, two regional rivals who have been, shall we say, at odds "
+    "in the West Asia neighbourhood for a very long time over shipping lanes, islands, proxies and "
+    "oil. [serious] But it matters because a thaw between them changes what every tanker in the "
+    "Gulf pays for insurance. Subscribe for the real story.")
+
+
+def test_truncation_never_cuts_a_sentence_in_half():
+    """Published script 267 went out mid-sentence: '...*at odds* in the West Asia [serious] But
+    it matters because...'. A whole sentence is dropped instead, and the CTA goes first."""
+    out = scriptwriter._truncate_to_words(_SCRIPT_267_SHAPE, 50)
+    assert "Subscribe" not in out, "the call to action is the first thing cut"
+    assert "at odds in the West Asia neighbourhood" in out, "the hook stays whole"
+    assert "But it matters because" in out
+    for sentence in scriptwriter._sentences(out):
+        assert sentence.rstrip().endswith((".", "!", "?", "…")), sentence
+
+
+def test_truncation_drops_the_close_before_the_facts():
+    body = ("Hook sentence here. Fact one is important. Fact two matters too. "
+            "Here's why it matters: prices rise. And that is the loop back. Subscribe now.")
+    out = scriptwriter._truncate_to_words(body, 18)
+    assert "Subscribe" not in out and "loop back" not in out
+    assert "Fact one" in out and "prices rise" in out
+
+
+def test_tighten_pass_is_used_when_the_draft_runs_long(monkeypatch):
+    long = " ".join(["Word"] * 90) + ". Here's why it matters: it does."
+    tight = " ".join(["Word"] * 50) + ". Here's why it matters: it does."
+    monkeypatch.setattr(scriptwriter.llm, "generate",
+                        lambda *a, **k: '{"script_body": "%s"}' % tight)
+    assert scriptwriter._enforce_length(long, 1) == tight
+
+
+def test_tighten_pass_that_drops_the_payoff_is_refused(monkeypatch):
+    long = " ".join(["Word"] * 90) + ". Here's why it matters: it does."
+    monkeypatch.setattr(scriptwriter.llm, "generate",
+                        lambda *a, **k: '{"script_body": "%s."}' % " ".join(["Word"] * 50))
+    out = scriptwriter._enforce_length(long, 1)
+    assert scriptwriter._WHY_IT_MATTERS_RE.search(out)
+
+
+def test_caption_gets_exactly_one_sources_block_of_real_links():
+    """Every recent description had TWO 'Sources:' blocks; the model's own was 12/53 dead."""
+    model_caption = ("Hook 📺\n\nSummary. 💬 Thoughts?\n\nSources:\n"
+                     "https://www.voanews.com/a/invented-404\nhttps://latimes.com/also-invented")
+    out = scriptwriter._ensure_sources(model_caption, [
+        "https://www.afp.com/en/real", "https://www.afp.com/en/second-afp",
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQ",
+        "https://news.google.com/rss/articles/CBMi", "https://citizen.digital/a"])
+    assert out.count("Sources:") == 1
+    assert "voanews" not in out and "latimes" not in out, "model-written links are dropped"
+    assert "vertexaisearch" not in out, "unresolved grounding redirects expire"
+    assert out.count("afp.com") == 1, "one link per outlet"
+    assert out.splitlines()[-3:] == ["https://www.afp.com/en/real", "https://citizen.digital/a",
+                                     "https://news.google.com/rss/articles/CBMi"]
+
+
+def test_a_redirect_is_kept_when_it_is_the_only_citation():
+    out = scriptwriter._ensure_sources("Hook.", [
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/X"])
+    assert "grounding-api-redirect/X" in out
+
+
+def test_markdown_emphasis_is_stripped_from_the_narration():
+    assert scriptwriter._strip_markdown("They did *that*, and **poof**.") == \
+        "They did that, and poof."
+
+
+def test_disclosure_matches_ai_imagery(monkeypatch):
+    monkeypatch.setenv("VISUAL_SOURCE", "ai")
+    assert scriptwriter._ensure_disclosure("Hook.").endswith(scriptwriter.DISCLOSURE_LINE_AI)
+    monkeypatch.setenv("VISUAL_SOURCE", "photos")
+    assert scriptwriter._ensure_disclosure("Hook.").endswith(scriptwriter.DISCLOSURE_LINE)
+
+
+def test_the_prompt_no_longer_asks_the_model_for_links():
+    prompt = scriptwriter._build_prompt(IDEA, "N")
+    assert "Line 3: The real source link" not in prompt
+    assert "Sources: ..." not in prompt
+    assert "SINGLE quotes" in prompt
+
+
+def test_punch_up_may_not_delete_the_why_it_matters_turn(monkeypatch):
+    """Live 2026-09-27, idea 312: the rewrite dropped the payoff and nothing checked."""
+    body = " ".join(["Word"] * 45) + ". Here's why it matters: it does."
+    rewrite = " ".join(["Better"] * 50) + "."
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k:
+                        '{"hook_score": 3, "title": "T2", "script_body": "%s"}' % rewrite)
+    assert scriptwriter._punch_up_hook("T", body) == ("T", body)
