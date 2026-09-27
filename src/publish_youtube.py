@@ -72,7 +72,11 @@ def _build_body(metadata: dict) -> dict:
     disclose = config.get_bool("AI_DISCLOSURE", True)
 
     return {
-        "snippet": {"title": title, "description": desc, "tags": tags, "categoryId": category},
+        # Language set explicitly: left to detection, 79 of 88 videos had none and one English
+        # reel (59Mmuej_mes) was tagged Hindi.
+        "snippet": {"title": title, "description": desc, "tags": tags, "categoryId": category,
+                    "defaultLanguage": config.get("YOUTUBE_LANGUAGE", "en"),
+                    "defaultAudioLanguage": config.get("YOUTUBE_LANGUAGE", "en")},
         "status": {
             "privacyStatus": privacy,
             "selfDeclaredMadeForKids": False,
@@ -85,11 +89,34 @@ def _upload(youtube, body: dict, video_path: str) -> dict:
     """Resumable upload of the reel; returns the inserted video resource."""
     from googleapiclient.http import MediaFileUpload
 
+    import random
+    import socket
+    import time
+
+    from googleapiclient.errors import HttpError
+
     media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-    response = None
+    response, failures = None, 0
+    # A resumable upload can pick up where it stopped, so a 5xx or a dropped socket costs one
+    # chunk, not the reel. Without this, one blip threw away the voice, render and fact-check
+    # already spent on it.
     while response is None:
-        _status, response = request.next_chunk()
+        try:
+            _status, response = request.next_chunk()
+        except (HttpError, ConnectionError, socket.timeout, TimeoutError) as e:
+            code = getattr(getattr(e, "resp", None), "status", None)
+            if isinstance(e, HttpError) and code not in (500, 502, 503, 504):
+                if code == 403 and "quota" in str(e).lower():
+                    raise RuntimeError(f"publish: YouTube upload quota exhausted ({e})") from e
+                raise
+            failures += 1
+            if failures > 5:
+                raise
+            wait = min(60.0, 2 ** failures) + random.random()
+            log.warning("publish: upload interrupted (%s); retry %d/5 in %.0fs",
+                        str(e)[:160], failures, wait)
+            time.sleep(wait)
     return response
 
 

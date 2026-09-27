@@ -140,3 +140,33 @@ def test_publish_survives_a_failed_post_insert(monkeypatch, tmp_path, caplog):
     assert video_id == "NEWID" and url.endswith("NEWID")
     assert any("NEWID" in r.getMessage() for r in caplog.records), \
         "the orphaned video id must be logged for reconciliation"
+
+
+def test_upload_language_is_set_explicitly():
+    """79 of 88 videos had no language and one English reel was auto-tagged Hindi."""
+    body = pub._build_body({"title": "T", "description": "d"})
+    assert body["snippet"]["defaultLanguage"] == "en"
+    assert body["snippet"]["defaultAudioLanguage"] == "en"
+
+
+def test_a_transient_upload_error_is_retried(monkeypatch):
+    from googleapiclient.errors import HttpError
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    calls = []
+
+    class _Req:
+        def next_chunk(self):
+            calls.append(1)
+            if len(calls) == 1:
+                raise HttpError(type("R", (), {"status": 503, "reason": "x"})(), b"busy")
+            return None, {"id": "VID"}
+
+    class _Videos:
+        def insert(self, **kw):
+            return _Req()
+
+    yt = type("YT", (), {"videos": lambda self: _Videos()})()
+    monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
+    assert pub._upload(yt, {}, "x.mp4") == {"id": "VID"}
+    assert len(calls) == 2
