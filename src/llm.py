@@ -59,20 +59,24 @@ log = logging.getLogger(__name__)
 # gemini-3.5-flash-lite, while Gemini 3 models ground fine on Vertex (5,000 grounded prompts/month
 # free, then $14/1,000; 3.5 Flash-Lite tokens cost what 2.5 Flash's do). Measured the same day:
 # grounded search answers on gemini-3.5-flash-lite and gemini-3.5-flash in this project. So
-# GEMINI_GROUNDED_MODEL is now an ordered, comma-separated CHAIN (see _grounded_chain): the
-# default keeps today's model first and names the successor behind it, so the retirement date
-# moves the pipeline onto 3.5 Flash-Lite instead of stopping it.
+# GEMINI_GROUNDED_MODEL is now an ordered, comma-separated CHAIN (see _grounded_chain), and
+# the default depends on the backend. On Vertex the pipeline moved off gemini-2.5-flash ahead of
+# its retirement (operator, 2026-09-27) onto Google's named replacement, gemini-3.5-flash-lite,
+# with gemini-3.5-flash behind it. On the Developer API gemini-2.5-flash stays: it is the only
+# model with free grounded search there, and a fresh clone runs on that path.
 _GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.6-flash")
-_GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL",
-                                    "gemini-2.5-flash,gemini-3.5-flash-lite")
+_GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL")  # None = the backend's default
+_GROUNDED_DEFAULT_VERTEX = "gemini-3.5-flash-lite,gemini-3.5-flash"
+_GROUNDED_DEFAULT_DEV = "gemini-2.5-flash"
 
 
 def _grounded_chain(model: str | None) -> list[str]:
-    """Grounded models to try, in order. An explicit `model` is used alone."""
-    if model:
-        return [model]
-    chain = [m.strip() for m in str(_GEMINI_GROUNDED_MODEL).split(",") if m.strip()]
-    return chain or ["gemini-3.5-flash-lite"]
+    """Grounded models to try, in order: `model` if given (a single name or its own chain),
+    else GEMINI_GROUNDED_MODEL, else the backend's default chain."""
+    raw = model or _GEMINI_GROUNDED_MODEL or (
+        _GROUNDED_DEFAULT_VERTEX if _use_vertex() else _GROUNDED_DEFAULT_DEV)
+    chain = [m.strip() for m in str(raw).split(",") if m.strip()]
+    return chain or [_GROUNDED_DEFAULT_DEV]
 
 
 def _is_model_gone(exc: Exception) -> bool:

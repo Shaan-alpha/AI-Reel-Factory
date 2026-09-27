@@ -316,10 +316,11 @@ def test_strict_mode_does_not_affect_a_real_verdict(monkeypatch):
 
 
 def test_default_model_is_none_so_the_shared_free_model_is_used(monkeypatch):
-    """Measured 2026-07-27: every model except gemini-2.5-flash returns `limit: 0` (no free
-    allowance) on this account. A non-None default would make the gate fail every single time —
-    permanently fail-open, which is worse than having no gate."""
+    """Measured 2026-07-27: on the Developer API every model except gemini-2.5-flash returns
+    `limit: 0` (no free allowance). A non-None default there would make the gate fail every
+    single time — permanently fail-open, which is worse than having no gate."""
     monkeypatch.delenv("FACTCHECK_MODEL", raising=False)
+    monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
     assert factcheck._model() is None
 
     seen = {}
@@ -524,3 +525,10 @@ def test_an_extra_sample_that_cannot_run_does_not_undo_the_first(monkeypatch):
     monkeypatch.setattr(factcheck, "_ask_checker", _ask)
     result = factcheck.verify("A claim.", [])
     assert result["ok"] is True and factcheck.gate_ran(result)
+
+
+def test_on_vertex_the_gate_runs_on_the_stronger_3_5_flash(monkeypatch):
+    """Operator, 2026-09-27: off the retiring model; 3.5 Flash caught the 314 error."""
+    monkeypatch.delenv("FACTCHECK_MODEL", raising=False)
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    assert factcheck._model() == "gemini-3.5-flash,gemini-3.5-flash-lite"

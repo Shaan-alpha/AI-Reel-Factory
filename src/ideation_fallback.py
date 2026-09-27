@@ -125,6 +125,24 @@ Return ONLY JSON:
 """
 
 
+# Ideation is the one grounded caller that needs the search's CITATIONS, not just grounded
+# text: they become each idea's sources. Measured 2026-09-27 on Vertex with the real ideation
+# prompt, two runs per model: gemini-2.5-flash returned 15 and 18 citations, while
+# gemini-3.5-flash-lite, gemini-3.5-flash and gemini-3.8-flash all SEARCHED (3 queries each) but
+# returned ZERO citation chunks. So ideation stays on 2.5 until Vertex retires it (2026-10-20),
+# then the 404 moves it to 3.5-flash-lite, where sources come from the news feed and the Google
+# News search top-up (which gave every idea two real sources in the same live run).
+_VERTEX_IDEATION_CHAIN = "gemini-2.5-flash,gemini-3.5-flash-lite"
+
+
+def _ideation_model() -> str | None:
+    """IDEATION_MODEL, or on Vertex the citation-bearing chain above. None = the grounded chain."""
+    explicit = config.get("IDEATION_MODEL")
+    if explicit:
+        return explicit
+    return _VERTEX_IDEATION_CHAIN if llm._use_vertex() else None
+
+
 def _parse_ideas(raw: str) -> list[dict]:
     # llm.parse_json: a bare array, text after the JSON and raw quotes inside strings all parse
     # (the old first-{-to-last-} slice turned a bare array into "Extra data").
@@ -629,7 +647,8 @@ def _produce_ideas(target: int) -> list[dict]:
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     clean: list[dict] = []
     try:
-        raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192)
+        raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192,
+                                                           model=_ideation_model())
         parsed = _parse_ideas(raw)
         clean = _validate_and_clean(_attach_real_sources(parsed, raw, grounded, feed_stories))
         if not clean:

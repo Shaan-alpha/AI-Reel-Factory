@@ -40,15 +40,14 @@ jobs:
           GEMINI_USE_VERTEX: "true"
           GCP_PROJECT: but-it-matters-tts
           GCP_LOCATION: global
-          GEMINI_GROUNDED_MODEL: gemini-2.5-flash
+          GEMINI_GROUNDED_MODEL: gemini-3.5-flash-lite
         run: python tools/verify_vertex.py
 
-      # The successor the grounded chain falls through to once gemini-2.5-flash retires on
-      # Vertex (2026-10-20). Proven on its own so the fall-through is never its first test.
-      - name: Vertex grounded search on the successor model
+      # The fact-check gate's model, proven on its own.
+      - name: Vertex grounded search on the fact-check model
         env:
           GEMINI_USE_VERTEX: "true"
           GCP_PROJECT: but-it-matters-tts
           GCP_LOCATION: global
-          GEMINI_GROUNDED_MODEL: gemini-3.5-flash-lite
+          GEMINI_GROUNDED_MODEL: gemini-3.5-flash
         run: python tools/verify_vertex.py

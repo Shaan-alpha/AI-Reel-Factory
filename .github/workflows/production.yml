@@ -64,7 +64,9 @@ jobs:
         env:                     # secrets configured in repo Settings -> Secrets (rule 5)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.6-flash' }}              # ungrounded text; own per-model free budget
-          GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-2.5-flash,gemini-3.5-flash-lite' }} # ordered chain: 2.5 retires on Vertex 2026-10-20, a 404 moves to the next
+          GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-3.5-flash-lite,gemini-3.5-flash' }} # off gemini-2.5-flash (retires 2026-10-20); a 404 moves down the chain
+          FACTCHECK_MODEL: ${{ vars.FACTCHECK_MODEL || 'gemini-3.5-flash,gemini-3.5-flash-lite' }} # the gate's own, stronger chain
+          IDEATION_MODEL: ${{ vars.IDEATION_MODEL || 'gemini-2.5-flash,gemini-3.5-flash-lite' }} # only 2.5 returns citations; 404 on 10-20 moves it on
           # Serve Gemini through Vertex AI rather than the Developer API. The free
           # Developer tier is 20 grounded requests/DAY shared by ideation, the scriptwriter and
           # the fact-check gate (~21/day of demand, so it runs dry and the GATE is what breaks).

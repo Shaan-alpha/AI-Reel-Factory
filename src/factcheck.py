@@ -139,16 +139,24 @@ def _parse(raw: str) -> dict:
     return data
 
 
+# The gate's own chain on Vertex (operator, 2026-09-27). gemini-3.5-flash is the stronger
+# checker: in one sample it caught the 314 "press briefing" error that gemini-2.5-flash waived as
+# minor on 315. About $0.003-0.004 a check; the grounding itself is inside Vertex's free 5,000 a
+# month. Flash-Lite behind it takes over if 3.5 Flash is ever withdrawn.
+_VERTEX_CHECKER = "gemini-3.5-flash,gemini-3.5-flash-lite"
+
+
 def _model() -> str | None:
-    """Which model runs the check. None = walk the GEMINI_GROUNDED_MODEL chain.
+    """Which model (or comma-separated chain) runs the check. None = the grounded chain.
 
     Backend-dependent. On the Developer API (API key) only `gemini-2.5-flash` has free grounded
-    search — every 3.x model 429s with no allowance (measured 2026-08-07) — so a non-default
-    there makes the gate fail every time. On Vertex, which CI runs, Gemini 3 models ground
-    (measured 2026-09-27), and gemini-2.5-flash itself retires on 2026-10-20. An explicit model
-    is used alone, without the chain's retirement fall-through, so leaving this unset is safer.
+    search — every 3.x model 429s with no allowance (measured 2026-08-07) — so the default there
+    stays None. On Vertex, which CI runs, Gemini 3 models ground and the gate gets its own chain.
     """
-    return config.get("FACTCHECK_MODEL") or None
+    explicit = config.get("FACTCHECK_MODEL")
+    if explicit:
+        return explicit
+    return _VERTEX_CHECKER if llm._use_vertex() else None
 
 
 def _api_key() -> str | None:

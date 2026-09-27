@@ -847,3 +847,15 @@ def test_an_unrelated_story_is_not_mistaken_for_a_repeat():
     other = {"title": "Iran & UAE: A BRICS Truce?", "hook": "Rivals shake hands.",
              "sources": ["https://b.example/iran"]}
     assert fb._repeats_recent_story(other, recent) is False
+
+
+def test_ideation_keeps_the_only_citation_bearing_model_until_it_retires(monkeypatch):
+    """Measured 2026-09-27: on the real prompt 2.5-flash returned 15-18 citations and every 3.x
+    model returned zero, so ideation walks its own chain onto 3.5-flash-lite only on a 404."""
+    monkeypatch.delenv("IDEATION_MODEL", raising=False)
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    assert fb._ideation_model() == "gemini-2.5-flash,gemini-3.5-flash-lite"
+    monkeypatch.delenv("GEMINI_USE_VERTEX")
+    assert fb._ideation_model() is None
+    monkeypatch.setenv("IDEATION_MODEL", "gemini-3.5-flash")
+    assert fb._ideation_model() == "gemini-3.5-flash"

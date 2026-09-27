@@ -263,11 +263,23 @@ def test_an_explicit_grounded_model_is_not_expanded_into_the_chain(monkeypatch):
     assert seen == ["gemini-3.5-flash"]
 
 
-def test_the_default_grounded_chain_survives_the_2_5_retirement():
-    """The code default must name a successor, not just the retiring model."""
+def test_vertex_has_moved_off_the_retiring_model(monkeypatch):
+    """gemini-2.5-flash retires on Vertex on 2026-10-20; the pipeline moved ahead of it."""
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", None)
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
     chain = llm._grounded_chain(None)
-    assert chain[0] == "gemini-2.5-flash" or "gemini-2.5-flash" not in chain
-    assert any(m.startswith("gemini-3") for m in chain)
+    assert chain[0] == "gemini-3.5-flash-lite" and "gemini-2.5-flash" not in chain
+
+
+def test_the_developer_api_keeps_its_only_free_grounded_model(monkeypatch):
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", None)
+    monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
+    assert llm._grounded_chain(None) == ["gemini-2.5-flash"]
+
+
+def test_an_explicit_model_may_be_a_chain_of_its_own():
+    assert llm._grounded_chain("gemini-3.5-flash, gemini-3.5-flash-lite") == [
+        "gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
 
 def test_an_unsupported_thinking_level_is_retried_at_low(monkeypatch):
