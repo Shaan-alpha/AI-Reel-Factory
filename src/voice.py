@@ -442,6 +442,8 @@ def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
     voice_name = config.get("GEMINI_TTS_VOICE", "Zubenelgenubi")
     cfg = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
+        # No tools here; the SDK only warns about automatic function calling on every call.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)

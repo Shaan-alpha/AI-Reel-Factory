@@ -196,6 +196,7 @@ def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
     cfg = types.GenerateContentConfig(
         max_output_tokens=max_tokens,
         thinking_config=_thinking_cfg(_GEMINI_MODEL),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
     if json:
         cfg.response_mime_type = "application/json"
