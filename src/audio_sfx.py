@@ -125,6 +125,14 @@ _GENERATORS = {
 }
 
 
+def _same_pcm(path: str, pcm: bytes) -> bool:
+    try:
+        with wave.open(path, "rb") as w:
+            return w.getframerate() == _SAMPLE_RATE and w.readframes(w.getnframes()) == pcm
+    except Exception:  # noqa: BLE001 — missing or unreadable: regenerate
+        return False
+
+
 def ensure_sfx_assets(sfx_dir: str | None = None) -> dict[str, str]:
     """Ensure procedural SFX files exist in sfx_dir (default assets/sfx). Returns {name: path}."""
     target_dir = sfx_dir or config.get("SFX_DIR", os.path.join("assets", "sfx"))
@@ -132,8 +140,11 @@ def ensure_sfx_assets(sfx_dir: str | None = None) -> dict[str, str]:
     paths = {}
     for name, gen_fn in _GENERATORS.items():
         path = os.path.join(target_dir, f"{name}.wav")
-        if not (os.path.isfile(path) and os.path.getsize(path) > 100):
-            pcm = gen_fn()
+        pcm = gen_fn()  # milliseconds: cheap enough to compare every time
+        # Rewrite when the cached file differs from what the generator makes now, not only when
+        # it is missing: a file left from an older generator (the pre-seed-fix whoosh and click
+        # on the dev box) otherwise sounds different from what CI renders, silently.
+        if not _same_pcm(path, pcm):
             with wave.open(path, "wb") as w:
                 w.setnchannels(1)
                 w.setsampwidth(2)

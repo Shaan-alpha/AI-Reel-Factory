@@ -81,3 +81,18 @@ def test_volume_scales_the_mix(tmp_path):
     audio_sfx.mix_sfx_events([{"time": 0.0, "name": "ding", "volume": 0.8}], 1.0, loud, sfx_dir)
     audio_sfx.mix_sfx_events([{"time": 0.0, "name": "ding", "volume": 0.2}], 1.0, quiet, sfx_dir)
     assert max(abs(v) for v in _samples(loud)) > max(abs(v) for v in _samples(quiet)) * 2
+
+
+def test_a_stale_cached_sting_is_regenerated(tmp_path):
+    """A file from an older generator used to be kept because it merely existed."""
+    import wave
+
+    stale = tmp_path / "click.wav"
+    with wave.open(str(stale), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b"\x01\x00" * 2000)
+    audio_sfx.ensure_sfx_assets(str(tmp_path))
+    with wave.open(str(stale), "rb") as w:
+        assert w.readframes(w.getnframes()) == audio_sfx._generate_click()

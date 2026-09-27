@@ -7,6 +7,7 @@ piece is unavailable (offline / no FFmpeg).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 import pytest
@@ -585,3 +586,42 @@ def test_grain_is_off_by_default_and_the_logo_clears_the_top_icons(monkeypatch, 
     monkeypatch.setenv("BRAND_LOGO", str(logo))
     cmd = assembly._build_cmd(_ordered(2), "n.wav", 9.0, "o.mp4")
     assert "overlay=W-w-44:240" in cmd[cmd.index("-filter_complex") + 1]
+
+
+def test_rendered_loudness_lands_on_target(tmp_path):
+    """Measure the OUTPUT, not the filter string. Every audio test used to assert substrings,
+    which is how 489 green tests coexisted with reels 3-9 dB too quiet and SFX switched on
+    unannounced. Synthetic inputs: a speech-like tone burst over a pink-noise bed."""
+    import shutil
+    import subprocess
+
+    ff = shutil.which("ffmpeg")
+    if not ff:
+        pytest.skip("needs ffmpeg")
+    narr, bed, clip = (str(tmp_path / n) for n in ("narr.wav", "bed.wav", "c.mp4"))
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=220:sample_rate=24000:duration=12,"
+                    "volume='if(lt(mod(t,1.4),1.0),0.25,0.0)':eval=frame",
+                    "-ac", "1", narr], check=True, capture_output=True)
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i", "anoisesrc=color=pink:duration=60:amplitude=0.3",
+                    "-ac", "1", bed], check=True, capture_output=True)
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:d=12:r=30",
+                    "-c:v", "libx264", "-preset", "ultrafast", clip], check=True, capture_output=True)
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copyfile(bed, music_dir / "bed.wav")
+    env = {"MUSIC_DIR": str(music_dir), "ENABLE_SFX": "false", "ENABLE_BRAND_BUG": "false"}
+    old = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    try:
+        out = assembly.assemble(narr, [clip], str(tmp_path / "out.mp4"))
+    finally:
+        for k, v in old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    err = subprocess.run([ff, "-hide_banner", "-nostats", "-i", out, "-af", "ebur128=peak=true",
+                          "-f", "null", "-"], capture_output=True, text=True).stderr
+    summary = err[err.rfind("Summary:"):]
+    loud = float(re.search(r"I:\s+(-?[\d.]+) LUFS", summary).group(1))
+    peak = float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary).group(1))
+    assert -16.0 <= loud <= -12.5, loud
+    assert peak <= -0.5, peak
