@@ -157,14 +157,14 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
                     idea_id, len(check["minor"]), " | ".join(check["minor"][:3]))
     # `ok=True` is ALSO what a fail-open returns, so "passed" and "could not be checked" were
     # indistinguishable here and an unverified reel shipped looking exactly like a verified one.
-    # The gate shares a 20/day grounded budget with ideation and the scriptwriter, so it runs dry
-    # on precisely the busiest days (audit 2026-09-03). Accuracy is the monetization gate (rule 6):
-    # if it did not run, say so on the operator's phone rather than in a log nobody reads.
+    # On the Developer API the gate shared a 20/day grounded budget and ran dry on the busiest days
+    # (audit 2026-09-03); on Vertex an outage is rarer but not impossible. Accuracy is the
+    # monetization gate (rule 6): if it did not run, say so on the operator's phone.
     if check["ok"] and factcheck.enabled() and not factcheck.gate_ran(check):
         log.warning("produce: idea %s is shipping UNVERIFIED — %s", idea_id, check.get("reason"))
         _notify(f"⚠️ Idea {idea_id} ({idea.get('title')!r}) shipped UNVERIFIED — the fact-check "
-                f"gate could not run ({check.get('reason')}). Set FACTCHECK_API_KEY to give it "
-                f"its own quota, or FACTCHECK_STRICT=true to block instead.")
+                f"gate could not run ({check.get('reason')}). Set FACTCHECK_STRICT=true to hold "
+                f"such reels back instead (it is the live setting; this means it is off).")
     if not check["ok"] and str(check.get("reason", "")).startswith("checker-failed"):
         raise FactCheckUnavailable(
             f"idea {idea_id} held back: the fact-check could not run ({check.get('reason')}). "
