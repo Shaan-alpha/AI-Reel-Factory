@@ -140,8 +140,11 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     # monetization gate (rule 6) — a strike costs far more than a skipped reel.
     # Only FABRICATION-grade findings block (2026-08-07): imprecision is waived and logged, so
     # the gate stops false stories rather than stopping the channel. See src/factcheck.py.
-    check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "")
-    if check.get("minor"):
+    # The cards and the description are published claims too, and were never checked.
+    summary_text = (script.get("caption") or "").split("\nSources:")[0].strip()
+    check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "",
+                             on_screen=[*(script.get("key_points") or []), summary_text])
+    if check.get("minor") and check["ok"]:
         log.warning("produce: idea %s shipped with %d waived minor fact issue(s): %s",
                     idea_id, len(check["minor"]), " | ".join(check["minor"][:3]))
     # `ok=True` is ALSO what a fail-open returns, so "passed" and "could not be checked" were
@@ -167,7 +170,16 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     work = os.path.join(work_root, f"idea_{idea_id}")
     os.makedirs(work, exist_ok=True)
     try:
-        audio, duration = voice.synthesize(script["script_body"], work)
+        spoke: dict = {}
+        audio, duration = voice.synthesize(script["script_body"], work, meta=spoke)
+        log.info("produce: idea %s voiced by %s", idea_id, spoke.get("voice"))
+        # The channel has ONE narrator, and it lives only on the Gemini engine. Three reels in
+        # September left it for Chirp's voice with nothing but a log line to show for it, which
+        # is how "the sound is very different" reached the operator before any alert did.
+        if spoke.get("engine") != "gemini":
+            _notify(f"🎙️ Idea {idea_id} ({idea.get('title')!r}) was voiced by the "
+                    f"{spoke.get('voice')} fallback, not the channel voice: every Gemini "
+                    f"attempt failed. It will sound different from the other Shorts.")
         keywords = visuals.extract_keywords(script["script_body"])
         clips = visuals.fetch_broll(keywords, duration, work)
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
@@ -176,7 +188,8 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         hook = script.get("title") or idea.get("title")
         final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
                                         hook_text=hook, key_points=script.get("key_points"),
-                                        source_label=_source_domain(idea.get("sources")))
+                                        source_label=_source_domain(idea.get("sources")),
+                                        script_text=script["script_body"])
         video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url
@@ -293,13 +306,26 @@ def _approval_mode() -> str:
     return (config.get("TELEGRAM_APPROVAL_MODE") or "polling").strip().lower()
 
 
-def _wait_for_webhook_decisions(max_seconds: int, poll_seconds: int = 5) -> int:
-    """Wait while the Vercel Telegram webhook writes approval taps into Supabase."""
+def _wait_for_webhook_decisions(max_seconds: int, poll_seconds: int = 5,
+                                offered: list[int] | None = None) -> int:
+    """Wait while the Vercel Telegram webhook writes approval taps into Supabase.
+
+    Scoped to the ideas THIS run offered, and done as soon as the approval cap is reached: it
+    used to wait for every pending idea in the table, so 5 of 14 sampled runs sat out the full
+    30 minutes while an approved reel waited behind ideas nobody was going to tap."""
     deadline = time.monotonic() + max_seconds
+    wanted = {int(i) for i in offered} if offered is not None else None
+    cap = int(config.get("APPROVAL_CAP", config.get("DAILY_REEL_CAP", "3")))
     while True:
-        pending = db.get_pending_ideas()
+        pending = [i for i in db.get_pending_ideas()
+                   if wanted is None or int(i["id"]) in wanted]
         if not pending:
             log.info("approval: all ideas decided via webhook.")
+            break
+        approved_now = [i for i in db.get_approved_ideas()
+                        if wanted is None or int(i["id"]) in wanted]
+        if len(approved_now) >= cap:
+            log.info("approval: approval cap (%d) reached; not waiting for the rest.", cap)
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -350,7 +376,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     offered = [i["id"] for i in db.get_pending_ideas()]
     approval.send_digest()
     if _approval_mode() == "webhook":
-        _wait_for_webhook_decisions(max_seconds=wait_minutes * 60)
+        _wait_for_webhook_decisions(max_seconds=wait_minutes * 60, offered=offered)
     else:
         approval.process_responses(max_seconds=wait_minutes * 60)
 

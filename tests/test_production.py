@@ -29,6 +29,13 @@ SCRIPT = {"script_id": 70, "script_body": "body words " * 20,
           "caption": "cap https://x.example\n#Shorts", "hashtags": ["#ISRO", "#Shorts"]}
 
 
+
+def _fake_synth(body, d, meta=None):
+    """A normal render: the channel voice spoke."""
+    if meta is not None:
+        meta.update(engine="gemini", voice="gemini:gemini-3.1-flash-tts-preview@dev")
+    return "a.mp3", 30.0
+
 def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     """Mock the whole chain so produce_one runs without side effects."""
     monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: SCRIPT)
@@ -36,13 +43,13 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     # network calls and burns the shared 20/day grounded quota (rule 13) — and passes for the
     # wrong reason, because a 429 takes the fail-open path.
     monkeypatch.setattr(production.factcheck, "verify",
-                        lambda body, sources=None, title="": {
+                        lambda body, sources=None, title="", on_screen=None: {
                             "ok": factcheck_ok,
                             "unsupported": [] if factcheck_ok else ["the 40% figure is invented"],
                             "checked": 3, "reason": "pass" if factcheck_ok else "fail"})
     monkeypatch.setattr(production.db, "get_published_post_for_idea",
                         lambda idea_id, plat="youtube": existing_post)
-    monkeypatch.setattr(production.voice, "synthesize", lambda body, d: ("a.mp3", 30.0))
+    monkeypatch.setattr(production.voice, "synthesize", _fake_synth)
     monkeypatch.setattr(production.visuals, "extract_keywords", lambda body: ["rocket"])
     monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d: ["c1.mp4"])
     monkeypatch.setattr(production.assembly, "assemble", lambda a, c, o: o)
@@ -247,7 +254,7 @@ def test_factcheck_failure_blocks_the_reel_before_any_render(monkeypatch, tmp_pa
     produced = _wire_happy(monkeypatch, factcheck_ok=False)
     rendered = []
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d: rendered.append("voice") or ("a.mp3", 30.0))
+                        lambda body, d, meta=None: rendered.append("voice") or ("a.mp3", 30.0))
 
     with pytest.raises(production.FactCheckFailed, match="40%"):
         production.produce_one(IDEA, str(tmp_path))
@@ -264,12 +271,12 @@ def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(mon
     about a story nobody had checked.
     """
     produced = _wire_happy(monkeypatch)
-    monkeypatch.setattr(production.factcheck, "verify", lambda body, sources=None, title="": {
+    monkeypatch.setattr(production.factcheck, "verify", lambda body, sources=None, title="", on_screen=None: {
         "ok": False, "unsupported": ["checker unavailable: 503 UNAVAILABLE"], "minor": [],
         "checked": 0, "reason": "checker-failed: 503 UNAVAILABLE"})
     rendered = []
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d: rendered.append("voice") or ("a.mp3", 30.0))
+                        lambda body, d, meta=None: rendered.append("voice") or ("a.mp3", 30.0))
 
     with pytest.raises(production.FactCheckUnavailable, match="could not run"):
         production.produce_one(IDEA, str(tmp_path))
@@ -514,3 +521,42 @@ def test_make_on_demand_expires_stale_pending_before_reusing_it(monkeypatch):
 
     production.make_on_demand(3, 1)
     assert order[0] == "expire", "stale ideas must be cleared BEFORE the queue is read"
+
+
+def test_produce_one_alerts_when_the_reel_leaves_the_channel_voice(monkeypatch, tmp_path):
+    """Three September reels shipped in Chirp's voice with only a log line to show for it."""
+    _wire_happy(monkeypatch)
+    sent = []
+    monkeypatch.setattr(production, "_notify", sent.append)
+
+    def _chirp(body, d, meta=None):
+        meta.update(engine="google", voice="google")
+        return "a.wav", 30.0
+
+    monkeypatch.setattr(production.voice, "synthesize", _chirp)
+    production.produce_one(IDEA, str(tmp_path))
+    assert any("not the channel voice" in m for m in sent)
+
+
+def test_produce_one_is_quiet_when_the_channel_voice_spoke(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    sent = []
+    monkeypatch.setattr(production, "_notify", sent.append)
+    production.produce_one(IDEA, str(tmp_path))
+    assert not any("channel voice" in m for m in sent)
+
+
+def test_the_approval_wait_ends_once_this_runs_cap_is_met(monkeypatch):
+    """5 of 14 sampled runs sat out the full 30 minutes waiting on ideas nobody would tap."""
+    monkeypatch.setenv("APPROVAL_CAP", "1")
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 9}, {"id": 2}])
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 1}])
+    monkeypatch.setattr(production.time, "sleep", lambda s: pytest.fail("must not keep waiting"))
+    assert production._wait_for_webhook_decisions(600, offered=[1, 2]) == 1
+
+
+def test_the_approval_wait_ignores_other_runs_pending_ideas(monkeypatch):
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 99}])
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [])
+    monkeypatch.setattr(production.time, "sleep", lambda s: pytest.fail("must not keep waiting"))
+    production._wait_for_webhook_decisions(600, offered=[1, 2])
