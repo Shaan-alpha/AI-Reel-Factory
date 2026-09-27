@@ -475,7 +475,7 @@ def _fake_genai(monkeypatch, captured, pcm: bytes | None = None):
             return resp
 
     class _Client:
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, **_kw):
             captured["api_key"] = api_key
             self.models = _Models()
 
@@ -531,7 +531,7 @@ def _fake_genai_failing(monkeypatch, captured, fail_models: dict[str, Exception]
             return resp
 
     class _Client:
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, **_kw):
             self.models = _Models()
 
     import google.genai as genai
@@ -556,18 +556,134 @@ def test_gemini_tts_falls_back_to_the_stable_model_on_a_transient_error(monkeypa
     assert path.endswith(".wav") and dur == pytest.approx(1.0, abs=0.05)
 
 
-def test_gemini_tts_does_not_retry_a_non_transient_error(monkeypatch, tmp_path):
-    """A 400 means the REQUEST is wrong — the second model would reject it identically, so
-    retrying just burns time before the engine chain can do its job."""
+def test_gemini_tts_tries_the_same_voice_fallback_even_on_a_400(monkeypatch, tmp_path):
+    """Idea 292 (2026-09-12): 3.1-preview answered 400 INVALID_ARGUMENT to a 924-byte request
+    with one allowed tag, and idea 291 voiced with the same setup 2.5 minutes later. The old
+    "a 400 is a verdict" rule ended the engine and shipped that reel in Chirp's voice. The byte
+    guards catch the deterministic 400s before any request is made."""
     monkeypatch.setenv("GEMINI_API_KEY", "gk")
     monkeypatch.setenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
     cap = {}
     _fake_genai_failing(monkeypatch, cap, {
         "gemini-3.1-flash-tts-preview": RuntimeError("400 INVALID_ARGUMENT")})
 
-    with pytest.raises(RuntimeError, match="400"):
+    path, _ = voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["tried"] == ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]
+    assert path.endswith(".wav")
+
+
+def test_gemini_tts_tries_the_other_model_on_a_429(monkeypatch, tmp_path):
+    """Free TTS quota is metered per model, so a spent 3.1 still leaves 2.5's own allowance."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    cap = {}
+    _fake_genai_failing(monkeypatch, cap, {
+        "gemini-3.1-flash-tts-preview": RuntimeError("429 RESOURCE_EXHAUSTED")})
+    voice._synthesize_gemini("hi there", str(tmp_path))
+    assert cap["tried"][-1] == "gemini-2.5-flash-preview-tts"
+
+
+def test_gemini_tts_raises_when_every_attempt_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    boom = RuntimeError("400 INVALID_ARGUMENT")
+    _fake_genai_failing(monkeypatch, {}, {"gemini-3.1-flash-tts-preview": boom,
+                                          "gemini-2.5-flash-preview-tts": boom})
+    with pytest.raises(RuntimeError, match="all attempts failed"):
         voice._synthesize_gemini("hi there", str(tmp_path))
-    assert cap["tried"] == ["gemini-3.1-flash-tts-preview"], "must not try a second model"
+
+
+def test_vertex_serves_the_same_voice_before_the_chain_leaves_gemini(monkeypatch):
+    """2026-09-15: the Developer API 503'd on BOTH TTS models and both reels shipped in Chirp's
+    voice. Vertex serves the same model with separate capacity, so it is tried next."""
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT", "p")
+    assert voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", have_key=True) == [
+        ("dev", "gemini-3.1-flash-tts-preview"), ("vertex", "gemini-3.1-flash-tts-preview"),
+        ("dev", "gemini-2.5-flash-preview-tts"), ("vertex", "gemini-2.5-flash-tts")]
+
+
+def test_vertex_is_skipped_for_models_it_does_not_serve(monkeypatch):
+    """Vertex 404s gemini-3.8-flash-tts (measured 2026-09-27)."""
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT", "p")
+    assert voice._gemini_tts_attempts("gemini-3.8-flash-tts", have_key=True) == [
+        ("dev", "gemini-3.8-flash-tts"), ("dev", "gemini-2.5-flash-preview-tts"),
+        ("vertex", "gemini-2.5-flash-tts")]
+
+
+def test_no_vertex_attempts_without_vertex_setup(monkeypatch):
+    """A fresh clone with only an API key must not try to reach Vertex."""
+    monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
+    assert all(b == "dev" for b, _ in
+               voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", have_key=True))
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT", "p")
+    monkeypatch.setenv("GEMINI_TTS_VERTEX_FALLBACK", "false")
+    assert all(b == "dev" for b, _ in
+               voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", have_key=True))
+
+
+def test_vertex_alone_can_voice_without_an_api_key(monkeypatch):
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    monkeypatch.setenv("GCP_PROJECT", "p")
+    assert voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", have_key=False) == [
+        ("vertex", "gemini-3.1-flash-tts-preview"), ("vertex", "gemini-2.5-flash-tts")]
+
+
+def test_style_prompt_layout_is_picked_per_model():
+    """gemini-3.8-flash-tts reads an unlabelled style preamble ALOUD (2026-09-27: a 47.5 s render
+    opening "You are a sharp, faintly unimpressed..."). The models today's narration was tuned
+    on keep the plain layout, so the current sound does not move."""
+    plain = voice._tts_contents("gemini-3.1-flash-tts-preview", "Dry.", "Hello.")
+    assert plain == "Dry.\n\nHello."
+    labelled = voice._tts_contents("gemini-3.8-flash-tts", "Dry.", "Hello.")
+    assert "DIRECTOR'S NOTES" in labelled and "TRANSCRIPT" in labelled
+    assert labelled.rstrip().endswith("Hello.")
+    assert voice._tts_contents("gemini-3.8-flash-tts", "", "Hello.") == "Hello."
+
+
+@pytest.mark.parametrize("value", ["off", "none", "OFF", "false"])
+def test_the_style_prompt_can_be_switched_off(monkeypatch, value):
+    """From 2026-07-27 to 2026-09-01 production narrated with NO direction (an empty variable),
+    which is the sound the channel had then. An empty value cannot ask for that any more, since
+    config.get treats "" as unset, so an explicit off switch is the only way back to it."""
+    monkeypatch.setenv("VOICE_STYLE_PROMPT", value)
+    assert voice._style_prompt() == ""
+
+
+def test_the_default_style_prompt_still_applies_when_unset(monkeypatch):
+    monkeypatch.delenv("VOICE_STYLE_PROMPT", raising=False)
+    assert voice._style_prompt() == voice._DEFAULT_STYLE_PROMPT
+
+
+def test_a_render_that_read_the_style_prompt_aloud_is_rejected(monkeypatch, tmp_path):
+    """Guard for the 3.8 failure mode: 12 words cannot take 20 s unless something else was read."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    _fake_genai_audio(monkeypatch, _wav_bytes(20.0), "audio/wav")
+    with pytest.raises(RuntimeError, match="read more than the script"):
+        voice._synthesize_gemini("one two three four five six seven eight nine ten eleven "
+                                 "twelve", str(tmp_path))
+
+
+def test_synthesize_reports_which_voice_spoke(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+    _fake_genai(monkeypatch, {})
+    meta = {}
+    voice.synthesize("Sure. [sarcastic] Brilliant.", str(tmp_path), meta=meta)
+    assert meta == {"engine": "gemini", "voice": "gemini:gemini-3.1-flash-tts-preview@dev"}
+
+
+def test_synthesize_reports_a_fallback_engine(monkeypatch, tmp_path):
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+
+    def _boom(*_a):
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(voice, "_engine_gemini", _boom)
+    monkeypatch.setattr(voice, "_engine_google", lambda *a: ("chirp.wav", 2.0))
+    meta = {}
+    voice.synthesize("hello there", str(tmp_path), meta=meta)
+    assert meta == {"engine": "google", "voice": "google"}
 
 
 def test_gemini_tts_does_not_double_call_when_already_on_the_stable_model(monkeypatch, tmp_path):
@@ -594,6 +710,74 @@ def test_quota_errors_are_not_treated_as_transient():
     assert voice._is_transient(RuntimeError("500 INTERNAL")) is True
     assert voice._is_transient(RuntimeError("429 RESOURCE_EXHAUSTED")) is False
     assert voice._is_transient(RuntimeError("400 INVALID_ARGUMENT")) is False
+
+
+def test_a_dropped_connection_is_transient():
+    """Run 34954327606 (2026-09-15): the SDK raised httpx's RemoteProtocolError, "Server
+    disconnected without sending a response." None of the old markers matched, so the engine
+    skipped its same-voice fallback model and the reel shipped in Chirp's voice instead."""
+    class RemoteProtocolError(Exception):
+        pass
+
+    class ReadTimeout(Exception):
+        pass
+
+    assert voice._is_transient(
+        RemoteProtocolError("Server disconnected without sending a response.")) is True
+    assert voice._is_transient(ReadTimeout("The read operation timed out")) is True
+    assert voice._is_transient(ConnectionResetError("Connection reset by peer")) is True
+
+
+def _wav_bytes(seconds: float = 1.0, rate: int = 24000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+    return buf.getvalue()
+
+
+def _fake_genai_audio(monkeypatch, data: bytes, mime: str):
+    inline = type("Inline", (), {"data": data, "mime_type": mime})()
+    part = type("Part", (), {"inline_data": inline})()
+    content = type("Content", (), {"parts": [part]})()
+    resp = type("Resp", (), {"candidates": [type("C", (), {"content": content})()]})()
+
+    class _Models:
+        def generate_content(self, **kw):
+            return resp
+
+    class _Client:
+        def __init__(self, api_key=None, **_kw):
+            self.models = _Models()
+
+    import google.genai as genai
+    monkeypatch.setattr(genai, "Client", _Client)
+
+
+def test_gemini_tts_keeps_a_wav_container_instead_of_wrapping_it_again(monkeypatch, tmp_path):
+    """gemini-3.8-flash-tts answers `audio/wav` — a complete RIFF file (measured 2026-09-27) —
+    where 3.1/2.5 answer raw `audio/l16`. Wrapping a WAV in a second header plays the first
+    header as a click and misreports the duration."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    _fake_genai_audio(monkeypatch, _wav_bytes(1.0), "audio/wav")
+    path, dur = voice._synthesize_gemini("hi there", str(tmp_path))
+    with open(path, "rb") as f:
+        raw = f.read()
+    assert raw.count(b"RIFF") == 1
+    assert dur == pytest.approx(1.0, abs=0.01)
+
+
+def test_gemini_tts_reads_the_sample_rate_from_the_mime_type(monkeypatch, tmp_path):
+    """The rate is declared per response (`audio/L16;codec=pcm;rate=24000`); a hardcoded 24 kHz
+    would pitch-shift and re-time any model that answers at another rate."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    _fake_genai_audio(monkeypatch, b"\x00\x00" * 48000, "audio/L16;codec=pcm;rate=48000")
+    path, dur = voice._synthesize_gemini("hi there", str(tmp_path))
+    with wave.open(path, "rb") as w:
+        assert w.getframerate() == 48000
+    assert dur == pytest.approx(1.0, abs=0.01)
 
 
 def test_gemini_tts_uses_configured_model_and_voice(monkeypatch, tmp_path):
@@ -677,7 +861,7 @@ def test_gemini_tts_raises_on_unexpected_response_shape(monkeypatch, tmp_path):
             return type("Resp", (), {"candidates": []})()
 
     class _Client:
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, **_kw):
             self.models = _Models()
 
     import google.genai as genai
