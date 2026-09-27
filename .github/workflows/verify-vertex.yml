@@ -33,7 +33,7 @@ jobs:
 
       # google-genai talks to Vertex; google-auth resolves the federated credentials the auth
       # step wrote out. Both are already pinned in requirements.txt.
-      - run: pip install "google-genai==2.8.0" "google-auth==2.53.0" "python-dotenv==1.2.2"
+      - run: pip install "google-genai==2.25.0" "google-auth==2.58.1" "python-dotenv==1.2.2"
 
       - name: Vertex grounded search from CI
         env:

@@ -336,6 +336,9 @@ def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None
         cfg = types.GenerateContentConfig(
             max_output_tokens=max_tokens,
             tools=[types.Tool(google_search=types.GoogleSearch())],
+            # Search grounding is not a callable function; automatic function calling only makes
+            # the newer SDK warn on every grounded call ("Direct use of AFC ... not recommended").
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             # Minimise "thinking" — it eats max_output_tokens and was truncating the grounded
             # JSON reply mid-script, forcing the ungrounded fallback. Per-generation field.
             thinking_config=_thinking_cfg(chosen),

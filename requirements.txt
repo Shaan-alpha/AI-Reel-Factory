@@ -2,8 +2,8 @@
 # Bump deliberately + re-test; don't let a transitive update silently break the daily pipeline.
 
 # LLM (scriptwriter + ideation, grounded + fallback)
-google-genai==2.8.0             # Gemini — current SDK (`from google import genai`)
-groq==1.4.0                     # Groq failover
+google-genai==2.25.0             # Gemini — current SDK (`from google import genai`)
+groq==1.7.0                     # Groq failover
 
 # Database / state
 supabase==2.31.0               # Supabase Postgres client
@@ -25,7 +25,7 @@ pillow==12.2.0                # graphics.py stat-card PNGs (ENABLE_GRAPHIC_CARDS
 
 # Publishing (Module 9) + analytics (Module 10)
 google-api-python-client==2.197.0  # YouTube Data API v3
-google-auth==2.53.0                # OAuth for headless upload
+google-auth==2.58.1                # OAuth for headless upload
 google-auth-oauthlib==1.4.0        # one-time local OAuth flow
 
 # Misc
