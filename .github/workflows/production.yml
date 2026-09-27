@@ -25,7 +25,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Keyless auth to Google Cloud. This org's policy blocks BOTH API keys and service-account
       # keys, so there is no credential to store — GitHub's OIDC token is exchanged for a short
@@ -36,7 +36,7 @@ jobs:
           workload_identity_provider: projects/892249248253/locations/global/workloadIdentityPools/github/providers/github-oidc
           service_account: reel-factory-ci@but-it-matters-tts.iam.gserviceaccount.com
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -44,7 +44,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
 
       - name: Cache TTS/ASR models (Kokoro + faster-whisper)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/kokoro
@@ -52,7 +52,7 @@ jobs:
           key: models-kokoro1.0-whisper-base-v1
 
       - name: Cache pip
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('requirements.txt') }}

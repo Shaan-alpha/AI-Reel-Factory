@@ -19,9 +19,9 @@ jobs:
       contents: read
       id-token: write        # mints the OIDC token WIF exchanges; without it auth cannot run
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
