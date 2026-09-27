@@ -305,7 +305,7 @@ def test_burn_uses_plain_vf_when_no_cards(monkeypatch, tmp_path):
     subtitles._burn(str(video), str(ass), str(tmp_path / "o.mp4"))
     cmd = captured["cmd"]
     assert "-filter_complex" not in cmd and "-shortest" not in cmd
-    assert cmd[cmd.index("-vf") + 1] == "ass=c.ass:fontsdir=."
+    assert cmd[cmd.index("-vf") + 1] == f"ass=c.ass:fontsdir=.,{subtitles.BT709_TAGS}"
 
 
 # --- live: real whisper + real burn ----------------------------------------------------
@@ -394,3 +394,74 @@ def test_captions_keep_a_number_whole(monkeypatch):
          (1.0, 1.4, "people"), (1.4, 1.8, "died")])
     texts = [t for _s, _e, t in subtitles._build_events(words)]
     assert texts == ["authority 1,270 people", "died"]
+
+
+# --- 2026-09-27 audit: script-aligned text, grouping, banner fitting --------------------------
+
+def _w(*pairs):
+    """[(start, end, word)] at 0.3 s a word."""
+    return [(i * 0.3, i * 0.3 + 0.25, w) for i, w in enumerate(pairs)]
+
+
+def test_captions_show_the_scripts_words_at_the_heard_timing():
+    """10 published reels: 7.6% of burned words differed from the approved script."""
+    heard = _w("The", "ministry", "signed", "a", "769", "croned", "defense", "deal", "on",
+               "Monday.", "On", "officially", "it", "is", "done.")
+    script = "The ministry signed a 769-crore defense deal on Monday. Unofficially, it is done."
+    out = subtitles._align_to_script(heard, script)
+    assert [w[2] for w in out] == script.split()
+    assert out[0][0] == heard[0][0] and out[-1][1] == heard[-1][1]
+    assert out[4][0] == heard[4][0] and out[4][1] == heard[5][1]  # one word over both timings
+
+
+def test_a_split_percentage_is_rejoined_before_captioning():
+    heard = subtitles._merge_number_tokens(_w("a", "3", "-5", "%", "drop"))
+    assert [w[2] for w in heard] == ["a", "3-5%", "drop"]
+
+
+def test_delivery_tags_never_reach_the_captions():
+    out = subtitles._align_to_script(_w("But", "here"), "[serious] But here")
+    assert [w[2] for w in out] == ["But", "here"]
+
+
+def test_asr_is_kept_when_the_script_is_not_what_was_spoken():
+    heard = _w("completely", "different", "narration", "here")
+    assert subtitles._align_to_script(heard, "nothing alike at all today") == heard
+
+
+def test_captions_never_straddle_a_sentence_end():
+    """'matters When news' and 'just drama It' were burned on the 09-22 Short."""
+    groups = subtitles._caption_groups(_w("it", "matters.", "When", "news", "outlets"), 3)
+    assert [[w[2] for w in g] for g in groups] == [["it", "matters."], ["When", "news", "outlets"]]
+
+
+def test_a_caption_never_runs_past_the_safe_width():
+    """'Germany's ThyssenKrupp Marine' drew 1130 px wide on a 1080 px frame."""
+    groups = subtitles._caption_groups(_w("Germany's", "ThyssenKrupp", "Marine"), 3)
+    for g in groups:
+        assert subtitles._caption_px(" ".join(w[2] for w in g)) <= subtitles._MAX_CAPTION_PX
+
+
+def test_the_hook_banner_keeps_every_word():
+    """20 of the last 40 banners were cut mid-phrase ('...CLAIM: WHY IT')."""
+    title = "Trump's One Shot Iran Claim: Why It Matters"
+    banner = subtitles._hook_banner_text(title)
+    for word in title.upper().split():
+        assert word in banner, word
+    assert banner.count("\\N") <= 2
+
+
+def test_a_short_hook_banner_keeps_its_full_size():
+    assert "\\fs" not in subtitles._hook_banner_text("Rupee Hits Record Low")
+
+
+def test_the_source_line_sits_above_the_shorts_bottom_ui():
+    header = subtitles._ass_header()
+    source = next(ln for ln in header.splitlines() if ln.startswith("Style: Source"))
+    assert int(source.split(",")[-2]) >= 400
+
+
+def test_a_long_seven_word_title_still_fits_without_an_ellipsis():
+    """Local render 2026-09-27: this title needed a fourth line at the old smallest size."""
+    banner = subtitles._hook_banner_text("Networks Boycott Trump: An Unprecedented Media Blackout")
+    assert "BLACKOUT" in banner and "…" not in banner
