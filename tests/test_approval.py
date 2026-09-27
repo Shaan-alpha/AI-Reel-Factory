@@ -90,7 +90,7 @@ def test_send_digest_empty_noop(monkeypatch):
 def test_apply_callback_approve_under_cap(monkeypatch):
     monkeypatch.setattr(approval.db, "get_approved_ideas", lambda: [])
     statuses = []
-    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s, **k: statuses.append((i, s)) or True)
     assert approval._apply_callback("a", 7, cap=5) == "approved"
     assert statuses == [(7, "approved")]
 
@@ -104,14 +104,14 @@ def test_apply_callback_approve_at_cap_blocks(monkeypatch):
 
 def test_apply_callback_reject(monkeypatch):
     statuses = []
-    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s, **k: statuses.append((i, s)) or True)
     assert approval._apply_callback("r", 7, cap=5) == "rejected"
     assert statuses == [(7, "rejected")]
 
 
 def test_apply_callback_pass(monkeypatch):
     statuses = []
-    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s, **k: statuses.append((i, s)) or True)
     assert approval._apply_callback("p", 7, cap=5) == "passed"
     assert statuses == [(7, "passed")]  # soft skip, distinct from reject
 
@@ -127,7 +127,7 @@ def _update(chat_id="111", data="a:7"):
 def test_handle_update_approves_and_acks(monkeypatch):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
     monkeypatch.setattr(approval.db, "get_approved_ideas", lambda: [])
-    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: None)
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s, **k: True)
     calls = _mock_api(monkeypatch)
     assert approval._handle_update(_update(), cap=5) == "approved"
     methods = [m for m, _ in calls]
@@ -139,7 +139,7 @@ def test_a_decision_keeps_the_idea_formatting(monkeypatch):
     a 400 on any '&' or '<' (this very fixture's title) so the tap looked ignored."""
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
     monkeypatch.setattr(approval.db, "get_approved_ideas", lambda: [])
-    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s: None)
+    monkeypatch.setattr(approval.db, "set_idea_status", lambda i, s, **k: True)
     calls = _mock_api(monkeypatch)
     up = _update()
     text = "ISRO <reusable> & rocket\n📰 isro.gov.in"
@@ -178,3 +178,14 @@ def test_handle_update_non_callback_returns_none():
 def test_live_send_digest():
     sent = approval.send_digest()
     assert sent >= 0
+
+
+def test_a_tap_on_an_old_digest_cannot_revive_a_decided_idea(monkeypatch):
+    """An untapped digest message keeps live buttons after its run moves on; a tap used to move
+    a rejected or produced idea back to 'approved' (the stuck-approved state of idea 223)."""
+    monkeypatch.setattr(approval.db, "get_approved_ideas", lambda: [])
+    calls = []
+    monkeypatch.setattr(approval.db, "set_idea_status",
+                        lambda i, s, **k: calls.append(k) or False)  # not pending any more
+    assert approval._apply_callback("a", 7, cap=5) == "stale"
+    assert calls == [{"from_status": "pending"}]

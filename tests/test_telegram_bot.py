@@ -182,3 +182,21 @@ def test_approval_cap_reads_the_env_var(bot, monkeypatch):
 def test_approval_cap_survives_a_junk_value(bot, monkeypatch):
     monkeypatch.setenv("APPROVAL_CAP", "not-a-number")
     assert bot.approval_cap() == 3
+
+
+def test_bot_tap_on_a_decided_idea_is_reported_as_stale(bot, monkeypatch):
+    monkeypatch.setattr(bot, "approved_count", lambda: 0)
+    monkeypatch.setattr(bot, "approval_cap", lambda: 3)
+    monkeypatch.setattr(bot, "set_idea_status", lambda i, s: "stale")
+    assert bot.apply_callback_action("a", 7) == "stale"
+    assert "stale" in bot._DECISION_TEXT
+
+
+def test_bot_only_patches_pending_ideas(bot, monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_KEY", "k")
+    seen = {}
+    monkeypatch.setattr(bot, "_http", lambda m, url, h, p: seen.update(url=url, h=h) or (200, "[]"))
+    assert bot.set_idea_status(7, "approved") == "stale"
+    assert "status=eq.pending" in seen["url"]
+    assert seen["h"]["Prefer"] == "return=representation"

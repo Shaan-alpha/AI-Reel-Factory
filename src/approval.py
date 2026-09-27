@@ -37,6 +37,7 @@ _DECISION_TEXT = {
     "passed": "⏭️ Passed",
     "capped": "⚠️ Daily approval cap reached — not approved",
     "unknown": "Could not process that.",
+    "stale": "Already decided — this idea is no longer waiting for a tap.",
 }
 
 
@@ -153,19 +154,18 @@ def send_digest() -> int:
 
 
 def _apply_callback(action: str, idea_id: int, cap: int) -> str:
-    """Apply one tap to the DB, enforcing the approval cap. Returns the decision label."""
-    if action == "a":
-        if len(db.get_approved_ideas()) >= cap:
-            return "capped"
-        db.set_idea_status(idea_id, "approved")
-        return "approved"
-    if action == "r":
-        db.set_idea_status(idea_id, "rejected")
-        return "rejected"
-    if action == "p":
-        db.set_idea_status(idea_id, "passed")
-        return "passed"
-    return "unknown"
+    """Apply one tap to the DB, enforcing the approval cap. Returns the decision label.
+
+    Only a PENDING idea can be decided. An untapped digest message keeps live buttons after its
+    run moves on (a timed-out idea is re-sent as a new message; aged-out ideas keep theirs), and
+    a tap on one used to move a rejected or produced idea back to 'approved' — the stuck-approved
+    state STATUS 2026-09-01 records for idea 223."""
+    status = {"a": "approved", "r": "rejected", "p": "passed"}.get(action)
+    if status is None:
+        return "unknown"
+    if status == "approved" and len(db.get_approved_ideas()) >= cap:
+        return "capped"
+    return status if db.set_idea_status(idea_id, status, from_status="pending") else "stale"
 
 
 def _handle_update(update: dict, cap: int) -> str | None:

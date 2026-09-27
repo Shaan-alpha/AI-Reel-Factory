@@ -194,6 +194,7 @@ _DECISION_TEXT = {  # same labels as src/approval.py, so both approval modes loo
     "passed": "⏭️ Passed",
     "capped": "⚠️ Daily approval cap reached — not approved",
     "unknown": "Could not process that.",
+    "stale": "Already decided — this idea is no longer waiting for a tap.",
 }
 
 
@@ -238,20 +239,36 @@ def approved_count() -> int:
     return len(sb_get("ideas?select=id&status=eq.approved"))
 
 
-def set_idea_status(idea_id: int, status: str) -> bool:
-    return sb_patch(f"ideas?id=eq.{idea_id}", {"status": status})
+def set_idea_status(idea_id: int, status: str):
+    """Move a PENDING idea to `status`: True, False (request failed), or "stale" (not pending).
+
+    Conditional on status=pending: an old digest message keeps live buttons, and a tap on one
+    used to move a rejected or produced idea back to 'approved'."""
+    base, key = _env("SUPABASE_URL"), _env("SUPABASE_KEY")
+    if not (base and key):
+        return False
+    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json",
+               "Content-Type": "application/json", "Prefer": "return=representation"}
+    code, body = _http("PATCH", f"{base}/rest/v1/ideas?id=eq.{idea_id}&status=eq.pending",
+                       headers, {"status": status})
+    if code >= 300:
+        return False
+    try:
+        return True if json.loads(body or "[]") else "stale"
+    except ValueError:
+        return True
 
 
 def apply_callback_action(action: str, idea_id: int) -> str:
-    if action == "a":
-        if approved_count() >= approval_cap():
-            return "capped"
-        return "approved" if set_idea_status(idea_id, "approved") else "unknown"
-    if action == "r":
-        return "rejected" if set_idea_status(idea_id, "rejected") else "unknown"
-    if action == "p":
-        return "passed" if set_idea_status(idea_id, "passed") else "unknown"
-    return "unknown"
+    status = {"a": "approved", "r": "rejected", "p": "passed"}.get(action)
+    if status is None:
+        return "unknown"
+    if status == "approved" and approved_count() >= approval_cap():
+        return "capped"
+    result = set_idea_status(idea_id, status)
+    if result == "stale":
+        return "stale"
+    return status if result else "unknown"
 
 
 def handle_callback(cq: dict) -> None:
