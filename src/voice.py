@@ -474,7 +474,11 @@ def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
                 inline = resp.candidates[0].content.parts[0].inline_data
                 audio = inline.data
             except (AttributeError, IndexError, TypeError) as e:
-                raise RuntimeError(f"unexpected response shape ({e})") from e
+                # Usually a 200 with no content: the model declined (finish_reason OTHER, SAFETY,
+                # ...). Say which, so the log is actionable.
+                reason = getattr((getattr(resp, "candidates", None) or [None])[0],
+                                 "finish_reason", None)
+                raise RuntimeError(f"no audio in the response (finish_reason={reason}; {e})") from e
             if not audio:
                 raise RuntimeError("empty audio")
             duration = _write_gemini_audio(audio, getattr(inline, "mime_type", "") or "",

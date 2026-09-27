@@ -1,5 +1,7 @@
-# Diagnostic: proves GOOGLE_TTS_API_KEY works from GitHub's IP (no Short, no approval).
-# Lists en-IN Chirp 3 HD voices using the repo secret; prints OK + voices, or FAIL + Google's reason.
+# Diagnostic: proves every voice engine the chain relies on works from GitHub's runners
+# (no Short, no approval). The channel voice lives only on Gemini TTS, so it is checked on both
+# of its backends (Developer API key, then Vertex via Workload Identity Federation), and Chirp,
+# the next fallback, is checked by listing its en-IN voices. Three small requests.
 name: verify-tts
 
 on:
@@ -8,13 +10,32 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write        # for the keyless Vertex login
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install requests
-      - name: Check Google TTS key from CI
+      - name: Authenticate to Google Cloud (keyless)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/892249248253/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: reel-factory-ci@but-it-matters-tts.iam.gserviceaccount.com
+      - run: pip install -r requirements.txt
+      - name: Gemini TTS, the channel voice (Developer API and Vertex)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}
+          GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Zubenelgenubi' }}
+          GCP_PROJECT: but-it-matters-tts
+          GCP_LOCATION: global
+        run: python tools/verify_gemini_tts.py
+      - name: Chirp 3 HD, the first fallback
+        if: always()
         env:
           GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
         run: python tools/list_google_voices.py

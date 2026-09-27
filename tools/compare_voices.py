@@ -1,6 +1,6 @@
 """Render one script through each voice engine so the operator can pick by ear.
 
-Run: python tools/compare_voices.py [out_dir]
+Run: python tools/compare_voices.py [out_dir] [--with-pro]
 Needs GOOGLE_TTS_API_KEY + GOOGLE_TTS_VOICE for Chirp, GEMINI_API_KEY for Gemini.
 
 Why this exists: gemini-2.5-pro-preview-tts has NO free tier (~$1.27/month at 3 Shorts/day),
@@ -33,7 +33,10 @@ SCRIPT = ("[curious] Another committee has been formed. [sarcastic] Groundbreaki
           "[pause long] [serious] Here's why it actually matters: the rules change in April, "
           "and your electricity bill is the one that moves.")
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "voice_ab"
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+OUT = ARGS[0] if ARGS else "voice_ab"
+# Pro has NO free tier; it used to be in the default run, so every comparison billed.
+WITH_PRO = "--with-pro" in sys.argv
 os.makedirs(OUT, exist_ok=True)
 
 # (label, gemini model or None for the Chirp REST path)
@@ -45,8 +48,14 @@ CANDIDATES = [
     # minutes, so treat a FAIL here as "try again later", not "the model is wrong for us".
     # _synthesize_gemini falls back to the stable flash model on a 503, keeping the same voice.
     ("gemini-3.1-flash", "gemini-3.1-flash-tts-preview"),
-    ("gemini-pro", "gemini-2.5-pro-preview-tts"),
+    # Not labelled preview (2026-09-27). voice.py gives it the labelled prompt layout, since it
+    # reads an unlabelled style prompt aloud.
+    ("gemini-3.8-flash", "gemini-3.8-flash-tts"),
 ]
+if WITH_PRO:
+    CANDIDATES.append(("gemini-pro", "gemini-2.5-pro-preview-tts"))
+# One render per model, on the Developer API: a comparison should not fall through to Vertex.
+os.environ["GEMINI_TTS_VERTEX_FALLBACK"] = "false"
 
 print("script: %s\n" % SCRIPT)
 results = []
@@ -70,6 +79,6 @@ if not results:
 
 print("\nListen to each, then set:")
 print("  VOICE_ENGINE=gemini            (or leave 'google' to keep Chirp)")
-print("  GEMINI_TTS_MODEL=<model>       (both flash models are free; pro is ~$1.27/mo at 3/day)")
+print("  GEMINI_TTS_MODEL=<model>       (the flash models are free; pro, via --with-pro, is not)")
 print("\nJudge the TAGS, not just the timbre: [curious] on the open, [sarcastic] on the turn,")
 print("[serious] on the payoff. The model that makes the payoff sound MEANT is the one to pick.")
