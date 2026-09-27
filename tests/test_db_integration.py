@@ -12,8 +12,9 @@ import pytest
 from src import db
 
 pytestmark = pytest.mark.skipif(
-    not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY")),
-    reason="needs live Supabase creds (.env / Actions secrets)",
+    not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
+    or os.environ.get("DB_INTEGRATION", "").strip().lower() == "false",
+    reason="needs live Supabase creds (.env / Actions secrets); off on the scheduled CI run",
 )
 
 _MARK = "__pytest_dbtest__"

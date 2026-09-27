@@ -200,3 +200,18 @@ def test_bot_only_patches_pending_ideas(bot, monkeypatch):
     assert bot.set_idea_status(7, "approved") == "stale"
     assert "status=eq.pending" in seen["url"]
     assert seen["h"]["Prefer"] == "return=representation"
+
+
+def test_the_bot_refuses_every_update_when_it_is_not_configured(bot, monkeypatch):
+    """Fail closed: a missing WEBHOOK_SECRET used to mean anyone could post to the webhook."""
+    import io
+
+    monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    monkeypatch.setattr(bot, "handle_update", lambda u: pytest.fail("must not act"))
+    replies = []
+    h = bot.handler.__new__(bot.handler)
+    h.headers, h.rfile = {}, io.BytesIO(b"{}")
+    h._reply = lambda code, text: replies.append(code)
+    h.do_POST()
+    assert replies == [503]

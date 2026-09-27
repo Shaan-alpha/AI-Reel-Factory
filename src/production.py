@@ -326,10 +326,14 @@ def run() -> None:
 
     ensure_ideas_and_digest()
 
-    try:  # apply any queued approvals; Telegram being down must not block production
-        approval.process_responses(max_seconds=int(config.get("DRAIN_SECONDS", "20")))
-    except Exception as e:  # noqa: BLE001
-        log.warning("production: approval drain failed (continuing): %s", e)
+    # In webhook mode the Vercel bot has already written every tap to the database, and polling
+    # getUpdates against an active webhook is refused by Telegram (409). Only the polling mode
+    # needs the drain.
+    if _approval_mode() != "webhook":
+        try:  # apply any queued approvals; Telegram being down must not block production
+            approval.process_responses(max_seconds=int(config.get("DRAIN_SECONDS", "20")))
+        except Exception as e:  # noqa: BLE001
+            log.warning("production: approval drain failed (continuing): %s", e)
 
     summary = run_production()
     log.info("production: done — %d published, %d failed.",
@@ -429,6 +433,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "make":
-        make_on_demand(int(os.environ.get("IDEAS", "3")), int(os.environ.get("WAIT_MIN", "20")))
+        # config.get, not os.environ.get: a scheduled run passes IDEAS="" and int("") crashed.
+        make_on_demand(int(config.get("IDEAS", "3")), int(config.get("WAIT_MIN", "20")))
     else:
         run()

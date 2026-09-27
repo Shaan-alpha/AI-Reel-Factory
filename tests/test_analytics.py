@@ -1,6 +1,8 @@
 """Tests for the analytics module (Module 10) — stats parsing + collection, fully mocked."""
 from __future__ import annotations
 
+import pytest
+
 from src import analytics
 
 
@@ -79,3 +81,19 @@ def test_a_failing_prune_never_loses_the_snapshots(monkeypatch):
 
     monkeypatch.setattr(analytics.db, "prune_analytics", _boom)
     assert analytics.collect_stats() == 1
+
+
+def test_a_short_gone_from_youtube_is_marked_and_reported_once(monkeypatch):
+    marked, sent = [], []
+    monkeypatch.setattr(analytics.db, "set_post_status", lambda pid, st: marked.append((pid, st)))
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    from src import approval
+    monkeypatch.setattr(approval, "_api", lambda method, **k: sent.append(k["text"]))
+    gone = analytics._flag_removed({"AAA": {"id": 1}, "BBB": {"id": 2}}, {"AAA": {"views": 5}})
+    assert gone == ["BBB"] and marked == [(2, "removed")]
+    assert sent and "BBB" in sent[0]
+
+
+def test_nothing_is_reported_when_every_short_is_still_up(monkeypatch):
+    monkeypatch.setattr(analytics.db, "set_post_status", lambda *a: pytest.fail("nothing gone"))
+    assert analytics._flag_removed({"AAA": {"id": 1}}, {"AAA": {"views": 5}}) == []

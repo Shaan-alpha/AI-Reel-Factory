@@ -148,6 +148,11 @@ def insert_script(idea_id: int, template: str, body: str, caption: str,
     return get_client().table("scripts").insert(row).execute().data[0]["id"]
 
 
+def set_post_status(post_id: int, status: str) -> None:
+    """Set a post's status (e.g. 'removed' once it is gone from the platform)."""
+    get_client().table("posts").update({"status": status}).eq("id", post_id).execute()
+
+
 def set_script_factcheck(script_id: int, verdict: dict) -> None:
     """Store the fact-check verdict on its script (column scripts.factcheck, jsonb).
 

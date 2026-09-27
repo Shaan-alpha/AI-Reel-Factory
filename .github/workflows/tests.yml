@@ -61,6 +61,10 @@ jobs:
           # this job should exercise what the code does by default, not what the repo variables
           # happen to say.
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # The live-database round trip (it inserts and deletes a real idea) runs on pushes and
+          # manual runs, not on the daily schedule, where a make-short run reading pending ideas
+          # could be offered the test row.
+          DB_INTEGRATION: ${{ github.event_name == 'schedule' && 'false' || 'true' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}

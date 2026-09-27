@@ -616,3 +616,14 @@ def test_the_voice_that_spoke_reaches_the_post_row(monkeypatch, tmp_path):
                         lambda v, m, sid: seen.update(m) or ("VID1", "u"))
     production.produce_one(IDEA, str(tmp_path))
     assert seen["voice"] == "gemini:gemini-3.1-flash-tts-preview@dev"
+
+
+def test_the_cron_path_does_not_poll_telegram_in_webhook_mode(monkeypatch):
+    """getUpdates against an active webhook is refused (409); the bot already wrote the taps."""
+    monkeypatch.setenv("TELEGRAM_APPROVAL_MODE", "webhook")
+    monkeypatch.setattr(production.config, "validate", lambda *a, **k: None)
+    monkeypatch.setattr(production, "ensure_ideas_and_digest", lambda: 0)
+    monkeypatch.setattr(production.approval, "process_responses",
+                        lambda **k: pytest.fail("must not poll getUpdates in webhook mode"))
+    monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
+    production.run()

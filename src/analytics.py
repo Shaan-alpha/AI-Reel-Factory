@@ -54,6 +54,31 @@ def _fetch_stats(youtube, video_ids: list[str]) -> dict[str, dict]:
     return out
 
 
+def _flag_removed(by_vid: dict[str, dict], stats: dict[str, dict]) -> list[str]:
+    """Mark posts YouTube no longer returns as 'removed', and say so once on Telegram.
+
+    The owner's token sees private and unlisted videos too, so an id missing from videos.list is
+    gone (deleted, or taken down). 9 of 87 'published' Shorts were, and nothing noticed. Marked
+    rows leave get_published_posts, so each one is reported a single time."""
+    gone = [vid for vid in by_vid if vid not in stats]
+    for vid in gone:
+        try:
+            db.set_post_status(by_vid[vid]["id"], "removed")
+        except Exception as e:  # noqa: BLE001 — bookkeeping only (rule 14)
+            log.warning("analytics: could not mark %s removed (%s)", vid, e)
+    if gone:
+        log.warning("analytics: %d Short(s) no longer on YouTube: %s", len(gone), gone)
+        try:
+            from src import approval
+
+            approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
+                          text=f"🗑️ {len(gone)} Short(s) are no longer on YouTube (deleted or "
+                               f"taken down): " + ", ".join(gone))
+        except Exception as e:  # noqa: BLE001 — alerting must never cost the snapshots
+            log.warning("analytics: removal alert not sent (%s)", e)
+    return gone
+
+
 def collect_stats() -> int:
     """Snapshot stats for every published Short into the analytics table. Returns #recorded."""
     posts = db.get_published_posts("youtube")
@@ -63,6 +88,7 @@ def collect_stats() -> int:
         return 0
 
     stats = _fetch_stats(_youtube_client(), list(by_vid))
+    _flag_removed(by_vid, stats)
     recorded = 0
     for vid, st in stats.items():
         post = by_vid.get(vid)

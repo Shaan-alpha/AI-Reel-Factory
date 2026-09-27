@@ -381,8 +381,13 @@ class handler(BaseHTTPRequestHandler):
         self._reply(200, "reel-factory bot ok")
 
     def do_POST(self):
-        secret = _env("WEBHOOK_SECRET")
-        if secret and self.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
+        # Fail CLOSED: with WEBHOOK_SECRET or TELEGRAM_CHAT_ID missing, anyone who found the URL
+        # could approve ideas or dispatch runs. A misconfigured bot answers 503 and does nothing.
+        secret, chat = _env("WEBHOOK_SECRET"), _env("TELEGRAM_CHAT_ID")
+        if not (secret and chat):
+            self._reply(503, "bot not configured")
+            return
+        if self.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
             self._reply(401, "unauthorized")
             return
         length = int(self.headers.get("Content-Length") or 0)
