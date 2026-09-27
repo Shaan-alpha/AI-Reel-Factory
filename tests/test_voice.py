@@ -866,7 +866,7 @@ def test_gemini_tts_raises_on_unexpected_response_shape(monkeypatch, tmp_path):
 
     import google.genai as genai
     monkeypatch.setattr(genai, "Client", _Client)
-    with pytest.raises(RuntimeError, match="unexpected response shape"):
+    with pytest.raises(RuntimeError, match="no audio in the response"):
         voice._synthesize_gemini("hi there", str(tmp_path))
 
 
