@@ -319,7 +319,8 @@ def test_sfx_event_times_land_on_the_xfade_cuts(monkeypatch):
     monkeypatch.setenv("SFX_EVERY_N_CUTS", "1")
     events = assembly._build_sfx_events(_ordered(6), 30.0)
     step = 4.0 - 0.5
-    assert [e["time"] for e in events] == [pytest.approx(i * step) for i in range(1, 6)]
+    # Clicks only since 2026-09-27: the odd slots (the even ones were the whoosh).
+    assert [e["time"] for e in events] == [pytest.approx(i * step) for i in (1, 3, 5)]
 
 
 def test_sfx_volume_zero_disables_events(monkeypatch):
@@ -562,3 +563,12 @@ def test_seamless_loop_noops_when_only_the_opening_slice_is_visible(monkeypatch)
         assert out == ordered, (
             f"dur={duration}: only slice 0 is visible, so the list must be left alone rather "
             "than reprising onto a trimmed-away slice")
+
+
+def test_the_whoosh_sting_is_gone(monkeypatch):
+    """Operator, 2026-09-27: remove the whoosh. Clicks keep their old, sparser slots."""
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_XFADE", "false")
+    monkeypatch.delenv("SFX_EVERY_N_CUTS", raising=False)
+    events = assembly._build_sfx_events(_ordered(12), 40.0)
+    assert events and {e["name"] for e in events} == {"click"}

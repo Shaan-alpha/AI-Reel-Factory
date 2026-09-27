@@ -305,8 +305,12 @@ def _build_sfx_events(ordered: list[tuple[str, float]], duration: float) -> list
         t = round(i * step, 2)
         if t < _SFX_LEAD_IN or t >= duration - 0.5:
             continue
-        name = "click" if (i // every) % 2 else "whoosh"
-        events.append({"time": t, "name": name, "volume": vol})
+        # Clicks only (operator, 2026-09-27): the whoosh that alternated with them is gone. It
+        # landed on words, and after the 24 kHz narration path it was mostly hiss. The click
+        # keeps its old slots, so the stings are now half as frequent.
+        if not (i // every) % 2:
+            continue
+        events.append({"time": t, "name": "click", "volume": vol})
     return events
 
 
