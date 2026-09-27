@@ -465,3 +465,18 @@ def test_a_long_seven_word_title_still_fits_without_an_ellipsis():
     """Local render 2026-09-27: this title needed a fourth line at the old smallest size."""
     banner = subtitles._hook_banner_text("Networks Boycott Trump: An Unprecedented Media Blackout")
     assert "BLACKOUT" in banner and "…" not in banner
+
+
+def test_a_caption_is_held_across_a_short_breath():
+    words = [(0.0, 0.3, "One"), (0.3, 0.6, "two."), (0.9, 1.2, "Three."), (3.0, 3.3, "four.")]
+    ass = subtitles._build_ass(words)
+    events = [ln for ln in ass.splitlines() if ln.startswith("Dialogue: 0,")]
+    assert events[0].split(",")[2] == subtitles._format_ts(0.9)   # held to the next caption
+    assert events[1].split(",")[2] == subtitles._format_ts(1.2)   # a real pause still clears
+
+
+def test_a_card_appears_when_its_point_is_spoken():
+    words = [(i * 0.5, i * 0.5 + 0.4, w) for i, w in
+             enumerate("the house passed a bill with tariffs of 100 percent on buyers".split())]
+    cards = subtitles._card_events(["100% TARIFFS"], 10.0, 1.0, 1.8, words)
+    assert cards and cards[0][0] == words[6][0]   # 'tariffs' is word 6

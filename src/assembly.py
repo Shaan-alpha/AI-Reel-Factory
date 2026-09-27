@@ -111,7 +111,10 @@ def _grade_filters() -> str:
         parts.append("colorbalance=rs=0.03:gs=0.01:bs=-0.03")  # slight warmth
     if config.get_bool("ENABLE_VIGNETTE", True):
         parts.append("vignette=PI/5")
-    if config.get_bool("ENABLE_GRAIN", True):
+    # Off by default since 2026-09-27: temporal grain is incompressible noise. It pushed an
+    # uncapped CRF 18 encode to 44 Mbps, now eats the 8 Mbps cap, and YouTube's own re-encode
+    # smears it anyway. ENABLE_GRAIN=true brings it back.
+    if config.get_bool("ENABLE_GRAIN", False):
         strength = config.get("GRAIN_STRENGTH", "8")
         parts.append(f"noise=alls={strength}:allf=t+u")  # subtle temporal film grain
     return ",".join(parts)
@@ -535,8 +538,11 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
         h = config.get("BRAND_LOGO_HEIGHT", "150")
         op = config.get("BRAND_LOGO_OPACITY", "0.55")
         m = config.get("BRAND_LOGO_MARGIN", "44")
+        # Below the Shorts player's top-right icons (search, camera, menu), which covered the
+        # logo at y=44. The side margin stays.
+        top = config.get("BRAND_LOGO_TOP", "240")
         parts.append(f"[{logo_idx}:v]scale=-1:{h},format=rgba,colorchannelmixer=aa={op}[lg]")
-        parts.append(f"[v][lg]overlay=W-w-{m}:{m}[vout]")
+        parts.append(f"[v][lg]overlay=W-w-{m}:{top}[vout]")
         video_label = "[vout]"
 
     cmd += [

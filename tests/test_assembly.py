@@ -126,9 +126,12 @@ def test_build_cmd_structure(monkeypatch):
 
 def test_grade_filters_present_by_default(monkeypatch):
     for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
-        monkeypatch.delenv(k, raising=False)  # defaults on
+        monkeypatch.delenv(k, raising=False)
     f = assembly._grade_filters()
-    assert "eq=contrast=" in f and "vignette" in f and "noise=" in f
+    # Grade and vignette on; grain off by default since 2026-09-27 (incompressible noise).
+    assert "eq=contrast=" in f and "vignette" in f and "noise=" not in f
+    monkeypatch.setenv("ENABLE_GRAIN", "true")
+    assert "noise=" in assembly._grade_filters()
 
 
 def test_grade_filters_empty_when_all_disabled(monkeypatch):
@@ -572,3 +575,13 @@ def test_the_whoosh_sting_is_gone(monkeypatch):
     monkeypatch.delenv("SFX_EVERY_N_CUTS", raising=False)
     events = assembly._build_sfx_events(_ordered(12), 40.0)
     assert events and {e["name"] for e in events} == {"click"}
+
+
+def test_grain_is_off_by_default_and_the_logo_clears_the_top_icons(monkeypatch, tmp_path):
+    monkeypatch.delenv("ENABLE_GRAIN", raising=False)
+    assert "noise=" not in assembly._grade_filters()
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"x")
+    monkeypatch.setenv("BRAND_LOGO", str(logo))
+    cmd = assembly._build_cmd(_ordered(2), "n.wav", 9.0, "o.mp4")
+    assert "overlay=W-w-44:240" in cmd[cmd.index("-filter_complex") + 1]

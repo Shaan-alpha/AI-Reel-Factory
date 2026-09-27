@@ -294,6 +294,10 @@ def _caption_groups(words: list[tuple[float, float, str]],
     return groups
 
 
+# The longest pause a caption is held across (seconds).
+_HOLD_GAP = 0.6
+
+
 def _cs(seconds: float) -> int:
     """Seconds → centiseconds, clamped non-negative (the ASS \\kf karaoke-fill unit)."""
     return max(0, int(round(seconds * 100)))
@@ -344,8 +348,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
+def _spoken_at(point: str, words: list[tuple[float, float, str]], after: float) -> float | None:
+    """When the narration first says a distinctive word of `point`, after `after`; else None."""
+    wanted = {_norm(t) for t in point.split() if len(_norm(t)) > 3 or _norm(t).isdigit()}
+    for start, _end, text in words or []:
+        if start >= after and _norm(text) in wanted:
+            return start
+    return None
+
+
 def _card_events(key_points: list[str], total_dur: float, start_after: float,
-                 card_dur: float) -> list[tuple[float, float, str]]:
+                 card_dur: float,
+                 words: list[tuple[float, float, str]] | None = None) -> list[tuple[float, float, str]]:
     """Place each key-point card briefly at its beat across (start_after, total_dur].
 
     Cards are SPARSE — one short flash per point with gaps between — because constant on-screen
@@ -356,11 +370,20 @@ def _card_events(key_points: list[str], total_dur: float, start_after: float,
         return []
     slot = span / len(pts)
     out: list[tuple[float, float, str]] = []
+    cursor = start_after
     for i, p in enumerate(pts):
+        # On the beat where the point is SAID when it can be found (audit 2026-09-27: evenly
+        # spaced cards flashed a number seconds before or after the narration reached it);
+        # otherwise the old even slot.
+        heard = _spoken_at(p, words, cursor)
         center = start_after + slot * (i + 0.5)
-        s = max(start_after, center - card_dur / 2)
+        s = heard if heard is not None else max(start_after, center - card_dur / 2)
+        s = max(s, cursor)
         e = min(total_dur, s + card_dur)
+        if e - s < 0.5:
+            continue
         out.append((round(s, 3), round(e, 3), p))
+        cursor = e
     return out
 
 
@@ -426,7 +449,7 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
         dur = total_dur if total_dur else (words[-1][1] if words else 0.0)
         start_after = float(config.get("HOOK_SECONDS", "1.8"))
         card_dur = float(config.get("CARD_SECONDS", "1.8"))
-        for cs, ce, text in _card_events(key_points, dur, start_after, card_dur):
+        for cs, ce, text in _card_events(key_points, dur, start_after, card_dur, words):
             banner = _hook_banner_text(text, max_chars=18, max_lines=2, base_size=90)
             if banner:
                 lines.append(f"Dialogue: 2,{_format_ts(cs)},{_format_ts(ce)},Card,,0,0,0,,{banner}")
@@ -434,8 +457,16 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
     # Group words into short phrases; each phrase is ONE karaoke line whose words fill to the
     # highlight colour exactly as spoken (active-word highlight — a retention driver).
     size = max(1, int(config.get("CAPTION_WORDS", "3")))
-    for chunk in _caption_groups(words, size):
+    groups = _caption_groups(words, size)
+    for gi, chunk in enumerate(groups):
         start, end = chunk[0][0], chunk[-1][1]
+        # Hold the caption to the next one across a short gap: dropping it for a breath between
+        # phrases made the captions blink. The 'no blank frame' rule lived only in
+        # _build_events, which production never calls. A real pause (over HOLD_GAP) still clears.
+        if gi + 1 < len(groups):
+            nxt = groups[gi + 1][0][0]
+            if 0 < nxt - end <= _HOLD_GAP:
+                end = nxt
         end = end if end > start else start + 0.10
         lines.append(
             f"Dialogue: 0,{_format_ts(start)},{_format_ts(end)},Karaoke,,0,0,0,,{_karaoke_line(chunk)}"
