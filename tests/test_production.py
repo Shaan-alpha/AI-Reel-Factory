@@ -30,7 +30,7 @@ SCRIPT = {"script_id": 70, "script_body": "body words " * 20,
 
 
 
-def _fake_synth(body, d, meta=None):
+def _fake_synth(body, d, meta=None, tone=None):
     """A normal render: the channel voice spoke."""
     if meta is not None:
         meta.update(engine="gemini", voice="gemini:gemini-3.1-flash-tts-preview@dev")
@@ -255,7 +255,7 @@ def test_factcheck_failure_blocks_the_reel_before_any_render(monkeypatch, tmp_pa
     produced = _wire_happy(monkeypatch, factcheck_ok=False)
     rendered = []
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d, meta=None: rendered.append("voice") or ("a.mp3", 30.0))
+                        lambda body, d, meta=None, tone=None: rendered.append("voice") or ("a.mp3", 30.0))
 
     with pytest.raises(production.FactCheckFailed, match="40%"):
         production.produce_one(IDEA, str(tmp_path))
@@ -277,7 +277,7 @@ def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(mon
         "checked": 0, "reason": "checker-failed: 503 UNAVAILABLE"})
     rendered = []
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d, meta=None: rendered.append("voice") or ("a.mp3", 30.0))
+                        lambda body, d, meta=None, tone=None: rendered.append("voice") or ("a.mp3", 30.0))
 
     with pytest.raises(production.FactCheckUnavailable, match="could not run"):
         production.produce_one(IDEA, str(tmp_path))
@@ -530,7 +530,7 @@ def test_produce_one_alerts_when_the_reel_leaves_the_channel_voice(monkeypatch, 
     sent = []
     monkeypatch.setattr(production, "_notify", sent.append)
 
-    def _chirp(body, d, meta=None):
+    def _chirp(body, d, meta=None, tone=None):
         meta.update(engine="google", voice="google")
         return "a.wav", 30.0
 
@@ -582,7 +582,7 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
     monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "FIXED BODY")
     monkeypatch.setattr(production.db, "update_script_body", lambda sid, b: saved.append(b))
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d, meta=None: voiced.append(body) or _fake_synth(body, d, meta))
+                        lambda body, d, meta=None, tone=None: voiced.append(body) or _fake_synth(body, d, meta))
     production.produce_one(IDEA, str(tmp_path))
     assert saved == ["FIXED BODY"] and voiced == ["FIXED BODY"]
 

@@ -190,7 +190,8 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     os.makedirs(work, exist_ok=True)
     try:
         spoke: dict = {}
-        audio, duration = voice.synthesize(script["script_body"], work, meta=spoke)
+        audio, duration = voice.synthesize(script["script_body"], work, meta=spoke,
+                                           tone=script.get("tone"))
         log.info("produce: idea %s voiced by %s", idea_id, spoke.get("voice"))
         # The channel has ONE narrator, and it lives only on the Gemini engine. Three reels in
         # September left it for Chirp's voice with nothing but a log line to show for it, which

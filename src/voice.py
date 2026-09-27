@@ -325,10 +325,24 @@ _STYLE_OFF = ("off", "none", "false", "0")
 _MIN_WORDS_PER_SECOND = 1.5
 
 
-def _style_prompt() -> str:
-    """VOICE_STYLE_PROMPT, the default director's notes, or "" when switched off."""
+# For stories about deaths or serious harm (scriptwriter.tone_for): the channel's dry,
+# "faintly unimpressed" read would sound like mocking the people affected.
+_SOMBER_STYLE_PROMPT = (
+    "You are a calm, measured news explainer speaking to one person. Read at an unhurried pace "
+    "with quiet seriousness and warmth. No irony and no amusement anywhere; let the facts carry "
+    "the weight, and read the final line plainly, as though it matters."
+)
+# In a somber read only these tags survive: the rest are the channel's sarcasm.
+_SOMBER_TAGS = ("serious", "sighs")
+
+
+def _style_prompt(tone: str | None = None) -> str:
+    """VOICE_STYLE_PROMPT, the default director's notes, or "" when switched off. A somber
+    story gets the somber notes instead (unless the style prompt is switched off)."""
     raw = (config.get("VOICE_STYLE_PROMPT", _DEFAULT_STYLE_PROMPT) or "").strip()
-    return "" if raw.lower() in _STYLE_OFF else raw
+    if raw.lower() in _STYLE_OFF:
+        return ""
+    return _SOMBER_STYLE_PROMPT if tone == "somber" else raw
 
 
 def _tts_contents(model: str, style: str, spoken: str) -> str:
@@ -382,7 +396,8 @@ def _tts_timeout_ms() -> int:
         return 120_000
 
 
-def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None) -> tuple[str, float]:
+def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
+                       tone: str | None = None) -> tuple[str, float]:
     """Synthesize via Gemini TTS. Returns (wav_path, seconds); fills meta["model"] if given.
 
     Uses the already-pinned google-genai SDK and the existing GEMINI_API_KEY, so this adds no
@@ -414,8 +429,8 @@ def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None) -> tup
     if not attempts:
         raise RuntimeError("gemini tts: GEMINI_TTS_API_KEY / GEMINI_API_KEY not set")
 
-    spoken = _style_text(text)  # keep style tags, degrade pause tags to an ellipsis
-    style = _style_prompt()
+    spoken = _style_text(text, tone)  # keep style tags, degrade pause tags to an ellipsis
+    style = _style_prompt(tone)
 
     # The API caps text and prompt at 4000 bytes each, 8000 combined. Check before spending a
     # request: the free tier is only 10/day, so an opaque 400 would cost real quota (rule 13).
@@ -552,7 +567,7 @@ _ENGINE_ALIASES = {"edge-tts": "edge", "chirp": "google", "google-tts": "google"
 
 def _engine_gemini(text: str, out_dir: str, meta: dict | None = None) -> tuple[str, float]:
     info = meta if meta is not None else {}
-    path, dur = _synthesize_gemini(text, out_dir, info)
+    path, dur = _synthesize_gemini(text, out_dir, info, tone=info.get("tone"))
     # The model that SPOKE, not the configured one: they differ whenever a fallback ran.
     _log_done(path, dur, f"gemini:{info.get('model', '?')}")
     return path, dur
@@ -668,18 +683,20 @@ def _pause_markup(text: str) -> str:
     return _filter_tags(text, _PAUSE_TAGS, _tag_limit("MAX_PAUSE_TAGS", 3))
 
 
-def _style_text(text: str) -> str:
+def _style_text(text: str, tone: str | None = None) -> str:
     """Gemini TTS input: keep style tags; pause tags degrade to an ellipsis so the beat survives
-    on the primary engine (Chirp's bracket pause syntax means nothing here)."""
-    return _filter_tags(text, _STYLE_TAGS, _tag_limit("MAX_STYLE_TAGS", 3),
-                        pause_as_ellipsis=True)
+    on the primary engine (Chirp's bracket pause syntax means nothing here). A somber read keeps
+    only _SOMBER_TAGS."""
+    keep = _SOMBER_TAGS if tone == "somber" else _STYLE_TAGS
+    return _filter_tags(text, keep, _tag_limit("MAX_STYLE_TAGS", 3), pause_as_ellipsis=True)
 
 
 def _has_pause_tag(text: str) -> bool:
     return bool(re.search(r"\[(?:pause short|pause long|pause)\]", text))
 
 
-def synthesize(script_body: str, out_dir: str, meta: dict | None = None) -> tuple[str, float]:
+def synthesize(script_body: str, out_dir: str, meta: dict | None = None,
+               tone: str | None = None) -> tuple[str, float]:
     """Return (audio_path, duration_seconds) via an ordered fallback chain (rule 11):
     google (Chirp 3 HD) → edge-tts (en-IN) → kokoro. VOICE_ENGINE picks the primary engine;
     the remaining engines follow as fallbacks. Engines are resolved by name at call time, so a
@@ -710,8 +727,8 @@ def synthesize(script_body: str, out_dir: str, meta: dict | None = None) -> tupl
         if fn is None:
             continue
         try:
-            inner: dict = {}
-            result = (fn(raw, out_dir, inner) if name == "gemini" and meta is not None
+            inner: dict = {"tone": tone} if tone else {}
+            result = (fn(raw, out_dir, inner) if name == "gemini" and (meta is not None or tone)
                       else fn(raw, out_dir))
             if meta is not None:
                 meta["engine"] = name

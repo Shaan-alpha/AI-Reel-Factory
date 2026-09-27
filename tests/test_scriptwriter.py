@@ -598,3 +598,25 @@ def test_a_repair_with_a_corrected_opening_is_accepted(monkeypatch):
     body = "The US passed a tariff law. " + " ".join(["Word"] * 45) + ". Here's why it matters: x."
     out = scriptwriter.repair_script(body, ["the law claim is false"], topic="tariffs")
     assert out and out.startswith("The US House passed")
+
+
+def test_a_story_about_deaths_drops_the_sarcasm():
+    """The audit found the fixed sarcastic voice on war strikes and a child-abuse story."""
+    idea = {"id": 1, "title": "South Africa Mass Shootings: 27 Dead", "hook": "h", "angle": "a"}
+    assert scriptwriter.tone_for(idea) == "somber"
+    assert "TONE OVERRIDE" in scriptwriter._build_prompt(idea, "N")
+    assert scriptwriter.tone_for({"title": "Rupee hits a record low", "hook": "", "angle": ""}) \
+        == "sarcastic"
+
+
+def test_somber_tone_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv("ENABLE_SOMBER_TONE", "false")
+    assert scriptwriter.tone_for({"title": "27 killed", "hook": "", "angle": ""}) == "sarcastic"
+
+
+def test_copying_the_angle_is_detected():
+    angle = "this sets a dangerous precedent for what information actually reaches the public"
+    assert scriptwriter._copies_the_angle(
+        "Here's why it matters: this sets a dangerous precedent for what information actually "
+        "reaches the public.", angle)
+    assert not scriptwriter._copies_the_angle("Here's why it matters: a new precedent.", angle)

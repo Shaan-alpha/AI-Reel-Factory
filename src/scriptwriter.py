@@ -107,7 +107,7 @@ independent fact-check runs on this script before it is voiced, and unsupported 
 reel — so do not reach for a punchier claim than your sources can carry.
 
 ALSO produce, for the feed + discoverability:
-- "title": a clear, curiosity-driven YouTube title (<=70 chars) that is TRUE to the video — front-loading the most interesting REAL word.
+- "title": a clear, curiosity-driven YouTube title that is TRUE to the video, front-loading the most interesting REAL word. Short wins on this channel: aim for 40-55 characters, never more than 70.
 - "caption": an ATTRACTIVE, high-retention YouTube description structured cleanly:
   Line 1: A gripping curiosity hook with a relevant emoji (YouTube shows ~2 lines in-feed to make viewers click 'more').
   Line 2: A 1-2 sentence compelling summary of why this matters + a comment trigger question (e.g., "💬 What's your take on this? Comment below!").
@@ -121,6 +121,42 @@ two-character escape \\n — a raw newline inside a JSON string is invalid JSON.
 put any quoted word in SINGLE quotes ('like this'): a raw double quote ends the string.
 {{"title": "the honest, gripping title", "script_body": "the spoken narration", "caption": "emoji hook line first\\n\\nwhy it matters summary + 💬 comment question", "hashtags": ["#keyword", "#Shorts"], "tags": ["high traffic search term", "long tail phrase"], "key_points": ["short card", "another"]}}
 """
+
+
+# Stories where the channel's sarcasm would read as mocking victims (docs/08 excludes graphic
+# tragedy exploitation). The audit found the fixed sarcastic voice applied to war strikes and a
+# child-abuse story. Matched on the idea's own words, so the tone is decided before writing.
+_SOMBER_RE = re.compile(
+    r"(?i)\b(?:killed|kills|dead|deaths?|died|dies|massacre|mass shootings?|shooting|stabbing|"
+    r"bombing|blast|suicide|genocide|war crimes?|hostages?|famine|casualties|child abuse|"
+    r"sexual (?:abuse|assault)|rape|trafficking|earthquake|landslides?|floods? (?:kill|death|toll)|"
+    r"death toll|funeral|mourning)\b")
+
+_SOMBER_NOTE = """
+
+TONE OVERRIDE — this story involves loss of life or serious harm to people. Drop the sarcasm and
+the jokes entirely: calm, respectful and direct, with no irony about the people affected. Use
+only [serious] or [pause] as delivery tags. The "why it matters" turn is still required:
+open it plainly with "Here's why it matters" (live 2026-09-27, a somber draft dropped it)."""
+
+
+def tone_for(idea: dict) -> str:
+    """'somber' for stories about deaths or serious harm, else 'sarcastic' (the channel voice).
+    Off with ENABLE_SOMBER_TONE=false."""
+    if not config.get_bool("ENABLE_SOMBER_TONE", True):
+        return "sarcastic"
+    text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+    return "somber" if _SOMBER_RE.search(text) else "sarcastic"
+
+
+def _copies_the_angle(body: str, angle: str, run: int = 8) -> bool:
+    """True if the narration repeats `run` or more consecutive words of the ideation angle.
+
+    The audit found the 'why it matters' payoff was often the angle pasted verbatim: the
+    originality signal (docs/08 §1) written by the idea generator, not the writer."""
+    a = re.findall(r"[a-z0-9']+", (angle or "").lower())
+    b = " " + " ".join(re.findall(r"[a-z0-9']+", (body or "").lower())) + " "
+    return any(f" {' '.join(a[i:i + run])} " in b for i in range(max(0, len(a) - run + 1)))
 
 
 def _build_prompt(idea: dict, template: str) -> str:
@@ -141,7 +177,10 @@ def _build_prompt(idea: dict, template: str) -> str:
     # The human "why it matters" take is the originality + anti-"AI-slop" signal (2026 policy).
     if config.get_bool("ENABLE_HUMAN_ANGLE", True):
         prompt += ("\n\nEMPHASIS: the \"why it matters\" analysis is the point of the video — make "
-                   "it a genuine, specific human take, not a generic restatement.")
+                   "it a genuine, specific human take, not a generic restatement. Develop the "
+                   "ANGLE in your own words: never copy its sentences.")
+    if tone_for(idea) == "somber":
+        prompt += _SOMBER_NOTE
     return prompt
 
 
@@ -673,6 +712,10 @@ def write_script(idea: dict, template: str = "N") -> dict:
                     "summary, which is the originality/monetization risk (docs/08 §1). Review it.",
                     idea_id)
 
+    if _copies_the_angle(body, idea.get("angle", "")):
+        log.warning("scriptwriter: idea %s repeats the ideation angle word for word; the payoff "
+                    "should be the writer's own analysis (docs/08 §1). Review it.", idea_id)
+
     # After the word cap, so truncation can never cut the tag back off. Tags are not spoken
     # words (_visible_words ignores them), so this cannot push the script over the cap.
     body = _ensure_delivery_tag(body)
@@ -681,4 +724,5 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.
     script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None)
     return {"script_id": script_id, "script_body": body, "caption": caption,
-            "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points}
+            "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points,
+            "tone": tone_for(idea)}

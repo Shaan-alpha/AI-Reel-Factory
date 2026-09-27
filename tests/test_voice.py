@@ -1040,3 +1040,26 @@ def test_every_fallback_engine_defaults_to_a_male_narrator(monkeypatch):
 def test_kokoro_uses_the_configured_default_voice(monkeypatch):
     monkeypatch.delenv("KOKORO_VOICE", raising=False)
     assert voice._kokoro_voice().startswith(("am_", "bm_"))
+
+
+def test_a_somber_story_gets_a_calm_read_and_no_sarcasm_tags(monkeypatch):
+    monkeypatch.delenv("VOICE_STYLE_PROMPT", raising=False)
+    assert voice._style_prompt("somber") == voice._SOMBER_STYLE_PROMPT
+    assert "[sarcastic]" not in voice._style_text("Well. [sarcastic] Great. [serious] Sad.", "somber")
+    assert "[serious]" in voice._style_text("Well. [sarcastic] Great. [serious] Sad.", "somber")
+
+
+def test_style_off_also_silences_the_somber_notes(monkeypatch):
+    monkeypatch.setenv("VOICE_STYLE_PROMPT", "off")
+    assert voice._style_prompt("somber") == ""
+
+
+def test_synthesize_passes_the_tone_to_gemini(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.delenv("VOICE_ENGINE", raising=False)
+    monkeypatch.delenv("VOICE_STYLE_PROMPT", raising=False)
+    cap = {}
+    _fake_genai(monkeypatch, cap)
+    voice.synthesize("Twenty-seven people died. [serious] It matters.", str(tmp_path),
+                     tone="somber")
+    assert voice._SOMBER_STYLE_PROMPT in cap["contents"]

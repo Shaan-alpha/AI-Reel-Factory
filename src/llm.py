@@ -64,7 +64,9 @@ log = logging.getLogger(__name__)
 # its retirement (operator, 2026-09-27) onto Google's named replacement, gemini-3.5-flash-lite,
 # with gemini-3.5-flash behind it. On the Developer API gemini-2.5-flash stays: it is the only
 # model with free grounded search there, and a fresh clone runs on that path.
-_GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.6-flash")
+# Text model: gemini-3.8-flash (2026-09-27), Google's listed replacement for 3.6 Flash, served
+# on both backends. Its thinking floor is LOW, which _generate_content handles.
+_GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.8-flash")
 _GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL")  # None = the backend's default
 _GROUNDED_DEFAULT_VERTEX = "gemini-3.5-flash-lite,gemini-3.5-flash"
 _GROUNDED_DEFAULT_DEV = "gemini-2.5-flash"
