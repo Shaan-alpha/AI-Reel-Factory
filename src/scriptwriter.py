@@ -181,7 +181,7 @@ def _build_prompt(idea: dict, template: str) -> str:
                    "ANGLE in your own words: never copy its sentences.")
     if tone_for(idea) == "somber":
         prompt += _SOMBER_NOTE
-    return prompt
+    return llm.today_line() + prompt
 
 
 def _max_words() -> int:

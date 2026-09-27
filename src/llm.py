@@ -397,6 +397,21 @@ def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
     return text, sources
 
 
+def today_line() -> str:
+    """A date line for prompts that write about the news.
+
+    Models do not know the date. A grounded answer about "today" opened "As of June 7, 2026" in
+    September, and the idea-308 draft called a law already signed "headed to the President's
+    desk", which the dated fact-check then blocked. Prepended by the scriptwriter and ideation;
+    the fact-check prompt carries its own."""
+    from datetime import datetime, timezone
+
+    d = datetime.now(timezone.utc).date()
+    return (f"TODAY'S DATE: {d.isoformat()} ({d:%A}), UTC. What the sources report from the last "
+            f"few days is current news: describe it in the right tense, and never date it to "
+            f"another month or year.\n\n")
+
+
 def escape_stray_quotes(blob: str) -> str:
     """Escape double quotes that sit INSIDE a JSON string instead of ending it.
 

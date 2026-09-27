@@ -620,3 +620,8 @@ def test_copying_the_angle_is_detected():
         "Here's why it matters: this sets a dangerous precedent for what information actually "
         "reaches the public.", angle)
     assert not scriptwriter._copies_the_angle("Here's why it matters: a new precedent.", angle)
+
+
+def test_the_script_prompt_carries_todays_date():
+    """A grounded draft dated September news to June, and another called a signed law pending."""
+    assert scriptwriter._build_prompt(IDEA, "N").startswith("TODAY'S DATE: 20")

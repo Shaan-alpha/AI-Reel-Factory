@@ -585,7 +585,7 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
     """
     if not headlines:
         return []
-    prompt = _STAGE1_PROMPT.format(
+    prompt = llm.today_line() + _STAGE1_PROMPT.format(
         n=target,
         headlines="\n".join(f"- {h}" for h in headlines),
         trending="\n".join(f"- {t}" for t in trending) or "- (none)",
@@ -648,7 +648,7 @@ def _produce_ideas(target: int) -> list[dict]:
         selected_block = ("- (no pre-selected stories — choose DISTINCT, current, "
                           "share-worthy stories yourself; never two on the same event)")
 
-    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
+    prompt = llm.today_line() + _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
                             selected=selected_block, trending=trending_block,
                             headlines=headlines_block, winners=winners_block)
     # Stage 2: web-grounded first, INCLUDING the parse — grounded JSON is sometimes
