@@ -5,11 +5,12 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased fixes (2026-09-13 and 2026-09-27)** on branch `fix/audit-2026-09-27`, not yet merged (**565 pass, 5 skipped** — measured 2026-09-27)
-**Last updated:** 2026-09-27 · **Fact-check:** `FACTCHECK_STRICT=true` (unverified reels are blocked and released back to the digest)
-**Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
-  ↳ same-voice chain (branch): Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, and only then Chirp
-**Grounding model:** `gemini-2.5-flash` **retires on Vertex 2026-10-20**; the branch makes it a chain that falls through to `gemini-3.5-flash-lite`
+**Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased: the 2026-09-13 fixes and the 2026-09-27/28 audit** (**614 pass, 5 skipped** — measured 2026-09-28)
+**Last updated:** 2026-09-28 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
+**Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
+  ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp · somber read for tragedies · whoosh removed
+**Models (Vertex):** text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` · fact-check `gemini-3.5-flash` · ideation `gemini-2.5-flash` until its 2026-10-20 retirement, then `3.5-flash-lite`
+**Trigger:** on demand **plus two scheduled digests a day** (09:00 and 18:30 IST); nothing is produced without a tap
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -53,11 +54,13 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-- ⚠️ **2026-09-27 audit — operator decisions pending** (full list in the log entry below): merge
-  `fix/audit-2026-09-27` **before 2026-10-20** (the grounding model retires that day and, with
-  `FACTCHECK_STRICT=true`, nothing would publish); pick the narration style from the A/B pack;
-  decide SFX on/off; redeploy the Vercel bot (`vercel deploy --prod` from `telegram-bot/`) to get
-  the stale-tap guard.
+- ⚠️ **Operator actions left from the 2026-09-27/28 audit** (everything else is done):
+  - unlist or delete the two public Shorts that never passed the gate, `xRUo6GxYwYo` and
+    `NKPb-InUoJU` (the pipeline's YouTube token cannot edit videos);
+  - re-run `tools/get_youtube_token.py` when convenient: it now asks for `yt-analytics.readonly`,
+    which unlocks retention data;
+  - optionally swap the music beds for calmer YouTube Audio Library tracks (the four in
+    `assets/music` are tagged Dark/Dramatic; the channel leans soft/positive).
 
 - ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**486 pass, 5 skipped** — 2026-09-13).
 - ⚠️ **Operator action (2026-09-13):** Short `NKPb-InUoJU` (idea 291, Modi-Xi) is public with a
@@ -110,6 +113,49 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-09-28 — The audit's decisions, carried out one change at a time
+
+Operator: "do all changes, remove the whoosh sound, style prompt for sound is good rather than off,
+change the retiring model to newer as suggested, do all changes one by one." Every change below is
+its own commit, each gated on a green suite; **614 pass, 5 skipped**. Live verification on Vertex
+and a full local render of a current story (the 2026-09-28 bank strike) through `produce_one`.
+
+- **Whoosh removed**; the click stays at its old, sparser slots. **Style prompt kept on.**
+- **Off the retiring model, measured first.** Text `gemini-3.8-flash`; grounding
+  `gemini-3.5-flash-lite`; the fact-check `gemini-3.5-flash`. **Ideation stays on
+  `gemini-2.5-flash` until 2026-10-20**: on the real ideation prompt 2.5 returned 15 and 18
+  citations while 3.5-flash-lite, 3.5-flash and 3.8-flash all searched but returned **zero**
+  citation chunks, and those citations are an idea's sources. The retirement 404 moves it on.
+- **The plain style-prompt layout caused the intermittent TTS 400s.** Same text on 3.1-preview:
+  plain failed 4/4, labelled sections 4/4 OK (idea 292's failure). Every model now gets the
+  labelled layout; same prompt, reads slightly less briskly (A/B sample 12).
+- **Fact-check:** two samples by default (the Modi-Xi claim was waived on one run and blocked on
+  the next); a repair pass that rewrites only the blocked claims and re-runs the gate (live, it
+  fixed the Modi-Xi claim and passed); "could not confirm" findings waived in code; verdicts
+  stored in `scripts.factcheck`; gate blocks marked `blocked`, not `rejected`.
+- **DB migration** `record_factcheck_verdict_and_voice` (additive, nullable, applied live):
+  `scripts.factcheck` jsonb, `posts.voice` text.
+- **Scripts:** a somber tone for deaths/serious harm (script and voice), the ideation angle not
+  copied, titles held to 70 (an 84-character title overflowed the banner), today's date in the
+  prompts (a grounded answer dated September news to June).
+- **Ideation:** a wider pool (World/Business/Technology/Science sections), 3 ideas a run,
+  in-batch story dedup, a 3-day recency window on the source search, a sensitive-story flag in
+  the digest.
+- **Visuals:** illustrative style per docs/08 on FLUX.2 klein (native 768x1344, ~103 neurons),
+  per-shot seeds and compositions, place-true keywords, the story's country as the setting
+  (dollar bills illustrated an Indian bank story).
+- **Captions and video:** captions held through breaths, cards on the beat of their words, the
+  logo below the Shorts icons, film grain off, a real publisher as the on-screen source.
+- **Ops:** two scheduled digests a day, a 90-minute job timeout, removed Shorts detected and
+  reported once, the cron path no longer polls Telegram in webhook mode, the daily test run
+  leaves the live database alone, the bot fails closed, verify-tts checks every voice backend.
+- **Growth:** recent, varied, correctly titled winners (plus low performers to avoid), the real
+  YouTube title backfilled, the India tag only on India stories, the footer says 30 seconds.
+- **Deps and CI:** google-genai 2.25.0, google-auth 2.58.1, groq 1.7.0 (suite and live calls
+  verified on both versions first); checkout/setup-python v7, cache v6.
+- **Two bugs of mine caught before shipping:** a status update that never executed (live DB
+  test) and a removal alert that would have repeated daily (found while reading the code).
 
 ### 2026-09-27 — Full audit: why the sound changed, a model retiring in 3 weeks, and 60+ findings
 

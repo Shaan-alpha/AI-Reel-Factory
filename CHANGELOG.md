@@ -11,7 +11,7 @@ A full audit, prompted by "the sound is very different from before". It was: on 
 empty-env fix switched on a style prompt and SFX stings that had never run in production, three
 reels left the channel voice for Chirp, and loudness was never set. Separately, Vertex retires
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
-**565 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
+**614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
 ### Fixed
 - **The grounding model retires on 2026-10-20** (`llm`): `GEMINI_GROUNDED_MODEL` is now an
@@ -49,6 +49,20 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
   `YOUTUBE_LANGUAGE`, `X264_*`.
 - `voice.synthesize(meta=)` reports which engine and model spoke; production alerts when a reel
   leaves the channel voice.
+
+### Changed (2026-09-28, operator decisions)
+- The whoosh sting is removed; the click stays. The style prompt stays on, now framed in labelled
+  sections for every model (the plain layout caused the intermittent TTS 400s: 4/4 vs 0/4).
+- Models on Vertex: text gemini-3.8-flash, grounding gemini-3.5-flash-lite, fact-check
+  gemini-3.5-flash; ideation keeps gemini-2.5-flash until its 2026-10-20 retirement (the only
+  model whose ideation reply carries citations).
+- Fact-check: 2 samples by default, a repair pass, verdicts stored, blocks marked `blocked`.
+- A somber tone for stories about deaths or serious harm; titles held to 70 characters; today's
+  date in the writing prompts.
+- Illustrative AI images on FLUX.2 klein (docs/08), seeded, place-true, in the story's country.
+- Two scheduled digests a day; removed Shorts detected; the bot fails closed.
+- google-genai 2.25.0, google-auth 2.58.1, groq 1.7.0; actions checkout/setup-python v7, cache v6.
+- DB: `scripts.factcheck` (jsonb) and `posts.voice` (text).
 
 ### Earlier in this release — Every idea cited every story, and the gate fell open on a quote mark
 

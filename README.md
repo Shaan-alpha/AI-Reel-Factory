@@ -59,7 +59,7 @@ effectively $0; Google Cloud TTS and Cloudflare AI both sit inside free tiers at
 See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.md](CHANGELOG.md).
 
 - [x] Full pipeline **built, tested, and publishing** captioned Shorts to **@butitmatters**
-- [x] Every module done + tested in isolation; **565 tests** (config · db · llm · ideation · approval · scriptwriter · factcheck · voice · visuals · assembly · subtitles · publish · orchestrator)
+- [x] Every module done + tested in isolation; **614 tests** (config · db · llm · ideation · approval · scriptwriter · factcheck · voice · visuals · assembly · subtitles · publish · orchestrator)
 - [x] All credentials collected & verified (Gemini · Groq · Supabase · Telegram · Pexels · Cloudflare · Google TTS · YouTube OAuth)
 - [x] **Near-human voice** — Gemini TTS (Zubenelgenubi), the same voice on Vertex as its first fallback, then Chirp 3 HD
 - [x] **Story-specific AI B-roll** — Cloudflare Flux images + Ken Burns motion
