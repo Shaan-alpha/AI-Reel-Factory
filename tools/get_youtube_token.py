@@ -35,6 +35,10 @@ import sys
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    # Retention and audience data (analytics.collect_stats reads views only today). Added
+    # 2026-09-27; it takes effect at the next re-authorisation, and the consent screen must
+    # list it under Data Access too.
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
 
 

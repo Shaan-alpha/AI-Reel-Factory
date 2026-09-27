@@ -43,13 +43,15 @@ def _fetch_stats(youtube, video_ids: list[str]) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i : i + 50]
-        resp = youtube.videos().list(part="statistics", id=",".join(batch)).execute()
+        # snippet costs nothing extra (one unit per call either way) and carries the real title.
+        resp = youtube.videos().list(part="snippet,statistics", id=",".join(batch)).execute()
         for item in resp.get("items", []):
             s = item.get("statistics", {})
             out[item["id"]] = {
                 "views": int(s.get("viewCount", 0)),
                 "likes": int(s.get("likeCount", 0)) if "likeCount" in s else None,
                 "comments": int(s.get("commentCount", 0)) if "commentCount" in s else None,
+                "title": (item.get("snippet") or {}).get("title"),
             }
     return out
 
@@ -99,6 +101,13 @@ def collect_stats() -> int:
             recorded += 1
         except Exception as e:  # noqa: BLE001 — one bad row shouldn't stop the pull
             log.warning("analytics: failed to record %s (%s)", vid, e)
+        # Scripts from before titles were saved fell back to the dry idea title ("... Explained")
+        # in the winners list, the very style the ideation prompt bans. YouTube has the real one.
+        if st.get("title") and post.get("script_id"):
+            try:
+                db.backfill_script_title(post["script_id"], st["title"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("analytics: title backfill failed for %s (%s)", vid, e)
     log.info("analytics: recorded %d snapshots.", recorded)
 
     # Retention is a no-op unless ANALYTICS_KEEP_PER_POST is set (see db.prune_analytics), but it

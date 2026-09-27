@@ -181,10 +181,20 @@ def insert_post(script_id: int, platform: str, external_id: str, url: str,
 
 def get_published_posts(platform: str = "youtube") -> list[dict]:
     """Posts that actually shipped (have an external_id) — the analytics targets."""
+    # 'removed' posts (gone from YouTube, see analytics._flag_removed) are no longer targets,
+    # which is also what makes the removal alert fire once rather than on every run.
     return (
         get_client().table("posts").select("*")
-        .eq("platform", platform).not_.is_("external_id", "null").execute().data
+        .eq("platform", platform).not_.is_("external_id", "null")
+        .neq("status", "removed").execute().data
     )
+
+
+def backfill_script_title(script_id: int, title: str) -> None:
+    """Store the published YouTube title on a script that has none (rows from before titles
+    were saved). Only a NULL title is filled, so a stored title is never overwritten."""
+    get_client().table("scripts").update({"title": title}).eq("id", script_id) \
+        .is_("title", "null").execute()
 
 
 def insert_analytics(post_id: int, views: int, likes: int | None = None,
@@ -193,6 +203,53 @@ def insert_analytics(post_id: int, views: int, likes: int | None = None,
     get_client().table("analytics").insert(
         {"post_id": post_id, "views": views, "likes": likes, "comments": comments}
     ).execute()
+
+
+def _ranked_recent_posts() -> list[dict]:
+    """The newest WINNERS_WINDOW_POSTS published Shorts with their current views and title,
+    best first: [{title, views}]. Shared by the winners and the low performers.
+
+    Recency matters: ranked on lifetime views the list had not changed since 2026-08-26, while
+    the channel's topics and style moved on. Views now come from each post's newest snapshot."""
+    client = get_client()
+    window = max(5, int(_cfg("WINNERS_WINDOW_POSTS", "40")))
+    posts = (client.table("posts").select("id").eq("platform", "youtube")
+             .not_.is_("external_id", "null").neq("status", "removed")
+             .order("id", desc=True).limit(window).execute().data) or []
+    ids = [p["id"] for p in posts]
+    if not ids:
+        return []
+    rows = (client.table("analytics")
+            .select("post_id, views, posts(scripts(title, ideas(title)))")
+            .in_("post_id", ids).order("id", desc=True).limit(len(ids) * 4).execute().data)
+    latest: dict = {}
+    for r in rows or []:  # newest first: the first row per post is its current standing
+        if r.get("post_id") is not None and r["post_id"] not in latest:
+            latest[r["post_id"]] = r
+    out = []
+    for r in latest.values():
+        try:
+            script = r["posts"]["scripts"]
+            title = (script.get("title") or "").strip() or script["ideas"]["title"]
+        except (TypeError, KeyError):
+            continue
+        out.append({"title": title, "views": int(r.get("views") or 0)})
+    return sorted(out, key=lambda x: x["views"], reverse=True)
+
+
+def _cfg(key: str, default: str) -> str:
+    from src import config
+
+    return config.get(key, default)
+
+
+_STOP = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "with", "at", "by",
+         "from", "as", "why", "how", "what", "just", "its", "it", "this", "that", "vs"}
+
+
+def _topic_words(title: str) -> set[str]:
+    import re as _re
+    return {t for t in _re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOP and len(t) > 2}
 
 
 def top_performing_titles(limit: int = 8) -> list[str]:
@@ -213,43 +270,32 @@ def top_performing_titles(limit: int = 8) -> list[str]:
     So: collapse to ONE row per post FIRST — its newest snapshot, which for a monotonically
     rising view count is also its highest — and only then rank.
     """
-    client = get_client()
-    # A full collect_stats() pass writes one row per published post, so the newest
-    # (published posts × 3) rows contain every post's latest snapshot with room to spare
-    # even if a pass or two was partial (rule 14: one bad row never stops the pull).
-    n_posts = (
-        client.table("posts").select("id", count="exact")
-        .eq("platform", "youtube").not_.is_("external_id", "null").limit(1).execute().count
-    ) or 0
-    if not n_posts:
-        return []
-    rows = (
-        client.table("analytics")
-        .select("post_id, views, posts(scripts(title, ideas(title)))")
-        .order("id", desc=True).limit(max(n_posts * 3, limit * 4)).execute().data
-    )
-
-    latest: dict = {}
-    for r in rows:  # newest-first, so the FIRST row seen for a post is its current standing
-        pid = r.get("post_id")
-        if pid is not None and pid not in latest:
-            latest[pid] = r
-
+    # Among the newest Shorts only, and at most two per story cluster: 4 of the 6 winners were
+    # Iran/oil/Middle East, and September's ideas drifted the same way (27% Middle East, up from
+    # 16%). A cluster is two or more shared distinctive title words.
     out: list[str] = []
+    chosen: list[set[str]] = []
     seen: set[str] = set()
-    for r in sorted(latest.values(), key=lambda x: int(x.get("views") or 0), reverse=True):
-        try:
-            script = r["posts"]["scripts"]
-            title = (script.get("title") or "").strip() or script["ideas"]["title"]
-            views = int(r.get("views") or 0)
-        except (TypeError, KeyError):
+    for r in _ranked_recent_posts():
+        title, words = r["title"], _topic_words(r["title"])
+        if not title or title.lower() in seen:
             continue
-        if title and title.lower() not in seen:
-            seen.add(title.lower())
-            out.append(f'"{title}" — {views:,} views')
+        if sum(1 for c in chosen if len(words & c) >= 2) >= 2:
+            continue
+        seen.add(title.lower())
+        chosen.append(words)
+        out.append(f'"{title}" — {r["views"]:,} views')
         if len(out) >= limit:
             break
     return out
+
+
+def low_performing_titles(limit: int = 3) -> list[str]:
+    """The weakest recent Shorts, so ideation sees what to avoid as well as what to repeat."""
+    ranked = _ranked_recent_posts()
+    if len(ranked) < limit * 3:  # too few Shorts for a bottom that means anything
+        return []
+    return [f'"{r["title"]}" — {r["views"]:,} views' for r in ranked[-limit:]]
 
 
 def prune_analytics(keep_per_post: int | None = None) -> int:

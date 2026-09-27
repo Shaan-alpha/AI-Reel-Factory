@@ -629,6 +629,10 @@ def _produce_ideas(target: int) -> list[dict]:
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"
     try:
         winners = db.top_performing_titles(6)
+        lows = db.low_performing_titles(3)
+        if lows:
+            winners = [*winners, "LOW PERFORMERS, avoid what these have in common:",
+                       *(f"(avoid) {t}" for t in lows)]
     except Exception as e:  # noqa: BLE001 — analytics feedback is best-effort
         log.warning("ideation: could not load past winners (%s)", e)
         winners = []

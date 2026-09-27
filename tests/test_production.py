@@ -627,3 +627,16 @@ def test_the_cron_path_does_not_poll_telegram_in_webhook_mode(monkeypatch):
                         lambda **k: pytest.fail("must not poll getUpdates in webhook mode"))
     monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
     production.run()
+
+
+def test_the_india_tag_only_goes_on_india_stories():
+    """It was on every upload, the US-only White House story included."""
+    script = {"title": "T", "caption": "c", "hashtags": [], "tags": []}
+    us = production._build_metadata({"title": "Networks boycott White House coverage"}, script)
+    india = production._build_metadata({"title": "Rupee hits a record low against the dollar"},
+                                        script)
+    assert "India News Explainer" not in us["tags"] and "India News Explainer" in india["tags"]
+
+
+def test_the_footer_matches_the_real_length():
+    assert "in 30 seconds" in production._DEFAULT_FOOTER

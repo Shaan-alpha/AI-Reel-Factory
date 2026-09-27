@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -72,7 +73,7 @@ _PLATFORM = "youtube"
 # Override the whole block via the DESCRIPTION_FOOTER env var; disable via ENABLE_DESC_FOOTER=false.
 _DEFAULT_FOOTER = (
     "—\n"
-    "📌 But It Matters — the news that actually matters, in 60 seconds.\n"
+    "📌 But It Matters — the news that actually matters, in 30 seconds.\n"
     "🔔 New explainer Shorts every day → Subscribe @butitmatters\n\n"
     "#ButItMatters #NewsShorts #WhyItMatters"
 )
@@ -99,7 +100,11 @@ def _work_root() -> str:
     return root
 
 
-_CORE_CHANNEL_TAGS = ("But It Matters", "News Shorts", "Why It Matters", "India News Explainer", "Trending News")
+_CORE_CHANNEL_TAGS = ("But It Matters", "News Shorts", "Why It Matters", "Trending News")
+# Added only when the story involves India: it was on every upload, US-only stories included.
+_INDIA_TAG = "India News Explainer"
+_INDIA_RE = re.compile(r"(?i)\b(india|indian|indians|modi|delhi|mumbai|rupee|isro|bjp|lok sabha|"
+                       r"rajya sabha|kolkata|chennai|bengaluru|bangalore|hyderabad)\b")
 
 
 def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True) -> dict:
@@ -110,7 +115,10 @@ def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True)
     """
     title = (script.get("title") or idea.get("title") or "").strip()
     seen, tags = set(), []
-    extra_tags = _CORE_CHANNEL_TAGS if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True) else ()
+    extra_tags: tuple = ()
+    if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True):
+        story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+        extra_tags = _CORE_CHANNEL_TAGS + ((_INDIA_TAG,) if _INDIA_RE.search(story) else ())
     for t in [*script.get("hashtags", []), *script.get("tags", []), *extra_tags]:
         t = str(t).lstrip("#").strip()
         if t and t.lower() not in seen:
