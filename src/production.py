@@ -389,7 +389,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     existing = db.get_pending_ideas()
     if existing:
         n = len(existing)
-        log.info("make_on_demand: %d pending idea(s) already queued (Routine).", n)
+        log.info("make_on_demand: %d pending idea(s) already queued from an earlier run.", n)
     else:
         try:
             n = ideation_fallback.seed_ideas(num_ideas)

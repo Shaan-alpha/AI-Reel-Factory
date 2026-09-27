@@ -27,7 +27,18 @@ _DEFAULT_URL = "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en"
 # The same free feed, filtered by query — no key, no quota. Used to source an idea whose
 # story has already scrolled off the top-stories front page.
 _SEARCH_URL = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
+# Section feeds of the same edition. The front page alone made the pool almost all geopolitics
+# and conflict (audit 2026-09-27); these widen it without a key or quota.
+_TOPIC_URL = "https://news.google.com/rss/headlines/section/topic/{topic}?hl=en-IN&gl=IN&ceid=IN:en"
+_DEFAULT_TOPICS = "WORLD,BUSINESS,TECHNOLOGY,SCIENCE"  # HEALTH left out: journal items, medical claims
 _TIMEOUT = 20
+
+
+def _get_stories(url: str) -> list[dict]:
+    resp = requests.get(url, timeout=_TIMEOUT,
+                        headers={"User-Agent": "Mozilla/5.0 (AI-Reel-Factory news)"})
+    resp.raise_for_status()
+    return _parse_stories(resp.text)
 
 
 def fetch_stories(limit: int = 12) -> list[dict]:
@@ -42,17 +53,26 @@ def fetch_stories(limit: int = 12) -> list[dict]:
     # `or _DEFAULT_URL` (not config.get's default arg): an empty NEWS_RSS_URL repo var reaches
     # us as "" in CI, which would otherwise become an invalid request URL.
     url = config.get("NEWS_RSS_URL") or _DEFAULT_URL
+    feeds: list[list[dict]] = []
     try:
-        resp = requests.get(
-            url, timeout=_TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0 (AI-Reel-Factory news)"},
-        )
-        resp.raise_for_status()
-        stories = _parse_stories(resp.text)
+        feeds.append(_get_stories(url))
     except Exception as e:  # noqa: BLE001 — headlines are a nice-to-have, never block ideation
         log.warning("news: could not fetch headlines (%s)", e)
-        return []
-    log.info("news: %d stories", len(stories))
+    topics = [t.strip().upper() for t in
+              (config.get("NEWS_TOPICS", _DEFAULT_TOPICS) or "").split(",") if t.strip()]
+    for topic in topics:
+        try:
+            feeds.append(_get_stories(_TOPIC_URL.format(topic=urllib.parse.quote(topic))))
+        except Exception as e:  # noqa: BLE001 — one section down costs only that section
+            log.warning("news: %s section unavailable (%s)", topic, e)
+    # Interleave, so the front page cannot fill the pool before any section is heard.
+    stories, seen = [], set()
+    for rank in range(max((len(f) for f in feeds), default=0)):
+        for feed in feeds:
+            if rank < len(feed) and feed[rank]["url"] not in seen:
+                seen.add(feed[rank]["url"])
+                stories.append(feed[rank])
+    log.info("news: %d stories from %d feed(s)", len(stories), len(feeds))
     return stories[:limit]
 
 
@@ -67,7 +87,10 @@ def search_stories(query: str, limit: int = 6) -> list[dict]:
     query = (query or "").strip()
     if not query:
         return []
-    url = _SEARCH_URL.format(q=urllib.parse.quote(query))
+    # Recency: an unbounded search attached a two-year-old article to a 2026 flood story
+    # (live, 2026-09-27). Google News reads `when:3d` as "the last three days".
+    window = (config.get("NEWS_SEARCH_WINDOW", "3d") or "").strip()
+    url = _SEARCH_URL.format(q=urllib.parse.quote(f"{query} when:{window}" if window else query))
     try:
         resp = requests.get(
             url, timeout=_TIMEOUT,
@@ -103,7 +126,11 @@ def _parse_stories(xml_text: str) -> list[dict]:
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
         if title and link:  # a headline with no URL cannot be cited, so it is not a story
-            stories.append({"title": title, "url": link, "source": _item_source(item)})
+            story = {"title": title, "url": link, "source": _item_source(item)}
+            published = (item.findtext("pubDate") or "").strip()
+            if published:
+                story["published"] = published
+            stories.append(story)
     return stories
 
 

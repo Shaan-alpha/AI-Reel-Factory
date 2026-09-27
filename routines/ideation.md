@@ -1,5 +1,12 @@
 # Routine: Daily Ideation (Module 1)
 
+> ⚠️ **Not the live ideation path (checked 2026-09-27).** No Routine currently writes
+> `data/daily-ideas.json`; every idea since June comes from `src/ideation_fallback.py` (Gemini on
+> Vertex, grounded, then Groq). Editorial policy has also moved on since this prompt was written:
+> **truth over neutrality** (CLAUDE.md rule 6, 2026-07-27), a somber tone for stories about deaths
+> or serious harm, and story-level dedup over 10 days. Update this prompt before re-enabling a
+> Routine, or it will reintroduce the old "neutral framing" rule.
+>
 > This is the prompt for the **Anthropic Routine** (Claude Code, Pro sub) that runs daily
 > ~08:00 local and produces the day's ideas. It runs in Anthropic's cloud — the laptop can
 > be off. **ToS:** ideation runs ONLY this way; never pipe `CLAUDE_CODE_OAUTH_TOKEN` into

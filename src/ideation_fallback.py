@@ -459,12 +459,16 @@ def _search_for_more(idea: dict, found: list[str], trusted: int | None = None) -
     # INDEPENDENT outlets corroborating each other (docs/08 §1) rather than one outlet's story
     # counted twice. The second pass then fills from repeats rather than leave a true story
     # unsourced — for a domestic item only PTI ran, one outlet twice still beats dropping it.
+    idea_toks = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
     for unique_publishers in (True, False):
         seen_publishers: set[str] = set()
         for story in results:
             url = (story.get("url") or "").strip()
             publisher = (story.get("source") or "").strip().lower()
             if not url or url in out or _is_homepage(url):
+                continue
+            # The same story, not merely the same search: two distinctive shared words.
+            if len(idea_toks & _tokens(story.get("title", ""))) < _STORY_MATCH_MIN_TOKENS:
                 continue
             if unique_publishers and publisher and publisher in seen_publishers:
                 continue
@@ -619,7 +623,7 @@ def _produce_ideas(target: int) -> list[dict]:
         "- (live trends unavailable — rely on the headlines below)"
     # Stories, not bare headlines: each carries the feed's own live article URL, which is what
     # lets an idea be cited from something we actually fetched instead of from model memory.
-    feed_stories = news.fetch_stories(12)
+    feed_stories = news.fetch_stories(int(config.get("NEWS_POOL_SIZE", "24")))
     headlines = [s["title"] for s in feed_stories]
     headlines_block = "\n".join(f"- {h}" for h in headlines) or \
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"
@@ -761,7 +765,9 @@ def seed_ideas(n: int = 3) -> int:
     the Gemini/Groq generator when that file is absent/empty. De-duplicates against ideas
     already in the table so repeated triggers don't re-propose the same ones.
     """
-    n = max(1, n)
+    # At least DIGEST_MIN_IDEAS go in front of the operator: every observed run asked for 1, and
+    # 3 of the 4 candidates already built and validated were thrown away (audit 2026-09-27).
+    n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "3")))
     routine = load_routine_ideas()
     pool = routine if routine else _produce_ideas(max(n * 2, 4))
     source = "routine file" if routine else "gemini/groq fallback"
@@ -769,7 +775,14 @@ def seed_ideas(n: int = 3) -> int:
     seen = db.existing_idea_titles()
     recent = _recent_ideas()
     pool = [i for i in pool if not _repeats_recent_story(i, recent)]
-    fresh = sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key)[:n]
+    fresh: list[dict] = []
+    for idea in sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key):
+        # Within the batch too: the grounded pass and the top-up pitched the same Trump/Iran and
+        # LPU stories twice each, sharing a source link (live, 2026-09-27).
+        if not _repeats_recent_story(idea, fresh):
+            fresh.append(idea)
+        if len(fresh) >= n:
+            break
     if not fresh:
         raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")
     log.info("ideation: seeding %d idea(s) from %s.", len(fresh), source)
