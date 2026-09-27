@@ -309,14 +309,6 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
 _GEMINI_TTS_VERTEX_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-tts")
 # The GA model on Vertex: the last same-voice attempt before the chain leaves Gemini.
 _GEMINI_TTS_VERTEX_STABLE = "gemini-2.5-flash-tts"
-# Models measured to take the style prompt as a plain preamble ("{style}\n\n{text}") without
-# reading it aloud. Everything else gets labelled sections: gemini-3.8-flash-tts reads an
-# unlabelled preamble VERBATIM (2026-09-27: a 47.5 s render that opened "You are a sharp,
-# faintly unimpressed news explainer..."), and rejects system_instruction outright. The labelled
-# form was measured obeyed and silent on 3.8, 3.1 and 2.5 alike; the plain form is kept where it
-# works only because it is what today's narration was tuned on.
-_PLAIN_PROMPT_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts",
-                        "gemini-2.5-flash-tts", "gemini-2.5-pro-preview-tts", "gemini-2.5-pro-tts")
 # Values of VOICE_STYLE_PROMPT that mean "no direction at all". An empty value cannot say that:
 # config.get treats "" as unset, which is how CI passes an absent repo variable (55544f1).
 _STYLE_OFF = ("off", "none", "false", "0")
@@ -345,13 +337,18 @@ def _style_prompt(tone: str | None = None) -> str:
     return _SOMBER_STYLE_PROMPT if tone == "somber" else raw
 
 
-def _tts_contents(model: str, style: str, spoken: str) -> str:
-    """The request text for `model`: the transcript, with the style prompt where it cannot be
-    mistaken for narration (see _PLAIN_PROMPT_MODELS)."""
+def _tts_contents(model: str, style: str, spoken: str) -> str:  # noqa: ARG001 — kept per-model
+    """The request text: the style prompt in a labelled DIRECTOR'S NOTES section, then the
+    transcript, for every model.
+
+    The plain layout ("{style}\n\n{text}") is what caused the intermittent 400s. Measured
+    2026-09-28 on gemini-3.1-flash-tts-preview (Vertex), same text and style: plain failed 4 of 4
+    with 400 INVALID_ARGUMENT, labelled succeeded 4 of 4. That is the idea-292 failure that
+    shipped a reel in Chirp's voice. The plain layout was also read ALOUD by gemini-3.8-flash-tts
+    (a 47.5 s render opening "You are a sharp, faintly unimpressed...") and by gemini-2.5-flash-tts
+    on a short line. Same style prompt either way; only the framing changed."""
     if not style:
         return spoken
-    if model in _PLAIN_PROMPT_MODELS:
-        return f"{style}\n\n{spoken}"
     return (f"### DIRECTOR'S NOTES (do not read aloud)\n{style}\n\n"
             f"### TRANSCRIPT (read only this)\n{spoken}")
 

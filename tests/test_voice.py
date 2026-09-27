@@ -629,16 +629,14 @@ def test_vertex_alone_can_voice_without_an_api_key(monkeypatch):
         ("vertex", "gemini-3.1-flash-tts-preview"), ("vertex", "gemini-2.5-flash-tts")]
 
 
-def test_style_prompt_layout_is_picked_per_model():
-    """gemini-3.8-flash-tts reads an unlabelled style preamble ALOUD (2026-09-27: a 47.5 s render
-    opening "You are a sharp, faintly unimpressed..."). The models today's narration was tuned
-    on keep the plain layout, so the current sound does not move."""
-    plain = voice._tts_contents("gemini-3.1-flash-tts-preview", "Dry.", "Hello.")
-    assert plain == "Dry.\n\nHello."
-    labelled = voice._tts_contents("gemini-3.8-flash-tts", "Dry.", "Hello.")
-    assert "DIRECTOR'S NOTES" in labelled and "TRANSCRIPT" in labelled
-    assert labelled.rstrip().endswith("Hello.")
-    assert voice._tts_contents("gemini-3.8-flash-tts", "", "Hello.") == "Hello."
+def test_every_model_gets_the_labelled_style_layout():
+    """The plain layout failed 4 of 4 with 400 INVALID_ARGUMENT on 3.1-preview (labelled: 4 of 4
+    OK, 2026-09-28) and was read ALOUD by 3.8 and by 2.5 on a short line."""
+    for model in ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-tts", "gemini-3.8-flash-tts"):
+        labelled = voice._tts_contents(model, "Dry.", "Hello.")
+        assert "DIRECTOR'S NOTES" in labelled and "TRANSCRIPT" in labelled, model
+        assert labelled.rstrip().endswith("Hello.")
+    assert voice._tts_contents("gemini-3.1-flash-tts-preview", "", "Hello.") == "Hello."
 
 
 @pytest.mark.parametrize("value", ["off", "none", "OFF", "false"])
