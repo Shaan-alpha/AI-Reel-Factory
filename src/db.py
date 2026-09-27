@@ -22,7 +22,9 @@ from src import config
 # Allowed idea lifecycle states. 'produced' marks an approved idea whose reel has shipped,
 # so a cron retry skips it (rule 12: idempotent reruns). 'passed' is a soft skip from the
 # Telegram digest — not posted, but distinct from a hard 'rejected'.
-IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced")
+# 'blocked' (2026-09-27): the fact-check gate refused the story. It used to be 'rejected', which
+# made a gate verdict indistinguishable from the operator's own Reject tap.
+IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked")
 
 
 @lru_cache(maxsize=1)
@@ -146,8 +148,16 @@ def insert_script(idea_id: int, template: str, body: str, caption: str,
     return get_client().table("scripts").insert(row).execute().data[0]["id"]
 
 
+def set_script_factcheck(script_id: int, verdict: dict) -> None:
+    """Store the fact-check verdict on its script (column scripts.factcheck, jsonb).
+
+    Nothing kept verdicts before 2026-09-27: a blocked or waived claim survived only in a CI log
+    that GitHub deletes, so "why did this reel ship?" had no answer after the fact."""
+    get_client().table("scripts").update({"factcheck": verdict}).eq("id", script_id).execute()
+
+
 def insert_post(script_id: int, platform: str, external_id: str, url: str,
-                status: str) -> int:
+                status: str, voice: str | None = None) -> int:
     """Record a published/queued output; return its id.
 
     `published_at` is stamped HERE. The column has no database default, and nothing else ever
@@ -159,6 +169,8 @@ def insert_post(script_id: int, platform: str, external_id: str, url: str,
     row = {"script_id": script_id, "platform": platform,
            "external_id": external_id, "url": url, "status": status,
            "published_at": datetime.now(timezone.utc).isoformat()}
+    if voice:  # posts.voice: which engine and model spoke (see voice.synthesize meta)
+        row["voice"] = voice
     return get_client().table("posts").insert(row).execute().data[0]["id"]
 
 

@@ -75,3 +75,25 @@ def test_a_conditional_status_change_only_moves_a_pending_idea():
         assert row["status"] == "approved"
     finally:
         client.table("ideas").delete().eq("id", idea_id).execute()
+
+
+def test_a_verdict_and_a_voice_are_stored():
+    """The 2026-09-27 migration: scripts.factcheck (jsonb) and posts.voice (text)."""
+    client = db.get_client()
+    idea_id = db.insert_ideas([{"niche": "impact-news", "title": _MARK + " verdict", "hook": "h",
+                                "angle": "a", "est_score": 0.1, "sources": []}])[0]["id"]
+    script_id = None
+    try:
+        script_id = db.insert_script(idea_id, "N", "body", "caption", ["#Shorts"])
+        db.set_script_factcheck(script_id, {"ok": True, "reason": "pass", "blocking": []})
+        row = client.table("scripts").select("factcheck").eq("id", script_id).execute().data[0]
+        assert row["factcheck"]["reason"] == "pass"
+        db.insert_post(script_id, "youtube", "vid_v", "https://youtu.be/v", "published",
+                       voice="gemini:test@dev")
+        post = client.table("posts").select("voice").eq("script_id", script_id).execute().data[0]
+        assert post["voice"] == "gemini:test@dev"
+    finally:
+        if script_id is not None:
+            client.table("posts").delete().eq("script_id", script_id).execute()
+            client.table("scripts").delete().eq("id", script_id).execute()
+        client.table("ideas").delete().eq("id", idea_id).execute()

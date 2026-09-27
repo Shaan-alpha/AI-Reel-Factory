@@ -58,6 +58,7 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
                         lambda v, m, sid: ("VID1", "https://www.youtube.com/shorts/VID1"))
     produced = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: produced.append((i, s)))
+    monkeypatch.setattr(production.db, "set_script_factcheck", lambda *a, **k: None)
     return produced
 
 
@@ -260,7 +261,7 @@ def test_factcheck_failure_blocks_the_reel_before_any_render(monkeypatch, tmp_pa
         production.produce_one(IDEA, str(tmp_path))
 
     assert rendered == [], "nothing may render after a failed fact check"
-    assert (7, "rejected") in produced, "the idea must drop out of the queue, not retry forever"
+    assert (7, "blocked") in produced, "the idea must drop out of the queue, not retry forever"
 
 
 def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(monkeypatch, tmp_path):
@@ -282,7 +283,7 @@ def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(mon
         production.produce_one(IDEA, str(tmp_path))
 
     assert rendered == [], "an unverified reel must not render or publish in strict mode"
-    assert (7, "rejected") not in produced
+    assert (7, "rejected") not in produced and (7, "blocked") not in produced
 
 
 _REAL_VERIFY = production.factcheck.verify
@@ -594,3 +595,24 @@ def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path)
                         lambda *a: pytest.fail("a failed repair must not be saved"))
     with pytest.raises(production.FactCheckFailed):
         production.produce_one(IDEA, str(tmp_path))
+
+
+def test_the_verdict_is_stored_and_a_block_is_marked_blocked(monkeypatch, tmp_path):
+    """Verdicts lived only in CI logs, and a gate block looked like the operator's Reject."""
+    produced = _wire_happy(monkeypatch, factcheck_ok=False)
+    monkeypatch.setenv("ENABLE_FACTCHECK_REPAIR", "false")
+    stored = []
+    monkeypatch.setattr(production.db, "set_script_factcheck", lambda sid, v: stored.append(v))
+    with pytest.raises(production.FactCheckFailed):
+        production.produce_one(IDEA, str(tmp_path))
+    assert stored and stored[0]["ok"] is False and stored[0]["blocking"]
+    assert (IDEA["id"], "blocked") in produced
+
+
+def test_the_voice_that_spoke_reaches_the_post_row(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: seen.update(m) or ("VID1", "u"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["voice"] == "gemini:gemini-3.1-flash-tts-preview@dev"

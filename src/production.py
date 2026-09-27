@@ -162,6 +162,7 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
             f"idea {idea_id} held back: the fact-check could not run ({check.get('reason')}). "
             f"FACTCHECK_STRICT is on, so it was not published unverified; it goes back to the "
             f"digest.")
+    first_check = check
     if not check["ok"] and check.get("unsupported") and \
             config.get_bool("ENABLE_FACTCHECK_REPAIR", True):
         # One repair pass, then the SAME gate again. It can only make a reel eligible: the
@@ -179,8 +180,9 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
                 check = recheck
             else:
                 log.warning("produce: idea %s repair did not pass the gate either", idea_id)
+    _record_verdict(script, check, repaired=check is not first_check)
     if not check["ok"]:
-        db.set_idea_status(idea_id, "rejected")
+        db.set_idea_status(idea_id, "blocked")
         raise FactCheckFailed(
             f"idea {idea_id} failed fact check: {factcheck.summary(check)}")
 
@@ -207,11 +209,24 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
                                         hook_text=hook, key_points=script.get("key_points"),
                                         source_label=_source_domain(idea.get("sources")),
                                         script_text=script["script_body"])
-        video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
+        metadata = _build_metadata(idea, script)
+        metadata["voice"] = spoke.get("voice")
+        video_id, url = publish_youtube.publish(final, metadata, script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url
     finally:
         shutil.rmtree(work, ignore_errors=True)  # render artifacts are disposable (rule 15)
+
+
+def _record_verdict(script: dict, check: dict, repaired: bool) -> None:
+    """Keep the verdict on the script row. Best-effort: bookkeeping never costs a reel."""
+    verdict = {"ok": bool(check.get("ok")), "reason": check.get("reason"),
+               "checked": check.get("checked"), "blocking": check.get("unsupported") or [],
+               "minor": check.get("minor") or [], "repaired": repaired}
+    try:
+        db.set_script_factcheck(script["script_id"], verdict)
+    except Exception as e:  # noqa: BLE001 — rule 14
+        log.warning("produce: could not store the fact-check verdict (%s)", e)
 
 
 def _notify_failure(idea: dict, error: Exception) -> None:
@@ -236,7 +251,8 @@ def _release_failed_idea(idea_id: int, error: Exception) -> None:
     not a verdict on the idea, so it belongs in front of the operator again rather than in the
     bin. A FactCheckFailed is the exception — produce_one already set it to 'rejected' because
     that IS a verdict on the content, and re-offering it would just re-spend quota to reach the
-    same answer. Best-effort: never let bookkeeping kill the batch (rule 14).
+    same answer. (It is 'blocked' since 2026-09-27, so a gate verdict no longer looks like the
+    operator's own Reject.) Best-effort: never let bookkeeping kill the batch (rule 14).
     """
     if isinstance(error, FactCheckFailed):
         return

@@ -82,7 +82,7 @@ def test_publish_uploads_records_and_deletes(monkeypatch, tmp_path):
 
     recorded = {}
     monkeypatch.setattr(pub.db, "insert_post",
-                        lambda sid, plat, ext, url, status: recorded.update(
+                        lambda sid, plat, ext, url, status, voice=None: recorded.update(
                             sid=sid, plat=plat, ext=ext, url=url, status=status) or 1)
 
     vid, url = pub.publish(str(video), {"title": "My Short", "description": "d"}, script_id=9)

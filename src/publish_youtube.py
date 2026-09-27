@@ -145,7 +145,8 @@ def publish(video_path: str, metadata: dict, script_id: int) -> tuple[str, str]:
     # get_published_post_for_idea) key off the row that was never written. A missing analytics
     # row is far cheaper than a duplicate public video, so swallow it and shout (rule 14).
     try:
-        db.insert_post(script_id, _PLATFORM, video_id, url, "published")
+        db.insert_post(script_id, _PLATFORM, video_id, url, "published",
+                       voice=metadata.get("voice"))
     except Exception as e:  # noqa: BLE001 — never turn a recorded upload into a repeated one
         log.error("publish: video %s IS LIVE at %s but its post row could not be written (%s). "
                   "Reconcile manually — analytics will miss it, and the idempotency guard for "
