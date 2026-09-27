@@ -86,8 +86,12 @@ def _keywords_via_llm(script_body: str, n: int) -> list[str]:
         f"  crypto/finance -> 'bitcoin coin', 'gold bars', 'digital vault'\n"
         f"  sport -> 'football stadium', 'soccer match', 'cheering crowd'\n"
         f"Prefer visually striking, high-motion subjects (they hold attention): places, objects, "
-        f"people doing things, nature, cities, crowds, maps. AVOID proper nouns, logos, and abstract "
-        f"words (policy, economy, impact) entirely — only things a camera can film.\n\n"
+        f"people doing things, nature, cities, crowds, maps. AVOID people's names, brands, logos "
+        f"and abstract words (policy, economy, impact) — only things a camera can film.\n"
+        f"PLACES ARE THE EXCEPTION: when the story names a country, city or landmark, keep it in "
+        f"the query ('Mumbai skyline', 'the White House', 'Nepal mountain village') and never swap "
+        f"in a different one. A White House story was illustrated with the US Capitol, and "
+        f"generic queries put American skylines on Indian stories.\n\n"
         f"NARRATION:\n{script_body}\n\n"
         f'Output ONE valid JSON object and nothing else, no markdown or fences: '
         f'{{"keywords": ["query one", "query two"]}}'
@@ -220,14 +224,31 @@ def _download(url: str, dest: str) -> None:
 
 # --- image-based visuals (photos / AI) → Ken Burns clips -------------------------------
 
-def _img_prompt(keyword: str) -> str:
+# docs/08: "AI images stay abstract/symbolic ... Never fake photoreal footage of real, named
+# people or specific real events presented as real." The old default asked for "photorealistic
+# ... documentary news b-roll", i.e. exactly the realistic look that rule rules out. Cinematic,
+# but plainly an illustration (2026-09-27). IMAGE_STYLE still overrides it.
+_DEFAULT_IMAGE_STYLE = (
+    "cinematic editorial illustration, symbolic and stylized, painterly digital art, dramatic "
+    "lighting, rich color, depth, no text, no watermark, no logos, no recognizable real people"
+)
+# One per shot, cycled: a keyword used two or three times in a reel used to get the identical
+# prompt each time, so its shots came out near-identical.
+_COMPOSITIONS = ("wide establishing shot", "close-up detail", "medium shot", "low angle",
+                 "overhead view", "silhouette against the light")
+
+
+def _img_prompt(keyword: str, index: int = 0) -> str:
     """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look."""
-    style = config.get(
-        "IMAGE_STYLE",
-        "cinematic, photorealistic, dramatic lighting, shallow depth of field, "
-        "high detail, professional documentary news b-roll, no text, no watermark",
-    )
-    return f"{keyword}, {style}, vertical 9:16 composition"
+    style = config.get("IMAGE_STYLE", _DEFAULT_IMAGE_STYLE)
+    framing = _COMPOSITIONS[index % len(_COMPOSITIONS)]
+    return f"{keyword}, {framing}, {style}, vertical 9:16 composition"
+
+
+def _image_seed(variant: str, index: int) -> int:
+    """Deterministic per reel and shot: a re-render draws the same pictures (rule 12) instead of
+    spending neurons on new ones, and two reels never share a seed."""
+    return int(hashlib.sha1(f"{variant}:{index}".encode("utf-8")).hexdigest()[:8], 16) % 2**31
 
 
 @lru_cache(maxsize=64)
@@ -250,18 +271,43 @@ def _pexels_photo_urls(keyword: str) -> tuple[str, ...]:
         return ()
 
 
-def _cloudflare_image(prompt: str, dest: str) -> bool:
-    """Generate an AI image via Cloudflare Workers AI (Flux). Needs CF_API_TOKEN + CF_ACCOUNT_ID."""
+# FLUX.2 [klein] 4B (2026-09-27): a native portrait size and a seed, where flux-1-schnell made a
+# square that assembly cropped. About 103 neurons at 768x1344 (26.05 per output 512 tile) against
+# 173 measured for schnell, so a reel's 12 images fit the free 10,000/day about 8 times over.
+_KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
+_SCHNELL = "@cf/black-forest-labs/flux-1-schnell"
+
+
+def _cloudflare_image(prompt: str, dest: str, seed: int | None = None) -> bool:
+    """Generate an AI image via Cloudflare Workers AI. Needs CF_API_TOKEN + CF_ACCOUNT_ID.
+
+    CF_IMAGE_MODEL (default klein-4b) first; flux-1-schnell is tried if it fails (rule 11)."""
     token, acct = config.get("CF_API_TOKEN"), config.get("CF_ACCOUNT_ID")
     if not (token and acct):
         return False
-    model = config.get("CF_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell")
+    first = config.get("CF_IMAGE_MODEL", _KLEIN)
+    for model in dict.fromkeys([first, _SCHNELL]):
+        if _cloudflare_run(model, prompt, dest, token, acct, seed):
+            return True
+    return False
+
+
+def _cloudflare_run(model: str, prompt: str, dest: str, token: str, acct: str,
+                    seed: int | None) -> bool:
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}"
     try:
-        r = requests.post(
-            f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"prompt": prompt[:2000]}, timeout=90,
-        )
+        if "flux-2" in model:  # FLUX.2 takes multipart form data, even for a prompt alone
+            fields = {"prompt": prompt[:2000], "width": "768", "height": "1344"}
+            if seed is not None:
+                fields["seed"] = str(seed)
+            r = requests.post(url, headers={"Authorization": f"Bearer {token}"},
+                              files={k: (None, v) for k, v in fields.items()}, timeout=90)
+        else:
+            body = {"prompt": prompt[:2000]}
+            if seed is not None:
+                body["seed"] = seed
+            r = requests.post(url, headers={"Authorization": f"Bearer {token}"},
+                              json=body, timeout=90)
         if r.status_code >= 400:
             # The body carries the reason (for example 3030, an NSFW false positive on a benign
             # prompt); raise_for_status alone threw it away, so two 400s in September could not
@@ -280,7 +326,7 @@ def _cloudflare_image(prompt: str, dest: str) -> bool:
                 f.write(r.content)
         return os.path.getsize(dest) > 1000
     except Exception as e:  # noqa: BLE001
-        log.warning("visuals: Cloudflare image gen failed (%s)", e)
+        log.warning("visuals: Cloudflare image gen failed on %s (%s)", model, e)
         return False
 
 
@@ -295,7 +341,8 @@ def _fetch_image(keyword: str, dest: str, seed: int, source: str,
     each reel its own starting point — and stays deterministic for a given (variant, cut), so
     a retry re-renders the same reel rather than a different one (rule 12).
     """
-    if source == "ai" and _cloudflare_image(_img_prompt(keyword), dest):
+    if source == "ai" and _cloudflare_image(_img_prompt(keyword, seed), dest,
+                                            seed=_image_seed(variant, seed)):
         return True
     urls = _pexels_photo_urls(keyword)
     if not urls:
