@@ -5,7 +5,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
-## [Unreleased] — Every idea cited every story, and the gate fell open on a quote mark
+## [Unreleased] — The sound, a retiring model, and a full audit (2026-09-27)
+
+A full audit, prompted by "the sound is very different from before". It was: on 2026-09-01 an
+empty-env fix switched on a style prompt and SFX stings that had never run in production, three
+reels left the channel voice for Chirp, and loudness was never set. Separately, Vertex retires
+`gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
+**565 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
+
+### Fixed
+- **The grounding model retires on 2026-10-20** (`llm`): `GEMINI_GROUNDED_MODEL` is now an
+  ordered chain (default `gemini-2.5-flash,gemini-3.5-flash-lite`); only a 404 "model gone"
+  advances it. Verified live on Vertex.
+- **The channel voice was lost on recoverable errors** (`voice`): a same-voice chain (Developer
+  API → the same model on Vertex → 2.5 → Vertex GA 2.5, then Chirp); any error advances; a
+  per-request timeout; dropped connections count as transient.
+- **gemini-3.8-flash-tts would have read the style prompt aloud and been double-wrapped**: the
+  prompt layout is chosen per model, the response mime type is honoured, and a read-aloud guard
+  rejects a render too slow for its script.
+- **Reels shipped 3–9 dB too quiet with pumping music** (`assembly`): every reel is leveled to
+  `TARGET_LUFS` (-14) from its own measurements, with de-pumped ducking and a 48 kHz limiter.
+- **Captions showed what whisper heard, not the approved script** (`subtitles`): text now comes
+  from the script and whisper only times it; groups close at sentence ends and a measured
+  width; the hook banner shrinks to fit; the Source line clears the Shorts bottom UI.
+- **Every script ran over the cap and was truncated mid-sentence** (`scriptwriter`): the cap is
+  stated in the prompt, an LLM tighten pass runs first, and truncation drops whole sentences
+  (CTA first). The punch-up may not delete the "why it matters" turn.
+- **Two "Sources:" blocks, dead model-written links and raw redirects in descriptions**: one
+  block, built only from fetched sources, publisher links first.
+- **Hand-written JSON broke on scare quotes and trailing text**: one shared `llm.parse_json`.
+- **A blocked story came back under a new title and shipped** (`ideation_fallback`): story-level
+  dedup over 10 days; one-hop redirect resolution; citations about another story are dropped.
+- **The fact-check had no date and never saw the on-screen cards or description.**
+- **An old digest message could revive a decided idea**; overlapping pipeline runs could
+  double-publish; the approval wait blocked on other runs' ideas; uploads had no retry.
+- **Colour tags were never written** and three CRF-23 generations cost 3.3 dB PSNR: capped-CRF
+  encodes with BT.709 set on the frames.
+
+### Added
+- Knobs: `GEMINI_TTS_VERTEX_FALLBACK`, `GEMINI_TTS_TIMEOUT_SECONDS`, `VOICE_STYLE_PROMPT=off`,
+  `ENABLE_LOUDNORM`, `TARGET_LUFS`, `ENABLE_VOICE_COMPRESS`, `MUSIC_LU_BELOW_VOICE`,
+  `ENABLE_MUSIC_OFFSET`, `ENABLE_SCRIPT_TIGHTEN`, `FACTCHECK_SAMPLES`, `IDEA_DEDUP_DAYS`,
+  `YOUTUBE_LANGUAGE`, `X264_*`.
+- `voice.synthesize(meta=)` reports which engine and model spoke; production alerts when a reel
+  leaves the channel voice.
+
+### Earlier in this release — Every idea cited every story, and the gate fell open on a quote mark
 
 Run 34703685567 (2026-09-12) published two Shorts wrongly. Ideas 291 (Modi-Xi) and 292 (Houthis)
 each carried the same 15 grounded citations, which also covered a Nagpur bank robbery and a

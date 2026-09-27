@@ -5,11 +5,11 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased fixes (2026-09-13)**: per-idea citations, a fact-check gate that no longer falls open on a quote mark, a compact Telegram digest (**486 pass, 5 skipped** — measured 2026-09-13)
-  ↳ this line said 0.17.0 until 2026-09-13, one tag behind `v0.18.0`.
-**Last updated:** 2026-09-13 · **Fact-check:** `FACTCHECK_STRICT=true` (unverified reels are blocked and released back to the digest)
+**Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased fixes (2026-09-13 and 2026-09-27)** on branch `fix/audit-2026-09-27`, not yet merged (**565 pass, 5 skipped** — measured 2026-09-27)
+**Last updated:** 2026-09-27 · **Fact-check:** `FACTCHECK_STRICT=true` (unverified reels are blocked and released back to the digest)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · both picked by ear · free tier
-  ↳ falls back to `gemini-2.5-flash-preview-tts` (same voice) on a 503 — the preference order IS the fallback order
+  ↳ same-voice chain (branch): Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, and only then Chirp
+**Grounding model:** `gemini-2.5-flash` **retires on Vertex 2026-10-20**; the branch makes it a chain that falls through to `gemini-3.5-flash-lite`
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 
@@ -52,6 +52,12 @@
 Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
+
+- ⚠️ **2026-09-27 audit — operator decisions pending** (full list in the log entry below): merge
+  `fix/audit-2026-09-27` **before 2026-10-20** (the grounding model retires that day and, with
+  `FACTCHECK_STRICT=true`, nothing would publish); pick the narration style from the A/B pack;
+  decide SFX on/off; redeploy the Vercel bot (`vercel deploy --prod` from `telegram-bot/`) to get
+  the stale-tap guard.
 
 - ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**486 pass, 5 skipped** — 2026-09-13).
 - ⚠️ **Operator action (2026-09-13):** Short `NKPb-InUoJU` (idea 291, Modi-Xi) is public with a
@@ -104,6 +110,95 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-09-27 — Full audit: why the sound changed, a model retiring in 3 weeks, and 60+ findings
+
+Asked for "a full deep audit — sound is very different too from before — check everything and
+every possible upgrade". Nine subsystem auditors (voice, mix, scripts/LLM, ideation, fact-check,
+visuals, captions/video, ops, growth) plus live probes and a local end-to-end render. All fixes
+are on branch **`fix/audit-2026-09-27`** (worktree `../AI-Reel-Factory-fix`), **uncommitted**,
+**565 pass, 5 skipped** (was 489 + 5).
+
+**Why the sound changed — measured, not guessed.** Audio of 10 published Shorts (06-11..09-22):
+- **2026-09-01, commit 55544f1** (`config.get` treats an empty env var as absent) silently turned
+  on two things in production that had never run there: the Gemini **style prompt** ("brisk
+  clip… very little warmth"; the same script reads in 21.9 s with it, 26.2 s without) and the
+  procedural **SFX stings** (whoosh/click every 2nd cut; `SFX_DIR=""` had crashed them since
+  07-26). Loudness range went from 1.6–3.4 LU to 4.5–5.8 LU. From 07-27 to 09-01 every reel was
+  narrated with NO direction at all — that is the "before" sound.
+- **3 of ~13 reels since 09-01 left the channel voice for Chirp** (ideas 292, 303, 304): a 400,
+  503s on both Developer-API models, and an httpx "Server disconnected" that matched no
+  transient marker. Nothing recorded which engine spoke.
+- **Loudness was never set**: published reels measured -16.8 to -22.7 LUFS (YouTube plays at -14
+  and never turns quiet uploads up), and the music ducking pumped 9–11 dB inside each second.
+
+**Critical, time-bound:** Google's Vertex model-versions page lists **`gemini-2.5-flash` for
+retirement on 2026-10-20** (replacement `gemini-3.5-flash-lite`). It grounds ideation, the
+scriptwriter and the fact-check gate; with `FACTCHECK_STRICT=true` every reel would be held.
+
+**Fixed on the branch (each with tests; live-verified where marked ✓live):**
+- `llm`: `GEMINI_GROUNDED_MODEL` is an ordered chain (default `gemini-2.5-flash,gemini-3.5-flash-lite`)
+  that falls through only on a 404 "model gone" ✓live; MINIMAL thinking is retried at LOW
+  (`gemini-3.8-flash` 400s on MINIMAL) ✓live; one shared JSON repair (`parse_json`) for scare
+  quotes, trailing text and bare arrays — the scriptwriter wrote both 09-22 scripts ungrounded
+  over a quote mark; Groq retries an empty `json_validate_failed` once with double the budget.
+- `voice`: same-voice attempt chain (Vertex serves 3.1 and GA 2.5-flash-tts with Zubenelgenubi;
+  ~$0.5/month expected, knob `GEMINI_TTS_VERTEX_FALLBACK`) ✓live — the local render hit a real
+  429 on the Developer API and was voiced by Vertex 3.1, same voice; any error advances (a 429
+  is per model, the 292 400 was intermittent); request timeout; mime-aware audio (3.8 answers a
+  full RIFF WAV); per-model prompt layout (**3.8 reads an unlabelled style prompt aloud**,
+  measured: 47.5 s) plus a read-aloud guard; `VOICE_STYLE_PROMPT=off`; `synthesize(meta=)` and
+  a Telegram alert whenever a reel leaves the channel voice.
+- `assembly`: every reel leveled to **-14 LUFS** from its own measurements (voice to a -20
+  reference, light 3:1 compression, bed 11 LU under, 48 kHz limiter) — local renders land at
+  -14.3..-14.7 for every engine (was -17.9..-19.9) ✓live; de-pumped ducking (3.5 dB swing);
+  bed starts at a per-reel offset with a fade-in; `MUSIC_VOLUME` validated; 48 kHz output.
+  Video: capped-CRF encodes (final CRF 20 / 8 Mbps, intermediates CRF 17 / 20 Mbps) and real
+  BT.709 tags. **An uncapped CRF 18 measured 44 Mbps** on the film grain — the cap is required.
+- `scriptwriter`: the word cap is stated in the prompt (it never was; drafts ran 82–128 words);
+  an LLM tighten pass before truncation (live: 101→72, 91→72) ✓live; truncation drops whole
+  sentences, CTA first, never mid-sentence (script 267 shipped mid-sentence); the hook punch-up
+  may not delete the "why it matters" turn (it did, live, on idea 312); markdown stripped; ONE
+  Sources block from fetched sources only (every recent description had two, 12 of 53
+  model-written links were dead); disclosure says "narration and images" when `VISUAL_SOURCE=ai`.
+- `factcheck`: the checker is told today's date ✓live (it then correctly blocked idea 308's
+  10-day-old "headed to the President's desk"); key-point cards and the description summary are
+  checked too; opt-in `FACTCHECK_SAMPLES` (block if any of N samples blocks) — measured
+  non-determinism: the same script passed 2 of 5 runs.
+- `ideation`: redirects resolve from Google's one-hop `Location` (idea 315 kept two raw
+  vertexaisearch links); a grounded citation whose slug names another story is dropped
+  (Iran-UAE idea 301 cited three UCC articles); **story-level dedup** over the last 10 days by
+  shared source or distinctive words (blocked idea 314 came back 47 min later as 315 and
+  shipped) — replayed on the real table it flags 227/228 and 314/315 ✓live.
+- `subtitles`: caption TEXT comes from the approved script, whisper only times it (7.6% of
+  burned words were wrong: '3 5 %', '769 croned', 'On officially'); groups close at sentence
+  ends and at a measured 840 px width; the hook banner shrinks to fit instead of dropping words
+  (20 of 40 were cut); the Source line moved above the Shorts bottom UI.
+- ops: `concurrency: reel-pipeline` on both pipeline workflows (overlapping runs could
+  double-publish); digest taps only move a still-pending idea (polling path + bot code); the
+  approval wait is scoped to this run's ideas and ends at the cap; YouTube upload retries
+  transient errors; `defaultLanguage/defaultAudioLanguage=en` (one English reel was tagged
+  Hindi); Cloudflare's error body is logged; `tests.yml` gets `permissions: contents: read`.
+- **Bug caught by the live DB test before it shipped:** the new conditional
+  `db.set_idea_status` skipped `execute()` on the unconditional path. Fixed, with a live test.
+
+**Operator decisions (not changed in code):**
+1. **Narration style** — listen to the A/B pack (scratchpad `ab_pack/`): August (no direction)
+   vs now (style prompt) vs `gemini-3.8-flash-tts` (not labelled preview; needs the labelled
+   prompt, which the branch provides). Set `VOICE_STYLE_PROMPT=off` for the August sound.
+2. **SFX** — the auditor recommends OFF (`ENABLE_SFX=false`): 3 of 4 stings land on words, the
+   whoosh is mostly hiss after the 24 kHz output; it was never signed off.
+3. **Grounded successor** — the chain moves to `gemini-3.5-flash-lite` on 10-20 by itself; the
+   gate could move now to `gemini-3.5-flash` (caught the 314 error in 1 sample; ~$0.003/check).
+4. **Fact-check samples** — `FACTCHECK_SAMPLES=2` halves the chance a contradiction slips through.
+5. **Visual style** — the Flux prompt asks for "photorealistic documentary news b-roll", which
+   docs/08 reads as against its rule that AI images stay abstract; upgrade path flux-2-klein-4b.
+6. **Cadence** — 0.72 Shorts/day vs a 4–5 goal; every run is hand-triggered with IDEAS=1-2.
+7. Two public Shorts never passed the gate: `xRUo6GxYwYo` (idea 285, US-Iran tanker) and
+   `NKPb-InUoJU` (idea 291, Modi-Xi). Re-checking now
+   blocks both.
+8. Redeploy the Vercel bot for the stale-tap guard (CLI-deployed, not git-connected).
+
 
 ### 2026-09-13 — Strict fact-check is ON: no reel ships unverified
 
