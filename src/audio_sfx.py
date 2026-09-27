@@ -1,11 +1,11 @@
 """Module for Sound Effects (SFX) synthesis and audio mixing.
 
 Contract:
-    what it does : generates crisp procedural SFX assets (whoosh, pop, ding, boom, click)
-                   and mixes them into video audio at precise timestamps (clip cuts, text cards,
-                   script impact points).
-    input        : list of SFX events [{"time": float, "name": str}], narration path, output path.
-    output       : mixed audio WAV/MP3 path containing narration + SFX.
+    what it does : generates procedural SFX assets (whoosh, pop, ding, boom, click) and renders
+                   an SFX-only track with each event at its timestamp; assembly mixes that
+                   track under the narration.
+    input        : list of SFX events [{"time": float, "name": str}], total duration, output path.
+    output       : path to a 44.1 kHz mono WAV holding only the SFX (it never sees the narration).
     depends on   : stdlib wave/math/struct/array, src.config.
 
 Stdlib-only and deterministic: the noise-based effects draw from a SEEDED generator, so the
