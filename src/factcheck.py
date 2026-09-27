@@ -62,9 +62,12 @@ log = logging.getLogger(__name__)
 _PROMPT = """You are the last check before a news script is published to millions of people. \
 Your job is to stop FABRICATION — not to police precision.
 
+TODAY'S DATE: {today} (UTC). Events from the last few days are current news, not the future, and \
+"this year" means {year}.
+
 SCRIPT TO CHECK:
 {body}
-
+{on_screen}
 SOURCES THE WRITER CLAIMS TO HAVE USED:
 {sources}
 
@@ -117,79 +120,33 @@ string ends the string and breaks the JSON.
 """
 
 
-def _escape_stray_quotes(blob: str) -> str:
-    """Escape double quotes that sit INSIDE a JSON string instead of ending it.
-
-    The checker's findings quote the script, and a model writing JSON by hand routinely leaves
-    those quotes raw: `["The script says "first talks in five years" — they met in 2024"]`.
-    json.loads reads the inner quote as the end of the string and dies with "Expecting ','
-    delimiter", which is the exact error that shipped idea 291 unverified on 2026-09-12 — with a
-    claim this gate blocks every single time it gets to read it.
-
-    A quote inside a string is taken as CLOSING only when what follows can legally follow a
-    string in this schema: `:` `]` `}` or the end, or `,` followed by the start of another value.
-    Anything else — a letter, a space and then a word — means it was a quote in prose.
-    """
-    out: list[str] = []
-    in_string = escaped = False
-    n = len(blob)
-    for i, ch in enumerate(blob):
-        if not in_string:
-            in_string = ch == '"'
-            out.append(ch)
-            continue
-        if escaped:
-            escaped = False
-        elif ch == "\\":
-            escaped = True
-        elif ch == '"':
-            j = i + 1
-            while j < n and blob[j].isspace():
-                j += 1
-            nxt = blob[j] if j < n else ""
-            if nxt == ",":
-                k = j + 1
-                while k < n and blob[k].isspace():
-                    k += 1
-                closes = k >= n or blob[k] in '"{['
-            else:
-                closes = nxt in ("", ":", "]", "}")
-            if closes:
-                in_string = False
-            else:
-                out.append('\\"')
-                continue
-        out.append(ch)
-    return "".join(out)
+# Moved to llm (2026-09-27) so the scriptwriter, ideation and visuals share the repair that
+# stopped this gate falling open on a quote mark. Kept under its old name for callers.
+_escape_stray_quotes = llm.escape_stray_quotes
 
 
 def _parse(raw: str) -> dict:
     """Pull the JSON object out of the model's reply. Tolerates fences, stray prose, and raw
     double quotes inside a finding (see `_escape_stray_quotes`). Raises ValueError if unusable."""
-    start, end = raw.find("{"), raw.rfind("}")
-    if start == -1 or end <= start:
+    if "{" not in (raw or ""):
         raise ValueError("fact check: no JSON object in response")
-    blob = raw[start : end + 1]
     try:
-        data = json.loads(blob, strict=False)
-    except json.JSONDecodeError:
-        data = json.loads(_escape_stray_quotes(blob), strict=False)  # still bad -> raises
+        data = llm.parse_json(raw[raw.find("{"):])
+    except ValueError as e:
+        raise ValueError(f"fact check: {e}") from e
     if not isinstance(data, dict):
         raise ValueError("fact check: reply is not a JSON object")
     return data
 
 
 def _model() -> str | None:
-    """Which model runs the check. None = use GEMINI_GROUNDED_MODEL.
+    """Which model runs the check. None = walk the GEMINI_GROUNDED_MODEL chain.
 
-    Free-tier quota IS metered per model, which suggests pointing the checker at its own model
-    to avoid competing with ideation and the scriptwriter. Measured 2026-07-27: that does not
-    work on this account, and **re-measured 2026-08-07 against the current lineup: still true.**
-    Grounded search 429s on every 3.x model with an empty quota-violation list (no allowance at
-    all), while `gemini-2.5-flash` 429s with an explicit `limit: 20` — a real budget, merely
-    spent. It remains the only model with free grounded search. A non-default here therefore
-    makes the gate fail EVERY time, i.e. permanently fail-open, which is worse than no gate.
-    Leave it unset unless the account has paid quota.
+    Backend-dependent. On the Developer API (API key) only `gemini-2.5-flash` has free grounded
+    search — every 3.x model 429s with no allowance (measured 2026-08-07) — so a non-default
+    there makes the gate fail every time. On Vertex, which CI runs, Gemini 3 models ground
+    (measured 2026-09-27), and gemini-2.5-flash itself retires on 2026-10-20. An explicit model
+    is used alone, without the chain's retirement fall-through, so leaving this unset is safer.
     """
     return config.get("FACTCHECK_MODEL") or None
 
@@ -291,12 +248,46 @@ def _ask_checker(prompt: str) -> str:
         return llm.generate_grounded(prompt, max_tokens=2048, model=_model(), api_key=None)
 
 
-def verify(script_body: str, sources: list[str] | None = None, title: str = "") -> dict:
+def _samples() -> int:
+    """How many independent checks to run; a finding from ANY of them counts (1-3, default 1).
+
+    The verdict is one sample of a search-backed model, and it varies: measured 2026-09-27, the
+    same script passed 2 of 5 runs and another 3 of 5, and temperature 0 does not fix it because
+    the search results differ run to run. That is how idea 314 was blocked for a claim that
+    idea 315 then shipped with. Two samples roughly halve the chance a real contradiction slips
+    through, at one extra grounded call (well inside Vertex's free allowance)."""
+    try:
+        return max(1, min(3, int(config.get("FACTCHECK_SAMPLES", "1"))))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _check_once(prompt: str) -> tuple[dict, str]:
+    """One checker verdict and its raw reply. An unreadable reply is asked for once more."""
+    raw = _ask_checker(prompt)
+    try:
+        return _parse(raw), raw
+    except ValueError as e:  # JSONDecodeError included
+        # A reply we cannot read is not an outage: the checker RAN and reached a verdict we
+        # failed to parse. Falling open on it shipped idea 291 unverified (2026-09-12) with a
+        # claim the gate blocks 6 times out of 6. One more ask is cheap — Vertex allows 1,500
+        # grounded requests a day — and far cheaper than a public false claim.
+        log.warning("factcheck: could not parse the checker's reply (%s); asking once more. "
+                    "Raw reply: %s", e, raw.strip()[:1500])
+        raw = _ask_checker(prompt)
+        return _parse(raw), raw
+
+
+def verify(script_body: str, sources: list[str] | None = None, title: str = "",
+           on_screen: list[str] | None = None) -> dict:
     """Re-check a finished script. Returns {ok, unsupported, checked, reason}.
 
     `ok=False` means BLOCK the reel. A checker failure returns ok=True with a reason, because a
     Gemini outage must not take the day's batch down with it (rule 14) — the scriptwriter's own
     grounding is still in place underneath.
+
+    `on_screen` is the other published text: the key-point cards burned into the video and the
+    description summary. They were never checked, yet a viewer reads them as claims too.
     """
     body = (script_body or "").strip()
     if not body:
@@ -305,23 +296,27 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
     if not enabled():
         return {"ok": True, "unsupported": [], "minor": [], "checked": 0, "reason": "disabled"}
 
+    from datetime import datetime, timezone
+
     src_block = "\n".join(f"- {s}" for s in (sources or [])) or "- (none provided)"
-    prompt = _PROMPT.format(body=f"{title}\n\n{body}".strip(), sources=src_block)
+    extra = [str(t).strip() for t in (on_screen or []) if str(t).strip()]
+    screen_block = ("\nALSO PUBLISHED WITH IT (on-screen cards and the description; check these "
+                    "claims too):\n" + "\n".join(f"- {t}" for t in extra) + "\n") if extra else ""
+    today = datetime.now(timezone.utc).date()
+    prompt = _PROMPT.format(body=f"{title}\n\n{body}".strip(), sources=src_block,
+                            on_screen=screen_block, today=today.isoformat(), year=today.year)
 
     raw = ""
     try:
-        raw = _ask_checker(prompt)
-        try:
-            data = _parse(raw)
-        except ValueError as e:  # JSONDecodeError included
-            # A reply we cannot read is not an outage: the checker RAN and reached a verdict we
-            # failed to parse. Falling open on it shipped idea 291 unverified (2026-09-12) with a
-            # claim the gate blocks 6 times out of 6. One more ask is cheap — Vertex allows 1,500
-            # grounded requests a day — and far cheaper than a public false claim.
-            log.warning("factcheck: could not parse the checker's reply (%s); asking once more. "
-                        "Raw reply: %s", e, raw.strip()[:1500])
-            raw = _ask_checker(prompt)
-            data = _parse(raw)
+        data, raw = _check_once(prompt)
+        for extra_sample in range(_samples() - 1):
+            try:
+                more, more_raw = _check_once(prompt)
+            except Exception as e:  # noqa: BLE001 — one verdict in hand is enough to decide on
+                log.warning("factcheck: extra sample %d could not run (%s)", extra_sample + 2, e)
+                continue
+            data = _merge_samples(data, more)
+            raw = f"{raw.strip()}\n--- sample {extra_sample + 2} ---\n{more_raw.strip()}"
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
         # Grounded search shares one free-tier bucket with ideation and the scriptwriter, so a
         # busy day can exhaust it and leave the gate unable to run. FACTCHECK_STRICT decides
@@ -370,11 +365,34 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "") 
         log.warning("factcheck: raw checker reply for the block above: %s", raw.strip()[:1500])
     else:
         log.info("factcheck: passed (%d claims checked)", checked)
-    if minor:  # shipped anyway, but loudly — a rising count here means the writer is drifting
+    if minor and ok:  # shipped anyway, but loudly — a rising count means the writer is drifting
         log.warning("factcheck: %d minor issue(s) WAIVED (not fabrication, reel proceeds): %s",
+                    len(minor), " | ".join(minor[:3]))
+    elif minor:
+        log.warning("factcheck: %d minor issue(s) alongside the block: %s",
                     len(minor), " | ".join(minor[:3]))
     return {"ok": ok, "unsupported": blocking, "minor": minor, "checked": checked,
             "reason": "fail" if not ok else "pass"}
+
+
+def _merge_samples(a: dict, b: dict) -> dict:
+    """Two verdicts as one: a finding from either counts, and a 'fail' from either stands."""
+    def _list(d: dict, key: str) -> list:
+        v = d.get(key)
+        return list(v) if isinstance(v, list) else []
+
+    merged = dict(a)
+    for key in ("blocking", "critical", "unsupported", "minor", "waived"):
+        items = _list(a, key) + [x for x in _list(b, key) if x not in _list(a, key)]
+        if items:
+            merged[key] = items
+    try:
+        merged["checked"] = max(int(a.get("checked") or 0), int(b.get("checked") or 0))
+    except (TypeError, ValueError):
+        pass
+    if "fail" in (str(a.get("verdict", "")).lower(), str(b.get("verdict", "")).lower()):
+        merged["verdict"] = "fail"
+    return merged
 
 
 def summary(result: dict, limit: int = 3) -> str:

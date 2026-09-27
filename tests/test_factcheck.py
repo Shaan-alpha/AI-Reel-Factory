@@ -469,3 +469,58 @@ def test_no_dedicated_key_means_exactly_one_attempt(monkeypatch):
     monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
     factcheck.verify("a body")
     assert tried == [None]
+
+
+# --- 2026-09-27 audit ---------------------------------------------------------------------
+
+def _capture_prompt(monkeypatch, replies):
+    seen = []
+    it = iter(replies)
+    monkeypatch.setattr(factcheck, "_ask_checker", lambda p: seen.append(p) or next(it))
+    return seen
+
+
+_PASS = '{"checked": 3, "blocking": [], "minor": [], "verdict": "pass"}'
+_FAIL = '{"checked": 3, "blocking": ["cameras were not turned off"], "minor": [], "verdict": "fail"}'
+
+
+def test_the_checker_is_told_todays_date(monkeypatch):
+    """Without a date the model treated this month's news as the future or a past year."""
+    seen = _capture_prompt(monkeypatch, [_PASS])
+    factcheck.verify("A claim.", ["https://a.example"])
+    assert "TODAY'S DATE: 20" in seen[0]
+
+
+def test_on_screen_text_is_checked_too(monkeypatch):
+    seen = _capture_prompt(monkeypatch, [_PASS])
+    factcheck.verify("A claim.", [], on_screen=["100% TARIFFS", "Summary line."])
+    assert "100% TARIFFS" in seen[0] and "Summary line." in seen[0]
+
+
+def test_one_sample_is_the_default(monkeypatch):
+    seen = _capture_prompt(monkeypatch, [_PASS, _FAIL])
+    assert factcheck.verify("A claim.", [])["ok"] is True
+    assert len(seen) == 1
+
+
+def test_a_second_sample_that_finds_a_contradiction_blocks(monkeypatch):
+    """Idea 314 was blocked and near-identical 315 shipped: one sample is a coin toss."""
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
+    _capture_prompt(monkeypatch, [_PASS, _FAIL])
+    result = factcheck.verify("A claim.", [])
+    assert result["ok"] is False and "cameras" in result["unsupported"][0]
+
+
+def test_an_extra_sample_that_cannot_run_does_not_undo_the_first(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
+    calls = []
+
+    def _ask(p):
+        calls.append(p)
+        if len(calls) > 1:
+            raise RuntimeError("503 UNAVAILABLE")
+        return _PASS
+
+    monkeypatch.setattr(factcheck, "_ask_checker", _ask)
+    result = factcheck.verify("A claim.", [])
+    assert result["ok"] is True and factcheck.gate_ran(result)
