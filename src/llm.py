@@ -171,22 +171,39 @@ def _thinking_cfg(model: str):
     return types.ThinkingConfig(thinking_budget=0)
 
 
+# The refusal is worded differently per backend. Vertex: "Thinking level is unsupported:
+# THINKING_LEVEL_MINIMAL". The Developer API: "Thinking level MINIMAL is not supported for this
+# model" — which the first version of this check missed, so there every gemini-3.8-flash text
+# call failed over to Groq (seen live in a test run, 2026-09-28).
+_MINIMAL_REFUSAL_RE = re.compile(r"(?is)thinking[ _]level.{0,40}?(?:unsupported|not supported)")
+# Models that refused MINIMAL in this process go straight to LOW: otherwise every call to them
+# spends a failed request first.
+_MINIMAL_REFUSED: set[str] = set()
+
+
 def _generate_content(client, *, model: str, contents: str, config):
     """`client.models.generate_content`, retried once at LOW thinking if MINIMAL is refused.
 
-    MINIMAL is not a floor every 3.x model shares: gemini-3.8-flash answers `400 Thinking level
-    is unsupported: THINKING_LEVEL_MINIMAL` (measured 2026-09-27 on Vertex) and accepts LOW and
-    up. Keyed on the error rather than a version table, so the next model that moves the floor
-    costs one extra request instead of every Gemini call silently failing over to Groq."""
+    MINIMAL is not a floor every 3.x model shares: gemini-3.8-flash refuses it (measured
+    2026-09-27 on Vertex) and accepts LOW and up. Keyed on the error rather than a version
+    table, so the next model that moves the floor costs one extra request instead of every
+    Gemini call silently failing over to Groq."""
+    from google.genai import types
+
+    def _at_low():
+        config.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+
+    level = getattr(getattr(config, "thinking_config", None), "thinking_level", None)
+    if model in _MINIMAL_REFUSED and level == types.ThinkingLevel.MINIMAL:
+        _at_low()
     try:
         return client.models.generate_content(model=model, contents=contents, config=config)
     except Exception as e:  # noqa: BLE001 — only the one refusal is handled; the rest re-raise
-        if "thinking level is unsupported" not in str(e).lower():
+        if not _MINIMAL_REFUSAL_RE.search(str(e)):
             raise
-        from google.genai import types
-
-        log.warning("llm: %s refuses MINIMAL thinking; retrying at LOW", model)
-        config.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+        _MINIMAL_REFUSED.add(model)
+        log.warning("llm: %s refuses MINIMAL thinking; using LOW for it from now on", model)
+        _at_low()
         return client.models.generate_content(model=model, contents=contents, config=config)
 
 

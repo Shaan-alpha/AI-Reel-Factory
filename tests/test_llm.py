@@ -304,8 +304,24 @@ def test_an_unsupported_thinking_level_is_retried_at_low(monkeypatch):
     monkeypatch.setattr(llm, "_gemini_client",
                         lambda api_key=None: type("C", (), {"models": _Models})())
     monkeypatch.setattr(llm, "_GEMINI_MODEL", "gemini-3.8-flash")
+    monkeypatch.setattr(llm, "_MINIMAL_REFUSED", set())
     assert llm._gen_gemini("x", json=False, max_tokens=64) == "ok"
     assert levels == [types.ThinkingLevel.MINIMAL, types.ThinkingLevel.LOW]
+    # Remembered: the next call does not spend a failed request first.
+    assert llm._gen_gemini("y", json=False, max_tokens=64) == "ok"
+    assert levels[2:] == [types.ThinkingLevel.LOW]
+
+
+@pytest.mark.parametrize("message", [
+    "400 INVALID_ARGUMENT. Thinking level is unsupported: THINKING_LEVEL_MINIMAL",  # Vertex
+    "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'Thinking level MINIMAL is not "
+    "supported for this model. Please retry with other thinking level'}}",  # Developer API
+])
+def test_both_wordings_of_the_minimal_refusal_are_recognised(message):
+    """The Developer API's wording was missed, so there every 3.8 call went to Groq."""
+    assert llm._MINIMAL_REFUSAL_RE.search(message)
+    assert not llm._MINIMAL_REFUSAL_RE.search("400 INVALID_ARGUMENT. Request contains an "
+                                              "invalid argument.")
 
 
 def test_thinking_config_is_picked_per_model_generation():
