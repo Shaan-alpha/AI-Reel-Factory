@@ -212,6 +212,102 @@ def test_grounded_defaults_to_the_grounded_model_not_the_text_model(monkeypatch)
     assert seen["model"] == "gemini-2.5-flash", "grounding must not follow the text model"
 
 
+def _grounded_fake(monkeypatch, fail: dict[str, Exception]):
+    """A client whose generate_content fails for the named models; records every attempt."""
+    seen: list[str] = []
+
+    class _Resp:
+        text = "ok"
+        candidates: list = []
+
+    class _Models:
+        @staticmethod
+        def generate_content(*, model, contents, config):
+            seen.append(model)
+            if model in fail:
+                raise fail[model]
+            return _Resp()
+
+    monkeypatch.setattr(llm, "_gemini_client",
+                        lambda api_key=None: type("C", (), {"models": _Models})())
+    return seen
+
+
+def test_a_retired_grounded_model_falls_through_to_the_next_in_the_chain(monkeypatch):
+    """Vertex retires gemini-2.5-flash on 2026-10-20 (Google's model-versions page, fetched
+    2026-09-27). It grounds ideation, the scriptwriter AND the fact-check gate, and with
+    FACTCHECK_STRICT=true a gate that cannot run holds every reel back — so a single pinned model
+    would stop the channel publishing on that date. A 404 must advance the chain instead."""
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", "gemini-2.5-flash,gemini-3.5-flash-lite")
+    seen = _grounded_fake(monkeypatch, {"gemini-2.5-flash": RuntimeError(
+        "404 NOT_FOUND. Publisher model `.../gemini-2.5-flash` was not found or your project "
+        "does not have access to it.")})
+    assert llm._gen_gemini_grounded("x", max_tokens=64) == "ok"
+    assert seen == ["gemini-2.5-flash", "gemini-3.5-flash-lite"]
+
+
+def test_the_grounded_chain_does_not_skip_a_model_on_other_errors(monkeypatch):
+    """Only "this model is gone" advances the chain. A 503 is retried by _call_with_retry on the
+    SAME model; moving on would quietly swap the fact-check model on a blip."""
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", "gemini-2.5-flash,gemini-3.5-flash-lite")
+    seen = _grounded_fake(monkeypatch, {"gemini-2.5-flash": RuntimeError("503 UNAVAILABLE")})
+    with pytest.raises(RuntimeError, match="503"):
+        llm._gen_gemini_grounded("x", max_tokens=64)
+    assert seen == ["gemini-2.5-flash"]
+
+
+def test_an_explicit_grounded_model_is_not_expanded_into_the_chain(monkeypatch):
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", "gemini-2.5-flash,gemini-3.5-flash-lite")
+    seen = _grounded_fake(monkeypatch, {})
+    llm._gen_gemini_grounded("x", max_tokens=64, model="gemini-3.5-flash")
+    assert seen == ["gemini-3.5-flash"]
+
+
+def test_vertex_has_moved_off_the_retiring_model(monkeypatch):
+    """gemini-2.5-flash retires on Vertex on 2026-10-20; the pipeline moved ahead of it."""
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", None)
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    chain = llm._grounded_chain(None)
+    assert chain[0] == "gemini-3.5-flash-lite" and "gemini-2.5-flash" not in chain
+
+
+def test_the_developer_api_keeps_its_only_free_grounded_model(monkeypatch):
+    monkeypatch.setattr(llm, "_GEMINI_GROUNDED_MODEL", None)
+    monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
+    assert llm._grounded_chain(None) == ["gemini-2.5-flash"]
+
+
+def test_an_explicit_model_may_be_a_chain_of_its_own():
+    assert llm._grounded_chain("gemini-3.5-flash, gemini-3.5-flash-lite") == [
+        "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+
+
+def test_an_unsupported_thinking_level_is_retried_at_low(monkeypatch):
+    """gemini-3.8-flash rejects THINKING_LEVEL_MINIMAL with a 400 (measured 2026-09-27 on
+    Vertex); LOW is its floor. Without this, moving GEMINI_MODEL to 3.8 would 400 every Gemini
+    call and the Groq failover would hide it."""
+    types = pytest.importorskip("google.genai.types")
+    levels = []
+
+    class _Resp:
+        text = "ok"
+
+    class _Models:
+        @staticmethod
+        def generate_content(*, model, contents, config):
+            levels.append(config.thinking_config.thinking_level)
+            if config.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL:
+                raise RuntimeError("400 INVALID_ARGUMENT. Thinking level is unsupported: "
+                                   "THINKING_LEVEL_MINIMAL")
+            return _Resp()
+
+    monkeypatch.setattr(llm, "_gemini_client",
+                        lambda api_key=None: type("C", (), {"models": _Models})())
+    monkeypatch.setattr(llm, "_GEMINI_MODEL", "gemini-3.8-flash")
+    assert llm._gen_gemini("x", json=False, max_tokens=64) == "ok"
+    assert levels == [types.ThinkingLevel.MINIMAL, types.ThinkingLevel.LOW]
+
+
 def test_thinking_config_is_picked_per_model_generation():
     """`thinking_budget` is REJECTED by Gemini 3.x (400 INVALID_ARGUMENT, verified live) — it was
     replaced by `thinking_level`. Sending the wrong field 400s every Gemini call, which the Groq
@@ -701,3 +797,62 @@ def test_vertex_without_a_project_fails_loudly(monkeypatch):
     monkeypatch.setattr(llm, "_gemini_client", llm._gemini_client.__wrapped__)
     with pytest.raises(config.ConfigError):
         llm._gemini_client(None)
+
+
+# --- shared JSON repair (2026-09-27): one parser for every hand-written LLM JSON ----------
+
+def test_parse_json_survives_the_channels_scare_quotes():
+    """Both 2026-09-22 scripts were written UNGROUNDED because the grounded reply carried a raw
+    scare quote ('the US just "destroyed" five...') and the scriptwriter's parser died on it."""
+    raw = '{"script_body": "The US just "destroyed" five boats. Sure.", "title": "t"}'
+    assert llm.parse_json_object(raw)["script_body"] == 'The US just "destroyed" five boats. Sure.'
+
+
+def test_parse_json_ignores_text_after_the_object():
+    """'Extra data: line 11 column 4' killed ideation's top-up on run 34954327606."""
+    raw = 'Sure! {"stories": [{"story": "a"}]}\nHope that helps. {"not": "this"}'
+    assert llm.parse_json(raw) == {"stories": [{"story": "a"}]}
+
+
+def test_parse_json_reads_a_bare_array():
+    """The old first-{-to-last-} slice turned `[{..}, {..}]` into `{..}, {..}`: Extra data."""
+    assert llm.parse_json('```json\n[{"a": 1}, {"b": 2}]\n```') == [{"a": 1}, {"b": 2}]
+
+
+def test_parse_json_tolerates_raw_newlines_in_strings():
+    assert llm.parse_json_object('{"caption": "line one\nline two"}')["caption"] == \
+        "line one\nline two"
+
+
+def test_parse_json_raises_valueerror_when_there_is_nothing_to_parse():
+    with pytest.raises(ValueError):
+        llm.parse_json("no json here at all")
+    with pytest.raises(ValueError):
+        llm.parse_json_object("[1, 2]")
+
+
+def test_groq_retries_an_empty_json_completion_with_more_room(monkeypatch):
+    """gpt-oss bills its reasoning against max_tokens; an EMPTY failed_generation means the
+    budget ran out before any content (seen at 200 and at 1024 tokens)."""
+    budgets = []
+
+    class _Completions:
+        @staticmethod
+        def create(**kw):
+            budgets.append(kw["max_tokens"])
+            if len(budgets) == 1:
+                raise RuntimeError("Error code: 400 - {'error': {'code': 'json_validate_failed', "
+                                   "'failed_generation': ''}}")
+            msg = type("M", (), {"content": '{"ok": 1}'})()
+            return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
+
+    client = type("G", (), {"chat": type("Ch", (), {"completions": _Completions})()})()
+    monkeypatch.setattr(llm, "_groq_client", lambda: client)
+    assert llm._gen_groq("json please", json=True, max_tokens=512) == '{"ok": 1}'
+    assert budgets == [512, 1024]
+
+
+def test_a_dropped_connection_on_a_grounded_call_is_retried():
+    """Under FACTCHECK_STRICT one network blip on the gate's call held a reel back."""
+    assert llm._retry_wait(RuntimeError("Server disconnected without sending a response.")) == 2.0
+    assert llm._retry_wait(RuntimeError("400 INVALID_ARGUMENT")) is None

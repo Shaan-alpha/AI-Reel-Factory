@@ -7,6 +7,7 @@ piece is unavailable (offline / no FFmpeg).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 import pytest
@@ -111,10 +112,10 @@ def test_build_cmd_structure(monkeypatch):
     cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
     # two video inputs + one audio input
     assert cmd.count("-i") == 3
-    assert "2:a" in cmd  # narration mapped directly when no music
     assert cmd[cmd.index("narr.mp3") - 1] == "-i"
-    # audio is the last input → mapped as stream index 2
-    assert "-map" in cmd and "2:a" in cmd
+    # audio is the last input (stream index 2), leveled and limited into [aout]
+    fc0 = cmd[cmd.index("-filter_complex") + 1]
+    assert "[2:a]volume=" in fc0 and "[aout]" in cmd
     assert "[v]" in cmd
     # trimmed to the narration duration and H.264 / yuv420p for compatibility
     assert "-t" in cmd and "9.000" in cmd
@@ -126,9 +127,12 @@ def test_build_cmd_structure(monkeypatch):
 
 def test_grade_filters_present_by_default(monkeypatch):
     for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
-        monkeypatch.delenv(k, raising=False)  # defaults on
+        monkeypatch.delenv(k, raising=False)
     f = assembly._grade_filters()
-    assert "eq=contrast=" in f and "vignette" in f and "noise=" in f
+    # Grade and vignette on; grain off by default since 2026-09-27 (incompressible noise).
+    assert "eq=contrast=" in f and "vignette" in f and "noise=" not in f
+    monkeypatch.setenv("ENABLE_GRAIN", "true")
+    assert "noise=" in assembly._grade_filters()
 
 
 def test_grade_filters_empty_when_all_disabled(monkeypatch):
@@ -319,7 +323,8 @@ def test_sfx_event_times_land_on_the_xfade_cuts(monkeypatch):
     monkeypatch.setenv("SFX_EVERY_N_CUTS", "1")
     events = assembly._build_sfx_events(_ordered(6), 30.0)
     step = 4.0 - 0.5
-    assert [e["time"] for e in events] == [pytest.approx(i * step) for i in range(1, 6)]
+    # Clicks only since 2026-09-27: the odd slots (the even ones were the whoosh).
+    assert [e["time"] for e in events] == [pytest.approx(i * step) for i in (1, 3, 5)]
 
 
 def test_sfx_volume_zero_disables_events(monkeypatch):
@@ -345,7 +350,7 @@ def test_build_cmd_mixes_sfx_and_limits_the_sum(tmp_path, monkeypatch):
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "[2:a]" in graph, "SFX must be added as the input after the narration"
     assert "amix=inputs=2" in graph
-    assert "alimiter=limit=0.95" in graph
+    assert "alimiter=limit=0.7079" in graph
     assert cmd[cmd.index("-map") + 1] == "[v]"
 
 
@@ -359,18 +364,18 @@ def test_build_cmd_sfx_plus_music_keeps_input_indices_straight(tmp_path, monkeyp
                               sfx_path=str(sfx), music_path="bed.mp3")
     graph = cmd[cmd.index("-filter_complex") + 1]
     # inputs: 0,1 clips · 2 narration · 3 sfx · 4 music
-    assert "[4:a]volume=0.10[abg]" in graph
-    assert "[2:a][3:a][abg]amix=inputs=3" in graph
+    assert "[4:a]volume=0.100[bed]" in graph
+    assert "[3:a]volume=0.00dB[sfx]" in graph
+    assert "[voice][sfx][bed]amix=inputs=3" in graph
     assert "alimiter" in graph
 
 
-def test_build_cmd_without_sfx_is_unchanged(monkeypatch):
-    """No SFX → no limiter and no extra input: the path that ships today must not shift."""
+def test_build_cmd_without_sfx_adds_no_input(monkeypatch):
+    """No SFX → no extra input; the narration is still leveled and limited into [aout]."""
     monkeypatch.setenv("ENABLE_BRAND_BUG", "false")
     cmd = assembly._build_cmd(_ordered(2), "narr.mp3", 9.0, "out.mp4")
-    graph = cmd[cmd.index("-filter_complex") + 1]
-    assert "alimiter" not in graph
-    assert cmd[cmd.index("-map", cmd.index("-map") + 1) + 1] == "2:a"
+    assert cmd.count("-i") == 3
+    assert cmd[cmd.index("-map", cmd.index("-map") + 1) + 1] == "[aout]"
 
 
 # --- live end-to-end render ------------------------------------------------------------
@@ -479,11 +484,70 @@ def test_music_only_mix_is_limited(monkeypatch, tmp_path):
     assert "alimiter" in fg, "a summed mix must be limited, with or without SFX"
 
 
-def test_narration_only_render_is_not_limited(monkeypatch, tmp_path):
-    """No mix, no summing, nothing to limit — don't touch a clean voice track."""
+def test_narration_only_render_is_limited_once_it_is_gained(monkeypatch, tmp_path):
+    """The voice is now raised to TARGET_LUFS, so even an unmixed render needs the limiter."""
     cmd = assembly._build_cmd([("a.mp4", 0.0), ("b.mp4", 0.0)], "n.wav", 20.0,
-                              str(tmp_path / "o.mp4"), music_path=None, sfx_path=None)
-    assert "alimiter" not in " ".join(cmd)
+                              str(tmp_path / "o.mp4"), music_path=None, sfx_path=None,
+                              levels={"voice_pre": 0.0, "voice_post": 6.0})
+    fg = " ".join(cmd)
+    assert "volume=6.00dB[voice]" in fg and "alimiter" in fg
+
+
+def test_measured_levels_drive_the_mix(monkeypatch, tmp_path):
+    """Published Shorts measured -16.8 to -22.7 LUFS with nothing setting the level."""
+    monkeypatch.setenv("ENABLE_BRAND_BUG", "false")
+    lv = {"voice_pre": 1.5, "voice_post": 7.0, "compress": True, "sfx": 6.0, "bed": -35.2,
+          "music_start": 42.0}
+    cmd = assembly._build_cmd(_ordered(2), "n.wav", 20.0, "o.mp4", music_path="bed.mp3",
+                              levels=lv)
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert "[2:a]volume=1.50dB,asplit=2[vref][vkey]" in fg
+    assert "acompressor=" in fg and "volume=7.00dB[voice]" in fg
+    assert "[3:a]volume=-35.20dB,afade=t=in:d=0.3[bg]" in fg
+    assert "sidechaincompress=threshold=0.02:ratio=2.5" in fg   # the de-pumped duck
+    assert "adelay=120" in fg and "adelay=240" in fg           # the held key
+    assert cmd[cmd.index("bed.mp3") - 5:cmd.index("bed.mp3")] == [
+        "-ss", "42.00", "-stream_loop", "-1", "-i"]
+    assert "-ar" in cmd and cmd[cmd.index("-ar") + 1] == "48000"
+
+
+def test_plain_retry_drops_an_unducked_bed_further(monkeypatch):
+    lv = {"voice_pre": 0.0, "voice_post": 6.0, "bed": -30.0}
+    cmd = assembly._build_cmd(_ordered(2), "n.wav", 20.0, "o.mp4", music_path="bed.mp3",
+                              polish=False, levels=lv)
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert "sidechaincompress" not in fg
+    assert "volume=-30.00dB,volume=-10.0dB[bed]" in fg
+
+
+def test_a_bad_music_volume_cannot_break_the_graph(monkeypatch):
+    """It was pasted in raw: `volume=abc` failed the polished render AND the plain retry."""
+    monkeypatch.setenv("MUSIC_VOLUME", "abc")
+    assert assembly._music_volume() == 0.10
+    monkeypatch.setenv("MUSIC_VOLUME", "7")
+    assert assembly._music_volume() == 1.0
+
+
+def test_levels_fall_back_to_fixed_when_the_narration_cannot_be_measured(monkeypatch):
+    monkeypatch.setattr(assembly, "_loudness", lambda *a, **k: None)
+    assert assembly._measure_levels("n.wav", "bed.mp3", 20.0) == {}
+
+
+def test_levels_put_the_voice_on_target_and_the_bed_under_it(monkeypatch):
+    reads = iter([-21.0, -24.5, -12.0])  # raw voice, voice after compression at ref, bed
+    monkeypatch.setattr(assembly, "_loudness", lambda *a, **k: next(reads))
+    monkeypatch.setattr(assembly, "_music_start", lambda *a: 0.0)
+    lv = assembly._measure_levels("n.wav", "bed.mp3", 20.0)
+    assert lv["voice_pre"] == 1.0                       # -21 -> the -20 reference
+    assert lv["voice_post"] == 10.5                     # -24.5 -> -14
+    assert lv["bed"] == -14.0 - 11.0 - (-12.0)          # 11 LU under the voice
+    assert lv["sfx"] == 7.0
+
+
+def test_loudnorm_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv("ENABLE_LOUDNORM", "false")
+    monkeypatch.setattr(assembly, "_loudness", lambda *a, **k: pytest.fail("must not measure"))
+    assert assembly._measure_levels("n.wav", None, 20.0) == {}
 
 
 def test_seamless_loop_noops_when_only_the_opening_slice_is_visible(monkeypatch):
@@ -503,3 +567,61 @@ def test_seamless_loop_noops_when_only_the_opening_slice_is_visible(monkeypatch)
         assert out == ordered, (
             f"dur={duration}: only slice 0 is visible, so the list must be left alone rather "
             "than reprising onto a trimmed-away slice")
+
+
+def test_the_whoosh_sting_is_gone(monkeypatch):
+    """Operator, 2026-09-27: remove the whoosh. Clicks keep their old, sparser slots."""
+    monkeypatch.setenv("CLIP_SECONDS", "3.5")
+    monkeypatch.setenv("ENABLE_XFADE", "false")
+    monkeypatch.delenv("SFX_EVERY_N_CUTS", raising=False)
+    events = assembly._build_sfx_events(_ordered(12), 40.0)
+    assert events and {e["name"] for e in events} == {"click"}
+
+
+def test_grain_is_off_by_default_and_the_logo_clears_the_top_icons(monkeypatch, tmp_path):
+    monkeypatch.delenv("ENABLE_GRAIN", raising=False)
+    assert "noise=" not in assembly._grade_filters()
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"x")
+    monkeypatch.setenv("BRAND_LOGO", str(logo))
+    cmd = assembly._build_cmd(_ordered(2), "n.wav", 9.0, "o.mp4")
+    assert "overlay=W-w-44:240" in cmd[cmd.index("-filter_complex") + 1]
+
+
+def test_rendered_loudness_lands_on_target(tmp_path):
+    """Measure the OUTPUT, not the filter string. Every audio test used to assert substrings,
+    which is how 489 green tests coexisted with reels 3-9 dB too quiet and SFX switched on
+    unannounced. Synthetic inputs: a speech-like tone burst over a pink-noise bed."""
+    import shutil
+    import subprocess
+
+    ff = shutil.which("ffmpeg")
+    if not ff:
+        pytest.skip("needs ffmpeg")
+    narr, bed, clip = (str(tmp_path / n) for n in ("narr.wav", "bed.wav", "c.mp4"))
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=220:sample_rate=24000:duration=12,"
+                    "volume='if(lt(mod(t,1.4),1.0),0.25,0.0)':eval=frame",
+                    "-ac", "1", narr], check=True, capture_output=True)
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i", "anoisesrc=color=pink:duration=60:amplitude=0.3",
+                    "-ac", "1", bed], check=True, capture_output=True)
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:d=12:r=30",
+                    "-c:v", "libx264", "-preset", "ultrafast", clip], check=True, capture_output=True)
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copyfile(bed, music_dir / "bed.wav")
+    env = {"MUSIC_DIR": str(music_dir), "ENABLE_SFX": "false", "ENABLE_BRAND_BUG": "false"}
+    old = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    try:
+        out = assembly.assemble(narr, [clip], str(tmp_path / "out.mp4"))
+    finally:
+        for k, v in old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    err = subprocess.run([ff, "-hide_banner", "-nostats", "-i", out, "-af", "ebur128=peak=true",
+                          "-f", "null", "-"], capture_output=True, text=True).stderr
+    summary = err[err.rfind("Summary:"):]
+    loud = float(re.search(r"I:\s+(-?[\d.]+) LUFS", summary).group(1))
+    peak = float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary).group(1))
+    assert -16.0 <= loud <= -12.5, loud
+    assert peak <= -0.5, peak

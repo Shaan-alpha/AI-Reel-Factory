@@ -36,6 +36,13 @@ class _FakeQuery:
     def eq(self, *_a, **_kw):
         return self
 
+    def neq(self, *_a, **_kw):
+        return self
+
+    def in_(self, _column, values):
+        self._store.in_ids = set(values)
+        return self
+
     def limit(self, n):
         self._limit = n
         return self
@@ -212,3 +219,24 @@ def test_expire_stale_pending_ideas_is_off_unless_configured(monkeypatch):
     monkeypatch.setattr(dbm, "get_client", _never)
     monkeypatch.setenv("IDEA_MAX_AGE_HOURS", "0")
     assert dbm.expire_stale_pending_ideas() == 0
+
+
+def test_winners_come_from_recent_shorts_and_at_most_two_per_story(monkeypatch):
+    """4 of the 6 winners were Iran/oil/Middle East, and the list had not changed since 08-26."""
+    titles = {1: "US vs Iran: The Oil Threat", 2: "India Caught in US-Iran Oil Crossfire",
+              3: "Iran Oil Sanctions Hit Asia", 4: "Rupee Hits a Record Low",
+              5: "ISRO Launches Crew Capsule Test", 6: "Chess Olympiad Gold for India"}
+    views = {1: 1200, 2: 1100, 3: 1050, 4: 900, 5: 800, 6: 700}
+    analytics = [_snapshot(p, views[p], titles[p], row_id=p) for p in titles]
+    _install(monkeypatch, analytics, [{"id": p} for p in titles])
+    out = db.top_performing_titles(5)
+    assert sum("Iran" in o for o in out) == 2, out
+    assert any("Rupee" in o for o in out)
+
+
+def test_low_performers_are_the_bottom_of_the_recent_window(monkeypatch):
+    analytics = [_snapshot(p, 100 * p, f"Story number {p}", row_id=p) for p in range(1, 13)]
+    _install(monkeypatch, analytics, [{"id": p} for p in range(1, 13)])
+    lows = db.low_performing_titles(3)
+    assert lows == ['"Story number 3" — 300 views', '"Story number 2" — 200 views',
+                    '"Story number 1" — 100 views']

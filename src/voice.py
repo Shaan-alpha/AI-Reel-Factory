@@ -88,12 +88,21 @@ _GEMINI_TTS_STABLE = "gemini-2.5-flash-preview-tts"
 # Retryable upstream states: capacity/outage, not "your request is wrong". A 429 is deliberately
 # NOT here — out of quota means the next model shares the same daily reset, so re-asking just
 # burns time before the engine chain does its job (rules 11, 13).
-_TRANSIENT_MARKERS = ("503", "unavailable", "500", "internal", "504", "deadline", "overloaded")
+#
+# The network-level markers (disconnected / timed out / connection reset / protocolerror) were
+# added 2026-09-27: on 2026-09-15 the SDK raised httpx's RemoteProtocolError ("Server
+# disconnected without sending a response."), none of the status markers matched, and the reel
+# skipped the same-voice fallback model and shipped in Chirp's voice. The exception's class name
+# is matched too, because httpx's timeout messages do not always say "timeout".
+_TRANSIENT_MARKERS = ("503", "unavailable", "500", "internal", "504", "deadline", "overloaded",
+                      "disconnected", "timed out", "timeout", "connection reset",
+                      "connection aborted", "protocolerror", "connecterror")
 
 
 def _is_transient(exc: Exception) -> bool:
     """True if `exc` looks like an upstream blip worth trying another model for."""
-    return any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(m in text for m in _TRANSIENT_MARKERS)
 # Structured per Google's own style-prompt guidance: an audio profile, then director's notes on
 # pacing and inflection, then paralinguistic detail. Their docs are explicit that naming an
 # emotion ("sarcastic") underperforms describing what it SOUNDS like -- and for this channel the
@@ -295,8 +304,98 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     return out_path, duration
 
 
-def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
-    """Synthesize via the Gemini Developer API TTS models. Returns (wav_path, seconds).
+# Models Vertex serves with the channel voice (measured 2026-09-27). Vertex 404s the 3.8 TTS
+# models, so they can only ever be a Developer-API attempt.
+_GEMINI_TTS_VERTEX_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-tts")
+# The GA model on Vertex: the last same-voice attempt before the chain leaves Gemini.
+_GEMINI_TTS_VERTEX_STABLE = "gemini-2.5-flash-tts"
+# Values of VOICE_STYLE_PROMPT that mean "no direction at all". An empty value cannot say that:
+# config.get treats "" as unset, which is how CI passes an absent repo variable (55544f1).
+_STYLE_OFF = ("off", "none", "false", "0")
+# Below this many words per second the model read more than the script (the style prompt, most
+# likely). Normal narration measures 2.2-2.7 wps on this channel; the 3.8 read-aloud was 1.3.
+_MIN_WORDS_PER_SECOND = 1.5
+
+
+# For stories about deaths or serious harm (scriptwriter.tone_for): the channel's dry,
+# "faintly unimpressed" read would sound like mocking the people affected.
+_SOMBER_STYLE_PROMPT = (
+    "You are a calm, measured news explainer speaking to one person. Read at an unhurried pace "
+    "with quiet seriousness and warmth. No irony and no amusement anywhere; let the facts carry "
+    "the weight, and read the final line plainly, as though it matters."
+)
+# In a somber read only these tags survive: the rest are the channel's sarcasm.
+_SOMBER_TAGS = ("serious", "sighs")
+
+
+def _style_prompt(tone: str | None = None) -> str:
+    """VOICE_STYLE_PROMPT, the default director's notes, or "" when switched off. A somber
+    story gets the somber notes instead (unless the style prompt is switched off)."""
+    raw = (config.get("VOICE_STYLE_PROMPT", _DEFAULT_STYLE_PROMPT) or "").strip()
+    if raw.lower() in _STYLE_OFF:
+        return ""
+    return _SOMBER_STYLE_PROMPT if tone == "somber" else raw
+
+
+def _tts_contents(model: str, style: str, spoken: str) -> str:  # noqa: ARG001 — kept per-model
+    """The request text: the style prompt in a labelled DIRECTOR'S NOTES section, then the
+    transcript, for every model.
+
+    The plain layout ("{style}\n\n{text}") is what caused the intermittent 400s. Measured
+    2026-09-28 on gemini-3.1-flash-tts-preview (Vertex), same text and style: plain failed 4 of 4
+    with 400 INVALID_ARGUMENT, labelled succeeded 4 of 4. That is the idea-292 failure that
+    shipped a reel in Chirp's voice. The plain layout was also read ALOUD by gemini-3.8-flash-tts
+    (a 47.5 s render opening "You are a sharp, faintly unimpressed...") and by gemini-2.5-flash-tts
+    on a short line. Same style prompt either way; only the framing changed."""
+    if not style:
+        return spoken
+    return (f"### DIRECTOR'S NOTES (do not read aloud)\n{style}\n\n"
+            f"### TRANSCRIPT (read only this)\n{spoken}")
+
+
+def _vertex_tts_enabled() -> bool:
+    """Use Vertex AI as a same-voice fallback? Needs the Vertex setup CI already has
+    (GEMINI_USE_VERTEX + GCP_PROJECT, credentials via ADC / Workload Identity Federation)."""
+    return (config.get_bool("GEMINI_TTS_VERTEX_FALLBACK", True)
+            and config.get_bool("GEMINI_USE_VERTEX", False) and bool(config.get("GCP_PROJECT")))
+
+
+def _gemini_tts_attempts(model: str, have_key: bool) -> list[tuple[str, str]]:
+    """(backend, model) pairs to try, in order. Every one speaks with the same voice.
+
+    Developer API first (free), then the same model on Vertex, which has separate capacity: the
+    2026-09-15 reels lost the channel voice to Chirp when the Developer API 503'd on BOTH its
+    models at once. Then the stable preview, then Vertex's GA model."""
+    vertex = _vertex_tts_enabled()
+    pairs = []
+    if have_key:
+        pairs.append(("dev", model))
+    if vertex and model in _GEMINI_TTS_VERTEX_MODELS:
+        pairs.append(("vertex", model))
+    if have_key:
+        pairs.append(("dev", _GEMINI_TTS_STABLE))
+    if vertex:
+        pairs.append(("vertex", _GEMINI_TTS_VERTEX_STABLE))
+    seen, out = set(), []
+    for p in pairs:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def _tts_timeout_ms() -> int:
+    """Per-request timeout. The SDK default is NONE, so a stalled connection could hold the reel
+    until the 60-minute job limit killed the whole batch. Renders measured 3.4-22 s."""
+    try:
+        return max(10, int(float(config.get("GEMINI_TTS_TIMEOUT_SECONDS", "120")))) * 1000
+    except (TypeError, ValueError):
+        return 120_000
+
+
+def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
+                       tone: str | None = None) -> tuple[str, float]:
+    """Synthesize via Gemini TTS. Returns (wav_path, seconds); fills meta["model"] if given.
 
     Uses the already-pinned google-genai SDK and the existing GEMINI_API_KEY, so this adds no
     dependency and no new credential. Style comes from VOICE_STYLE_PROMPT plus the inline style
@@ -308,18 +407,27 @@ def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
 
     Default model is the FREE one. gemini-2.5-pro-preview-tts has no free tier, so selecting it
     is a deliberate act, not a default.
+
+    The channel's voice identity (Zubenelgenubi, picked by ear) exists ONLY on this engine, so
+    every failure first tries the next same-voice attempt (_gemini_tts_attempts) before the
+    engine chain may hand the reel to Chirp. ANY error advances, not only a transient one: a 429
+    is per model, and the 400 on idea 292 (2026-09-12) was intermittent — idea 291 voiced with
+    the same setup 2.5 minutes later — yet it ended the engine and shipped the reel in Chirp's
+    voice.
     """
-    import wave
+    import time
 
     from google import genai
     from google.genai import types
 
     key = (config.get("GEMINI_TTS_API_KEY") or config.get("GEMINI_API_KEY") or "").strip()
-    if not key:
+    model = config.get("GEMINI_TTS_MODEL", _GEMINI_TTS_PRIMARY)
+    attempts = _gemini_tts_attempts(model, have_key=bool(key))
+    if not attempts:
         raise RuntimeError("gemini tts: GEMINI_TTS_API_KEY / GEMINI_API_KEY not set")
 
-    spoken = _style_text(text)  # keep style tags, degrade pause tags to an ellipsis
-    style = config.get("VOICE_STYLE_PROMPT", _DEFAULT_STYLE_PROMPT)
+    spoken = _style_text(text, tone)  # keep style tags, degrade pause tags to an ellipsis
+    style = _style_prompt(tone)
 
     # The API caps text and prompt at 4000 bytes each, 8000 combined. Check before spending a
     # request: the free tier is only 10/day, so an opaque 400 would cost real quota (rule 13).
@@ -329,62 +437,100 @@ def _synthesize_gemini(text: str, out_dir: str) -> tuple[str, float]:
         raise RuntimeError(
             f"gemini tts: input too long (script {t_bytes}B, style {p_bytes}B; limits are "
             f"{_GEMINI_MAX_FIELD_BYTES}B each / {_GEMINI_MAX_TOTAL_BYTES}B combined)")
-    model = config.get("GEMINI_TTS_MODEL", _GEMINI_TTS_PRIMARY)
     # Zubenelgenubi ("Casual") was chosen by ear over Kore/Schedar/Algenib/Charon — it is the
     # channel's voice identity now, not an incidental default. Re-pick via tools/tune_voice.py.
     voice_name = config.get("GEMINI_TTS_VOICE", "Zubenelgenubi")
-
-    client = genai.Client(api_key=key)
     cfg = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
+        # No tools here; the SDK only warns about automatic function calling on every call.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
             )
         ),
     )
+    http = types.HttpOptions(timeout=_tts_timeout_ms())
+    clients: dict = {}
 
-    # Try the configured model, then the stable free one. The channel's voice identity
-    # (Zubenelgenubi, picked by ear) exists ONLY on the Gemini engine, so letting a transient
-    # blip fall straight through to Chirp would silently change how the channel sounds for that
-    # reel. The preview TTS models are genuinely flaky — gemini-3.1-flash-tts-preview returned
-    # 503 "high demand" on two probes 20 minutes apart on 2026-08-07 — so staying inside the
-    # engine one extra step is worth more here than it looks (rule 11).
-    attempts = [model] + ([_GEMINI_TTS_STABLE] if model != _GEMINI_TTS_STABLE else [])
-    resp = last_err = None
-    for attempt in attempts:
-        try:
-            resp = client.models.generate_content(
-                model=attempt, contents=f"{style}\n\n{spoken}", config=cfg)
-            if attempt != model:
-                log.warning("gemini tts: %s unavailable (%s) — fell back to %s, same voice",
-                            model, str(last_err)[:120], attempt)
-            break
-        except Exception as e:  # noqa: BLE001 — try the next model, then let the engine chain run
-            last_err = e
-            if not _is_transient(e):
-                raise
-    if resp is None:
-        raise RuntimeError(f"gemini tts: all models failed ({last_err})") from last_err
+    def _client(backend: str):
+        if backend not in clients:
+            clients[backend] = (genai.Client(api_key=key, http_options=http) if backend == "dev"
+                                else genai.Client(vertexai=True,
+                                                  project=config.get("GCP_PROJECT"),
+                                                  location=config.get("GCP_LOCATION", "global"),
+                                                  http_options=http))
+        return clients[backend]
 
-    try:
-        pcm = resp.candidates[0].content.parts[0].inline_data.data
-    except (AttributeError, IndexError, TypeError) as e:
-        raise RuntimeError(f"gemini tts: unexpected response shape ({e})") from e
-    if not pcm:
-        raise RuntimeError("gemini tts: empty audio")
-
-    # The response is RAW PCM, not a WAV container — without this wrapper nothing downstream
-    # (ffprobe, assembly, whisper) can read the file.
     out_path = os.path.join(out_dir, _audio_filename(spoken, ".wav"))
+    words = len(_clean_tts_text(text).split())
+    errors: list[str] = []
+    for i, (backend, attempt) in enumerate(attempts):
+        try:
+            resp = _client(backend).models.generate_content(
+                model=attempt, contents=_tts_contents(attempt, style, spoken), config=cfg)
+            try:
+                inline = resp.candidates[0].content.parts[0].inline_data
+                audio = inline.data
+            except (AttributeError, IndexError, TypeError) as e:
+                # Usually a 200 with no content: the model declined (finish_reason OTHER, SAFETY,
+                # ...). Say which, so the log is actionable.
+                reason = getattr((getattr(resp, "candidates", None) or [None])[0],
+                                 "finish_reason", None)
+                raise RuntimeError(f"no audio in the response (finish_reason={reason}; {e})") from e
+            if not audio:
+                raise RuntimeError("empty audio")
+            duration = _write_gemini_audio(audio, getattr(inline, "mime_type", "") or "",
+                                           out_path)
+            if duration > 8 and words / duration < _MIN_WORDS_PER_SECOND:
+                raise RuntimeError(
+                    f"{duration:.1f}s for {words} words: it read more than the script")
+        except Exception as e:  # noqa: BLE001 — next same-voice attempt, then the engine chain
+            errors.append(f"{backend}:{attempt}: {str(e)[:160]}")
+            log.warning("gemini tts: %s on %s failed (%s)", attempt, backend, str(e)[:200])
+            if _is_transient(e) and i < len(attempts) - 1:
+                time.sleep(2)
+            continue
+        if i:
+            log.warning("gemini tts: voiced by %s on %s after %d failed attempt(s), same voice",
+                        attempt, backend, i)
+        if meta is not None:
+            meta["model"] = f"{attempt}@{backend}"
+        return out_path, duration
+    raise RuntimeError("gemini tts: all attempts failed — " + " | ".join(errors))
+
+
+def _mime_param(mime: str, name: str, default: int) -> int:
+    m = re.search(rf"\b{name}=(\d+)", mime)
+    return int(m.group(1)) if m else default
+
+
+def _write_gemini_audio(audio: bytes, mime: str, out_path: str) -> float:
+    """Write a Gemini TTS response to `out_path` as a WAV; return its duration in seconds.
+
+    The format differs by model (measured 2026-09-27): 3.1 and 2.5 answer raw PCM declared as
+    `audio/l16; rate=24000`, which needs a WAV header before ffprobe, assembly or whisper can
+    read it, while 3.8 answers `audio/wav`, a complete RIFF file that must be kept as it is. So
+    the container and the sample rate come from the response, not from a constant.
+    """
+    import io
+    import wave
+
+    if audio[:4] == b"RIFF":
+        with wave.open(io.BytesIO(audio), "rb") as w:
+            duration = w.getnframes() / float(w.getframerate())
+        with open(out_path, "wb") as f:
+            f.write(audio)
+        return duration
+
+    rate = _mime_param(mime.lower(), "rate", _GEMINI_TTS_RATE)
+    channels = _mime_param(mime.lower(), "channels", 1)
     with wave.open(out_path, "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(channels)
         w.setsampwidth(2)
-        w.setframerate(_GEMINI_TTS_RATE)
-        w.writeframes(pcm)
-    with wave.open(out_path, "rb") as w:
-        duration = w.getnframes() / float(w.getframerate())
-    return out_path, duration
+        w.setframerate(rate)
+        w.writeframes(audio)
+    return len(audio) / float(2 * channels * rate)
 
 
 def _stream_chunks(text: str, voice: str, rate: str):
@@ -422,9 +568,11 @@ _ENGINE_ALIASES = {"edge-tts": "edge", "chirp": "google", "google-tts": "google"
                    "gemini-tts": "gemini"}
 
 
-def _engine_gemini(text: str, out_dir: str) -> tuple[str, float]:
-    path, dur = _synthesize_gemini(text, out_dir)
-    _log_done(path, dur, f"gemini:{config.get('GEMINI_TTS_MODEL', _GEMINI_TTS_PRIMARY)}")
+def _engine_gemini(text: str, out_dir: str, meta: dict | None = None) -> tuple[str, float]:
+    info = meta if meta is not None else {}
+    path, dur = _synthesize_gemini(text, out_dir, info, tone=info.get("tone"))
+    # The model that SPOKE, not the configured one: they differ whenever a fallback ran.
+    _log_done(path, dur, f"gemini:{info.get('model', '?')}")
     return path, dur
 
 
@@ -538,22 +686,28 @@ def _pause_markup(text: str) -> str:
     return _filter_tags(text, _PAUSE_TAGS, _tag_limit("MAX_PAUSE_TAGS", 3))
 
 
-def _style_text(text: str) -> str:
+def _style_text(text: str, tone: str | None = None) -> str:
     """Gemini TTS input: keep style tags; pause tags degrade to an ellipsis so the beat survives
-    on the primary engine (Chirp's bracket pause syntax means nothing here)."""
-    return _filter_tags(text, _STYLE_TAGS, _tag_limit("MAX_STYLE_TAGS", 3),
-                        pause_as_ellipsis=True)
+    on the primary engine (Chirp's bracket pause syntax means nothing here). A somber read keeps
+    only _SOMBER_TAGS."""
+    keep = _SOMBER_TAGS if tone == "somber" else _STYLE_TAGS
+    return _filter_tags(text, keep, _tag_limit("MAX_STYLE_TAGS", 3), pause_as_ellipsis=True)
 
 
 def _has_pause_tag(text: str) -> bool:
     return bool(re.search(r"\[(?:pause short|pause long|pause)\]", text))
 
 
-def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
+def synthesize(script_body: str, out_dir: str, meta: dict | None = None,
+               tone: str | None = None) -> tuple[str, float]:
     """Return (audio_path, duration_seconds) via an ordered fallback chain (rule 11):
     google (Chirp 3 HD) → edge-tts (en-IN) → kokoro. VOICE_ENGINE picks the primary engine;
     the remaining engines follow as fallbacks. Engines are resolved by name at call time, so a
     missing key/model just advances to the next link.
+
+    `meta`, when given, is filled with what actually spoke: {"engine": name, "voice": label}.
+    Nothing recorded this before 2026-09-27, so three reels went out in Chirp's voice instead of
+    the channel's with only a log line to show for it.
 
     Raises ValueError on empty input, RuntimeError only if EVERY engine fails — the orchestrator
     skips that one reel and keeps the batch going (rule 14: soft on runtime).
@@ -576,7 +730,13 @@ def synthesize(script_body: str, out_dir: str) -> tuple[str, float]:
         if fn is None:
             continue
         try:
-            return fn(raw, out_dir)
+            inner: dict = {"tone": tone} if tone else {}
+            result = (fn(raw, out_dir, inner) if name == "gemini" and (meta is not None or tone)
+                      else fn(raw, out_dir))
+            if meta is not None:
+                meta["engine"] = name
+                meta["voice"] = f"gemini:{inner['model']}" if inner.get("model") else name
+            return result
         except Exception as e:  # noqa: BLE001 — try the next engine in the chain (rule 11)
             log.warning("voice: engine %s failed (%s); trying next", name, e)
             errors.append(f"{name}: {e}")

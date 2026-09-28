@@ -23,7 +23,7 @@ import re
 
 import requests
 
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from src import config, db, llm, news, trends
 
@@ -125,13 +125,32 @@ Return ONLY JSON:
 """
 
 
+# Ideation is the one grounded caller that needs the search's CITATIONS, not just grounded
+# text: they become each idea's sources. Measured 2026-09-27 on Vertex with the real ideation
+# prompt, two runs per model: gemini-2.5-flash returned 15 and 18 citations, while
+# gemini-3.5-flash-lite, gemini-3.5-flash and gemini-3.8-flash all SEARCHED (3 queries each) but
+# returned ZERO citation chunks. So ideation stays on 2.5 until Vertex retires it (2026-10-20),
+# then the 404 moves it to 3.5-flash-lite, where sources come from the news feed and the Google
+# News search top-up (which gave every idea two real sources in the same live run).
+_VERTEX_IDEATION_CHAIN = "gemini-2.5-flash,gemini-3.5-flash-lite"
+
+
+def _ideation_model() -> str | None:
+    """IDEATION_MODEL, or on Vertex the citation-bearing chain above. None = the grounded chain."""
+    explicit = config.get("IDEATION_MODEL")
+    if explicit:
+        return explicit
+    return _VERTEX_IDEATION_CHAIN if llm._use_vertex() else None
+
+
 def _parse_ideas(raw: str) -> list[dict]:
-    start, end = raw.find("{"), raw.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError(f"ideation_fallback: no JSON object in reply: {raw[:200]!r}")
-    # strict=False: grounded LLM JSON often has raw newlines/tabs inside string values.
-    data = json.loads(raw[start : end + 1], strict=False)
-    ideas = data.get("ideas", data if isinstance(data, list) else [])
+    # llm.parse_json: a bare array, text after the JSON and raw quotes inside strings all parse
+    # (the old first-{-to-last-} slice turned a bare array into "Extra data").
+    try:
+        data = llm.parse_json(raw)
+    except ValueError as e:
+        raise ValueError(f"ideation_fallback: {e}") from e
+    ideas = data.get("ideas", []) if isinstance(data, dict) else data
     if not isinstance(ideas, list):
         raise ValueError("ideation_fallback: 'ideas' is not a list.")
     return ideas
@@ -230,22 +249,57 @@ def _is_homepage(url: str) -> bool:
 
 
 def _resolve_redirect(url: str) -> str:
-    """Follow a citation redirect to the publisher's own URL; return `url` unchanged on failure.
+    """The publisher URL a citation redirect points to; `url` unchanged on failure.
 
     Grounded citations arrive as `vertexaisearch.cloud.google.com/grounding-api-redirect/…`
-    links, which work but read as noise in a YouTube description and expire. Resolving them once,
-    here, stores the real article URL instead. Best-effort: a failed probe must never cost us a
+    links, which read as noise in a YouTube description and expire. Resolving them once, here,
+    stores the real article URL instead. Best-effort: a failed probe must never cost us a
     citation we genuinely have (rule 11).
+
+    ONE hop, read from Google's own `Location` header. Following the whole chain meant the
+    publisher had to answer too, and a slow or bot-blocking one (the Washington Post resets bot
+    traffic) left the raw redirect in stored and published sources even though Google had
+    already said where it pointed (probed 2026-09-27: 302 with the WaPo URL).
     """
     try:
-        resp = requests.get(url, timeout=_SOURCE_TIMEOUT, allow_redirects=True,
-                            stream=True, headers={"User-Agent": _SOURCE_UA})
+        resp = requests.get(url, timeout=_SOURCE_TIMEOUT, allow_redirects=False,
+                            headers={"User-Agent": _SOURCE_UA})
         try:
-            return resp.url or url
+            location = resp.headers.get("Location") if 300 <= resp.status_code < 400 else None
         finally:
             resp.close()
+        return urljoin(url, location) if location else url
     except Exception:  # noqa: BLE001 — keep the redirect rather than lose the source
         return url
+
+
+# Words too common in news slugs to show that an article is about THIS story.
+_GENERIC_SLUG_TOKENS = {"news", "india", "world", "live", "latest", "update", "updates", "article",
+                        "story", "report", "says", "said", "amp", "html", "htm", "cms", "php",
+                        "articleshow", "business", "politics", "national", "international"}
+
+
+def _slug_tokens(url: str) -> set[str]:
+    try:
+        path = urlparse(url).path
+    except ValueError:
+        return set()
+    return {t for t in _tokens(re.sub(r"[-_/.]+", " ", path))
+            if len(t) > 1 and not t.isdigit() and t not in _GENERIC_SLUG_TOKENS}
+
+
+def _cites_this_story(idea: dict, url: str) -> bool:
+    """False when a descriptive article slug shares no distinctive word with the idea.
+
+    Published idea 301 (Iran and the UAE) went out citing three UCC articles from the same batch,
+    after the 2026-09-13 attribution fix. Grounding offsets are approximate, so a resolved URL
+    whose slug plainly names another story is dropped. A slug with fewer than three words (an id,
+    '/a/12345') says nothing either way and is kept."""
+    slug = _slug_tokens(url)
+    if len(slug) < 3:
+        return True
+    idea_toks = _tokens(" ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle")))
+    return bool(slug & (idea_toks - _GENERIC_SLUG_TOKENS))
 
 
 def _idea_spans(raw: str, ideas: list[dict]) -> list[tuple[int, int]]:
@@ -351,6 +405,10 @@ def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
                 continue
             if uri not in resolved:
                 resolved[uri] = _resolve_redirect(uri)
+            if not _cites_this_story(idea, resolved[uri]):
+                log.info("ideation_fallback: %r: dropped a citation about another story: %s",
+                         idea.get("title"), resolved[uri][:120])
+                continue
             if resolved[uri] not in publisher:
                 publisher.append(resolved[uri])
         # A homepage is dropped wherever it came from: it is live, and it cites nothing.
@@ -401,12 +459,16 @@ def _search_for_more(idea: dict, found: list[str], trusted: int | None = None) -
     # INDEPENDENT outlets corroborating each other (docs/08 §1) rather than one outlet's story
     # counted twice. The second pass then fills from repeats rather than leave a true story
     # unsourced — for a domestic item only PTI ran, one outlet twice still beats dropping it.
+    idea_toks = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
     for unique_publishers in (True, False):
         seen_publishers: set[str] = set()
         for story in results:
             url = (story.get("url") or "").strip()
             publisher = (story.get("source") or "").strip().lower()
             if not url or url in out or _is_homepage(url):
+                continue
+            # The same story, not merely the same search: two distinctive shared words.
+            if len(idea_toks & _tokens(story.get("title", ""))) < _STORY_MATCH_MIN_TOKENS:
                 continue
             if unique_publishers and publisher and publisher in seen_publishers:
                 continue
@@ -523,7 +585,7 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
     """
     if not headlines:
         return []
-    prompt = _STAGE1_PROMPT.format(
+    prompt = llm.today_line() + _STAGE1_PROMPT.format(
         n=target,
         headlines="\n".join(f"- {h}" for h in headlines),
         trending="\n".join(f"- {t}" for t in trending) or "- (none)",
@@ -531,9 +593,9 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
     )
     try:
         raw = llm.generate(prompt, json=True, max_tokens=2048, prefer_groq=True)
-        start, end = raw.find("{"), raw.rfind("}")
-        data = json.loads(raw[start : end + 1], strict=False)
-        stories = data.get("stories", []) if isinstance(data, dict) else []
+        data = llm.parse_json(raw)
+        stories = (data.get("stories", []) if isinstance(data, dict)
+                   else data if isinstance(data, list) else [])
         out: list[dict] = []
         for s in stories:
             if isinstance(s, dict) and str(s.get("story", "")).strip():
@@ -561,12 +623,16 @@ def _produce_ideas(target: int) -> list[dict]:
         "- (live trends unavailable — rely on the headlines below)"
     # Stories, not bare headlines: each carries the feed's own live article URL, which is what
     # lets an idea be cited from something we actually fetched instead of from model memory.
-    feed_stories = news.fetch_stories(12)
+    feed_stories = news.fetch_stories(int(config.get("NEWS_POOL_SIZE", "24")))
     headlines = [s["title"] for s in feed_stories]
     headlines_block = "\n".join(f"- {h}" for h in headlines) or \
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"
     try:
         winners = db.top_performing_titles(6)
+        lows = db.low_performing_titles(3)
+        if lows:
+            winners = [*winners, "LOW PERFORMERS, avoid what these have in common:",
+                       *(f"(avoid) {t}" for t in lows)]
     except Exception as e:  # noqa: BLE001 — analytics feedback is best-effort
         log.warning("ideation: could not load past winners (%s)", e)
         winners = []
@@ -582,14 +648,15 @@ def _produce_ideas(target: int) -> list[dict]:
         selected_block = ("- (no pre-selected stories — choose DISTINCT, current, "
                           "share-worthy stories yourself; never two on the same event)")
 
-    prompt = _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
+    prompt = llm.today_line() + _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
                             selected=selected_block, trending=trending_block,
                             headlines=headlines_block, winners=winners_block)
     # Stage 2: web-grounded first, INCLUDING the parse — grounded JSON is sometimes
     # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     clean: list[dict] = []
     try:
-        raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192)
+        raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192,
+                                                           model=_ideation_model())
         parsed = _parse_ideas(raw)
         clean = _validate_and_clean(_attach_real_sources(parsed, raw, grounded, feed_stories))
         if not clean:
@@ -664,6 +731,37 @@ def load_routine_ideas() -> list[dict]:
     return _validate_and_clean(ideas if isinstance(ideas, list) else [])
 
 
+def _recent_ideas() -> list[dict]:
+    try:
+        return db.recent_ideas(int(config.get("IDEA_DEDUP_DAYS", "10")))
+    except Exception as e:  # noqa: BLE001 — story dedup is a guard, not a dependency (rule 14)
+        log.warning("ideation: could not load recent ideas for story dedup (%s)", e)
+        return []
+
+
+def _repeats_recent_story(idea: dict, recent: list[dict]) -> bool:
+    """True if `idea` is a story already pitched in the last IDEA_DEDUP_DAYS, under any title.
+
+    Title-only dedup let a story the fact-check had BLOCKED (314) return 47 minutes later under
+    a new title (315) and ship the same claim; the Telegram/NEET story came back three times.
+    A shared source link, or the same distinctive words, is the same story. Rejected, blocked,
+    produced or still pending, it does not come back."""
+    mine_src = {u for u in _clean_sources(idea.get("sources")) if not _is_homepage(u)}
+    mine = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
+    for old in recent:
+        theirs_src = {u for u in _clean_sources(old.get("sources")) if not _is_homepage(u)}
+        shared_src = mine_src & theirs_src
+        theirs = _tokens(f"{old.get('title', '')} {old.get('hook', '')}")
+        shared = mine & theirs
+        same_words = (mine and theirs and len(shared) >= _STORY_MATCH_MIN_TOKENS + 1
+                      and len(shared) / min(len(mine), len(theirs)) >= _STORY_MATCH_RATIO)
+        if shared_src or same_words:
+            log.info("ideation: %r repeats recent idea %s (%s, %s); skipped.", idea.get("title"),
+                     old.get("id"), old.get("status"), "same source" if shared_src else "same story")
+            return True
+    return False
+
+
 def seed_ideas(n: int = 3) -> int:
     """Seed ~n fresh 'pending' ideas for the on-demand digest. Return the count inserted.
 
@@ -671,13 +769,24 @@ def seed_ideas(n: int = 3) -> int:
     the Gemini/Groq generator when that file is absent/empty. De-duplicates against ideas
     already in the table so repeated triggers don't re-propose the same ones.
     """
-    n = max(1, n)
+    # At least DIGEST_MIN_IDEAS go in front of the operator: every observed run asked for 1, and
+    # 3 of the 4 candidates already built and validated were thrown away (audit 2026-09-27).
+    n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "3")))
     routine = load_routine_ideas()
     pool = routine if routine else _produce_ideas(max(n * 2, 4))
     source = "routine file" if routine else "gemini/groq fallback"
 
     seen = db.existing_idea_titles()
-    fresh = sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key)[:n]
+    recent = _recent_ideas()
+    pool = [i for i in pool if not _repeats_recent_story(i, recent)]
+    fresh: list[dict] = []
+    for idea in sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key):
+        # Within the batch too: the grounded pass and the top-up pitched the same Trump/Iran and
+        # LPU stories twice each, sharing a source link (live, 2026-09-27).
+        if not _repeats_recent_story(idea, fresh):
+            fresh.append(idea)
+        if len(fresh) >= n:
+            break
     if not fresh:
         raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")
     log.info("ideation: seeding %d idea(s) from %s.", len(fresh), source)

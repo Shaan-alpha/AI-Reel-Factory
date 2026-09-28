@@ -6,7 +6,8 @@ This is the **monetization-safe** structure: the *analysis* is the original valu
 facts (YouTube 2026 Inauthentic Content policy — see playbook §1).
 
 ## Constraints
-- **25–30 seconds** → ~65–75 spoken words.
+- **25–30 seconds** → ~55–70 spoken words, never more than `SCRIPT_MAX_WORDS` (80). Over the cap,
+  an LLM tighten pass cuts to fit; truncation of whole sentences is the backstop.
 - **First 2–3 seconds = disorienting hook** — open a curiosity LOOP paid off only at the end. No throat-clearing.
 - **Rewrite facts in your own words + cite**. Never copy phrasing.
 - **Tone = Witty, sarcastic, dry comedy** (Daily Show / Phil DeFranco style) roasting the absurdity of news, but keeping facts 100% true.
@@ -29,7 +30,8 @@ Write, in this order:
 4. PUNCHY CLOSE: witty last line looping back to the hook + 2-3 word CTA.
 
 Return JSON: { "title": "...", "script_body": "...", "caption": "...", "hashtags": ["...","#Shorts"], "tags": [...], "key_points": [...] }
-Caption must include the source link(s) + an AI-disclosure line. Append #Shorts.
+Caption: hook line + why-it-matters summary + comment question. NO links: the fetched sources
+and the AI-disclosure line are appended in code, never by the model. Append #Shorts.
 ```
 
 ## Output

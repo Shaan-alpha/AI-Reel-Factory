@@ -194,6 +194,7 @@ _DECISION_TEXT = {  # same labels as src/approval.py, so both approval modes loo
     "passed": "⏭️ Passed",
     "capped": "⚠️ Daily approval cap reached — not approved",
     "unknown": "Could not process that.",
+    "stale": "Already decided — this idea is no longer waiting for a tap.",
 }
 
 
@@ -238,20 +239,36 @@ def approved_count() -> int:
     return len(sb_get("ideas?select=id&status=eq.approved"))
 
 
-def set_idea_status(idea_id: int, status: str) -> bool:
-    return sb_patch(f"ideas?id=eq.{idea_id}", {"status": status})
+def set_idea_status(idea_id: int, status: str):
+    """Move a PENDING idea to `status`: True, False (request failed), or "stale" (not pending).
+
+    Conditional on status=pending: an old digest message keeps live buttons, and a tap on one
+    used to move a rejected or produced idea back to 'approved'."""
+    base, key = _env("SUPABASE_URL"), _env("SUPABASE_KEY")
+    if not (base and key):
+        return False
+    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json",
+               "Content-Type": "application/json", "Prefer": "return=representation"}
+    code, body = _http("PATCH", f"{base}/rest/v1/ideas?id=eq.{idea_id}&status=eq.pending",
+                       headers, {"status": status})
+    if code >= 300:
+        return False
+    try:
+        return True if json.loads(body or "[]") else "stale"
+    except ValueError:
+        return True
 
 
 def apply_callback_action(action: str, idea_id: int) -> str:
-    if action == "a":
-        if approved_count() >= approval_cap():
-            return "capped"
-        return "approved" if set_idea_status(idea_id, "approved") else "unknown"
-    if action == "r":
-        return "rejected" if set_idea_status(idea_id, "rejected") else "unknown"
-    if action == "p":
-        return "passed" if set_idea_status(idea_id, "passed") else "unknown"
-    return "unknown"
+    status = {"a": "approved", "r": "rejected", "p": "passed"}.get(action)
+    if status is None:
+        return "unknown"
+    if status == "approved" and approved_count() >= approval_cap():
+        return "capped"
+    result = set_idea_status(idea_id, status)
+    if result == "stale":
+        return "stale"
+    return status if result else "unknown"
 
 
 def handle_callback(cq: dict) -> None:
@@ -364,8 +381,13 @@ class handler(BaseHTTPRequestHandler):
         self._reply(200, "reel-factory bot ok")
 
     def do_POST(self):
-        secret = _env("WEBHOOK_SECRET")
-        if secret and self.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
+        # Fail CLOSED: with WEBHOOK_SECRET or TELEGRAM_CHAT_ID missing, anyone who found the URL
+        # could approve ideas or dispatch runs. A misconfigured bot answers 503 and does nothing.
+        secret, chat = _env("WEBHOOK_SECRET"), _env("TELEGRAM_CHAT_ID")
+        if not (secret and chat):
+            self._reply(503, "bot not configured")
+            return
+        if self.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
             self._reply(401, "unauthorized")
             return
         length = int(self.headers.get("Content-Length") or 0)

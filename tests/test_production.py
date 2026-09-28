@@ -29,6 +29,13 @@ SCRIPT = {"script_id": 70, "script_body": "body words " * 20,
           "caption": "cap https://x.example\n#Shorts", "hashtags": ["#ISRO", "#Shorts"]}
 
 
+
+def _fake_synth(body, d, meta=None, tone=None):
+    """A normal render: the channel voice spoke."""
+    if meta is not None:
+        meta.update(engine="gemini", voice="gemini:gemini-3.1-flash-tts-preview@dev")
+    return "a.mp3", 30.0
+
 def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     """Mock the whole chain so produce_one runs without side effects."""
     monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: SCRIPT)
@@ -36,21 +43,22 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     # network calls and burns the shared 20/day grounded quota (rule 13) — and passes for the
     # wrong reason, because a 429 takes the fail-open path.
     monkeypatch.setattr(production.factcheck, "verify",
-                        lambda body, sources=None, title="": {
+                        lambda body, sources=None, title="", on_screen=None: {
                             "ok": factcheck_ok,
                             "unsupported": [] if factcheck_ok else ["the 40% figure is invented"],
                             "checked": 3, "reason": "pass" if factcheck_ok else "fail"})
     monkeypatch.setattr(production.db, "get_published_post_for_idea",
                         lambda idea_id, plat="youtube": existing_post)
-    monkeypatch.setattr(production.voice, "synthesize", lambda body, d: ("a.mp3", 30.0))
+    monkeypatch.setattr(production.voice, "synthesize", _fake_synth)
     monkeypatch.setattr(production.visuals, "extract_keywords", lambda body: ["rocket"])
-    monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d: ["c1.mp4"])
+    monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d, setting=None: ["c1.mp4"])
     monkeypatch.setattr(production.assembly, "assemble", lambda a, c, o: o)
     monkeypatch.setattr(production.subtitles, "burn_captions", lambda v, a, o, **k: o)
     monkeypatch.setattr(production.publish_youtube, "publish",
                         lambda v, m, sid: ("VID1", "https://www.youtube.com/shorts/VID1"))
     produced = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: produced.append((i, s)))
+    monkeypatch.setattr(production.db, "set_script_factcheck", lambda *a, **k: None)
     return produced
 
 
@@ -247,13 +255,13 @@ def test_factcheck_failure_blocks_the_reel_before_any_render(monkeypatch, tmp_pa
     produced = _wire_happy(monkeypatch, factcheck_ok=False)
     rendered = []
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d: rendered.append("voice") or ("a.mp3", 30.0))
+                        lambda body, d, meta=None, tone=None: rendered.append("voice") or ("a.mp3", 30.0))
 
     with pytest.raises(production.FactCheckFailed, match="40%"):
         production.produce_one(IDEA, str(tmp_path))
 
     assert rendered == [], "nothing may render after a failed fact check"
-    assert (7, "rejected") in produced, "the idea must drop out of the queue, not retry forever"
+    assert (7, "blocked") in produced, "the idea must drop out of the queue, not retry forever"
 
 
 def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(monkeypatch, tmp_path):
@@ -264,18 +272,18 @@ def test_strict_mode_holds_back_an_unchecked_reel_without_rejecting_the_idea(mon
     about a story nobody had checked.
     """
     produced = _wire_happy(monkeypatch)
-    monkeypatch.setattr(production.factcheck, "verify", lambda body, sources=None, title="": {
+    monkeypatch.setattr(production.factcheck, "verify", lambda body, sources=None, title="", on_screen=None: {
         "ok": False, "unsupported": ["checker unavailable: 503 UNAVAILABLE"], "minor": [],
         "checked": 0, "reason": "checker-failed: 503 UNAVAILABLE"})
     rendered = []
     monkeypatch.setattr(production.voice, "synthesize",
-                        lambda body, d: rendered.append("voice") or ("a.mp3", 30.0))
+                        lambda body, d, meta=None, tone=None: rendered.append("voice") or ("a.mp3", 30.0))
 
     with pytest.raises(production.FactCheckUnavailable, match="could not run"):
         production.produce_one(IDEA, str(tmp_path))
 
     assert rendered == [], "an unverified reel must not render or publish in strict mode"
-    assert (7, "rejected") not in produced
+    assert (7, "rejected") not in produced and (7, "blocked") not in produced
 
 
 _REAL_VERIFY = production.factcheck.verify
@@ -514,3 +522,128 @@ def test_make_on_demand_expires_stale_pending_before_reusing_it(monkeypatch):
 
     production.make_on_demand(3, 1)
     assert order[0] == "expire", "stale ideas must be cleared BEFORE the queue is read"
+
+
+def test_produce_one_alerts_when_the_reel_leaves_the_channel_voice(monkeypatch, tmp_path):
+    """Three September reels shipped in Chirp's voice with only a log line to show for it."""
+    _wire_happy(monkeypatch)
+    sent = []
+    monkeypatch.setattr(production, "_notify", sent.append)
+
+    def _chirp(body, d, meta=None, tone=None):
+        meta.update(engine="google", voice="google")
+        return "a.wav", 30.0
+
+    monkeypatch.setattr(production.voice, "synthesize", _chirp)
+    production.produce_one(IDEA, str(tmp_path))
+    assert any("not the channel voice" in m for m in sent)
+
+
+def test_produce_one_is_quiet_when_the_channel_voice_spoke(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    sent = []
+    monkeypatch.setattr(production, "_notify", sent.append)
+    production.produce_one(IDEA, str(tmp_path))
+    assert not any("channel voice" in m for m in sent)
+
+
+def test_the_approval_wait_ends_once_this_runs_cap_is_met(monkeypatch):
+    """5 of 14 sampled runs sat out the full 30 minutes waiting on ideas nobody would tap."""
+    monkeypatch.setenv("APPROVAL_CAP", "1")
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 9}, {"id": 2}])
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 1}])
+    monkeypatch.setattr(production.time, "sleep", lambda s: pytest.fail("must not keep waiting"))
+    assert production._wait_for_webhook_decisions(600, offered=[1, 2]) == 1
+
+
+def test_the_approval_wait_ignores_other_runs_pending_ideas(monkeypatch):
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 99}])
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [])
+    monkeypatch.setattr(production.time, "sleep", lambda s: pytest.fail("must not keep waiting"))
+    production._wait_for_webhook_decisions(600, offered=[1, 2])
+
+
+def _verdicts(monkeypatch, *results):
+    it = iter(results)
+    monkeypatch.setattr(production.factcheck, "verify", lambda *a, **k: next(it))
+
+
+_BLOCK = {"ok": False, "unsupported": ["the bill was already signed"], "minor": [], "checked": 3,
+          "reason": "fail"}
+_OK = {"ok": True, "unsupported": [], "minor": [], "checked": 3, "reason": "pass"}
+
+
+def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
+    """Idea 308's block said exactly what was true ('already signed into law'); the reel used to
+    be thrown away anyway. The rewrite must pass the same gate before it is used."""
+    _wire_happy(monkeypatch)
+    _verdicts(monkeypatch, _BLOCK, _OK)
+    saved, voiced = [], []
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "FIXED BODY")
+    monkeypatch.setattr(production.db, "update_script_body", lambda sid, b: saved.append(b))
+    monkeypatch.setattr(production.voice, "synthesize",
+                        lambda body, d, meta=None, tone=None: voiced.append(body) or _fake_synth(body, d, meta))
+    production.produce_one(IDEA, str(tmp_path))
+    assert saved == ["FIXED BODY"] and voiced == ["FIXED BODY"]
+
+
+def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    _verdicts(monkeypatch, _BLOCK, _BLOCK)
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "STILL WRONG")
+    monkeypatch.setattr(production.db, "update_script_body",
+                        lambda *a: pytest.fail("a failed repair must not be saved"))
+    with pytest.raises(production.FactCheckFailed):
+        production.produce_one(IDEA, str(tmp_path))
+
+
+def test_the_verdict_is_stored_and_a_block_is_marked_blocked(monkeypatch, tmp_path):
+    """Verdicts lived only in CI logs, and a gate block looked like the operator's Reject."""
+    produced = _wire_happy(monkeypatch, factcheck_ok=False)
+    monkeypatch.setenv("ENABLE_FACTCHECK_REPAIR", "false")
+    stored = []
+    monkeypatch.setattr(production.db, "set_script_factcheck", lambda sid, v: stored.append(v))
+    with pytest.raises(production.FactCheckFailed):
+        production.produce_one(IDEA, str(tmp_path))
+    assert stored and stored[0]["ok"] is False and stored[0]["blocking"]
+    assert (IDEA["id"], "blocked") in produced
+
+
+def test_the_voice_that_spoke_reaches_the_post_row(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: seen.update(m) or ("VID1", "u"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["voice"] == "gemini:gemini-3.1-flash-tts-preview@dev"
+
+
+def test_the_cron_path_does_not_poll_telegram_in_webhook_mode(monkeypatch):
+    """getUpdates against an active webhook is refused (409); the bot already wrote the taps."""
+    monkeypatch.setenv("TELEGRAM_APPROVAL_MODE", "webhook")
+    monkeypatch.setattr(production.config, "validate", lambda *a, **k: None)
+    monkeypatch.setattr(production, "ensure_ideas_and_digest", lambda: 0)
+    monkeypatch.setattr(production.approval, "process_responses",
+                        lambda **k: pytest.fail("must not poll getUpdates in webhook mode"))
+    monkeypatch.setattr(production, "run_production", lambda: {"published": [], "failed": []})
+    production.run()
+
+
+def test_the_india_tag_only_goes_on_india_stories():
+    """It was on every upload, the US-only White House story included."""
+    script = {"title": "T", "caption": "c", "hashtags": [], "tags": []}
+    us = production._build_metadata({"title": "Networks boycott White House coverage"}, script)
+    india = production._build_metadata({"title": "Rupee hits a record low against the dollar"},
+                                        script)
+    assert "India News Explainer" not in us["tags"] and "India News Explainer" in india["tags"]
+
+
+def test_the_footer_matches_the_real_length():
+    assert "in 30 seconds" in production._DEFAULT_FOOTER
+
+
+def test_the_on_screen_source_is_a_publisher_not_the_aggregator():
+    assert production._source_domain(["https://news.google.com/rss/articles/X",
+                                      "https://www.thehindu.com/news/a"]) == "thehindu.com"
+    assert production._source_domain(["https://news.google.com/rss/articles/X"]) == "Google News"
+    assert production._source_domain([]) is None

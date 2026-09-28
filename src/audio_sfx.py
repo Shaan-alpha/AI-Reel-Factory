@@ -1,11 +1,11 @@
 """Module for Sound Effects (SFX) synthesis and audio mixing.
 
 Contract:
-    what it does : generates crisp procedural SFX assets (whoosh, pop, ding, boom, click)
-                   and mixes them into video audio at precise timestamps (clip cuts, text cards,
-                   script impact points).
-    input        : list of SFX events [{"time": float, "name": str}], narration path, output path.
-    output       : mixed audio WAV/MP3 path containing narration + SFX.
+    what it does : generates procedural SFX assets (whoosh, pop, ding, boom, click) and renders
+                   an SFX-only track with each event at its timestamp; assembly mixes that
+                   track under the narration.
+    input        : list of SFX events [{"time": float, "name": str}], total duration, output path.
+    output       : path to a 44.1 kHz mono WAV holding only the SFX (it never sees the narration).
     depends on   : stdlib wave/math/struct/array, src.config.
 
 Stdlib-only and deterministic: the noise-based effects draw from a SEEDED generator, so the
@@ -125,6 +125,14 @@ _GENERATORS = {
 }
 
 
+def _same_pcm(path: str, pcm: bytes) -> bool:
+    try:
+        with wave.open(path, "rb") as w:
+            return w.getframerate() == _SAMPLE_RATE and w.readframes(w.getnframes()) == pcm
+    except Exception:  # noqa: BLE001 — missing or unreadable: regenerate
+        return False
+
+
 def ensure_sfx_assets(sfx_dir: str | None = None) -> dict[str, str]:
     """Ensure procedural SFX files exist in sfx_dir (default assets/sfx). Returns {name: path}."""
     target_dir = sfx_dir or config.get("SFX_DIR", os.path.join("assets", "sfx"))
@@ -132,8 +140,11 @@ def ensure_sfx_assets(sfx_dir: str | None = None) -> dict[str, str]:
     paths = {}
     for name, gen_fn in _GENERATORS.items():
         path = os.path.join(target_dir, f"{name}.wav")
-        if not (os.path.isfile(path) and os.path.getsize(path) > 100):
-            pcm = gen_fn()
+        pcm = gen_fn()  # milliseconds: cheap enough to compare every time
+        # Rewrite when the cached file differs from what the generator makes now, not only when
+        # it is missing: a file left from an older generator (the pre-seed-fix whoosh and click
+        # on the dev box) otherwise sounds different from what CI renders, silently.
+        if not _same_pcm(path, pcm):
             with wave.open(path, "wb") as w:
                 w.setnchannels(1)
                 w.setsampwidth(2)

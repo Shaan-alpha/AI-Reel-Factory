@@ -19,9 +19,9 @@ jobs:
       contents: read
       id-token: write        # mints the OIDC token WIF exchanges; without it auth cannot run
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -33,12 +33,21 @@ jobs:
 
       # google-genai talks to Vertex; google-auth resolves the federated credentials the auth
       # step wrote out. Both are already pinned in requirements.txt.
-      - run: pip install "google-genai==2.8.0" "google-auth==2.53.0" "python-dotenv==1.2.2"
+      - run: pip install "google-genai==2.25.0" "google-auth==2.58.1" "python-dotenv==1.2.2"
 
       - name: Vertex grounded search from CI
         env:
           GEMINI_USE_VERTEX: "true"
           GCP_PROJECT: but-it-matters-tts
           GCP_LOCATION: global
-          GEMINI_GROUNDED_MODEL: gemini-2.5-flash
+          GEMINI_GROUNDED_MODEL: gemini-3.5-flash-lite
+        run: python tools/verify_vertex.py
+
+      # The fact-check gate's model, proven on its own.
+      - name: Vertex grounded search on the fact-check model
+        env:
+          GEMINI_USE_VERTEX: "true"
+          GCP_PROJECT: but-it-matters-tts
+          GCP_LOCATION: global
+          GEMINI_GROUNDED_MODEL: gemini-3.5-flash
         run: python tools/verify_vertex.py

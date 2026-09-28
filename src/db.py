@@ -22,7 +22,9 @@ from src import config
 # Allowed idea lifecycle states. 'produced' marks an approved idea whose reel has shipped,
 # so a cron retry skips it (rule 12: idempotent reruns). 'passed' is a soft skip from the
 # Telegram digest — not posted, but distinct from a hard 'rejected'.
-IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced")
+# 'blocked' (2026-09-27): the fact-check gate refused the story. It used to be 'rejected', which
+# made a gate verdict indistinguishable from the operator's own Reject tap.
+IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked")
 
 
 @lru_cache(maxsize=1)
@@ -48,11 +50,19 @@ def get_pending_ideas() -> list[dict]:
     )
 
 
-def set_idea_status(idea_id: int, status: str) -> None:
-    """Set an idea's status. Valid: pending | approved | rejected | produced."""
+def set_idea_status(idea_id: int, status: str, from_status: str | None = None) -> bool:
+    """Set an idea's status. Valid: pending | approved | rejected | produced.
+
+    With `from_status`, only an idea currently in that status changes, and the return value
+    says whether one did. A digest tap uses it: an old, still-tappable digest message could
+    otherwise move a rejected, passed or already-produced idea back to 'approved'."""
     if status not in IDEA_STATUSES:
         raise ValueError(f"invalid idea status: {status!r} (allowed: {IDEA_STATUSES})")
-    get_client().table("ideas").update({"status": status}).eq("id", idea_id).execute()
+    q = get_client().table("ideas").update({"status": status}).eq("id", idea_id)
+    if from_status:
+        q = q.eq("status", from_status)
+    result = q.execute()  # always executed; only the RETURN depends on from_status
+    return bool(result.data) if from_status else True
 
 
 def get_approved_ideas() -> list[dict]:
@@ -90,12 +100,38 @@ def expire_stale_pending_ideas(max_age_hours: int | None = None) -> int:
 
 
 def existing_idea_titles() -> set[str]:
-    """Lowercased titles of every idea already in the table (any status) — for dedup."""
-    rows = get_client().table("ideas").select("title").execute().data
-    return {r["title"].lower() for r in rows if r.get("title")}
+    """Lowercased titles of every idea already in the table (any status) — for dedup.
+
+    Paged: PostgREST caps a response at 1,000 rows by default, and past that an unpaged read
+    silently stops deduplicating against the oldest ideas."""
+    titles: set[str] = set()
+    page, start = 1000, 0
+    while True:
+        rows = (get_client().table("ideas").select("title").order("id")
+                .range(start, start + page - 1).execute().data) or []
+        titles.update(r["title"].lower() for r in rows if r.get("title"))
+        if len(rows) < page:
+            return titles
+        start += page
+
+
+def recent_ideas(days: int = 10) -> list[dict]:
+    """Ideas created in the last `days` days, any status: {id, title, hook, sources, status}.
+
+    For STORY-level dedup. Titles alone miss a re-pitch: the fact-check blocked idea 314 ('US
+    Media Boycotts White House Coverage!') and 47 minutes later idea 315 ('US Networks Blackout
+    Trump Coverage!') shipped the same claim, citing the same article."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return (get_client().table("ideas").select("id,title,hook,sources,status")
+            .gte("created_at", since).execute().data) or []
 
 
 # --- scripts / posts ------------------------------------------------------------------
+
+def update_script_body(script_id: int, body: str) -> None:
+    """Replace a script's narration (the fact-check repair pass rewrote it)."""
+    get_client().table("scripts").update({"body": body}).eq("id", script_id).execute()
+
 
 def insert_script(idea_id: int, template: str, body: str, caption: str,
                   hashtags: list[str], title: str | None = None) -> int:
@@ -112,8 +148,21 @@ def insert_script(idea_id: int, template: str, body: str, caption: str,
     return get_client().table("scripts").insert(row).execute().data[0]["id"]
 
 
+def set_post_status(post_id: int, status: str) -> None:
+    """Set a post's status (e.g. 'removed' once it is gone from the platform)."""
+    get_client().table("posts").update({"status": status}).eq("id", post_id).execute()
+
+
+def set_script_factcheck(script_id: int, verdict: dict) -> None:
+    """Store the fact-check verdict on its script (column scripts.factcheck, jsonb).
+
+    Nothing kept verdicts before 2026-09-27: a blocked or waived claim survived only in a CI log
+    that GitHub deletes, so "why did this reel ship?" had no answer after the fact."""
+    get_client().table("scripts").update({"factcheck": verdict}).eq("id", script_id).execute()
+
+
 def insert_post(script_id: int, platform: str, external_id: str, url: str,
-                status: str) -> int:
+                status: str, voice: str | None = None) -> int:
     """Record a published/queued output; return its id.
 
     `published_at` is stamped HERE. The column has no database default, and nothing else ever
@@ -125,15 +174,27 @@ def insert_post(script_id: int, platform: str, external_id: str, url: str,
     row = {"script_id": script_id, "platform": platform,
            "external_id": external_id, "url": url, "status": status,
            "published_at": datetime.now(timezone.utc).isoformat()}
+    if voice:  # posts.voice: which engine and model spoke (see voice.synthesize meta)
+        row["voice"] = voice
     return get_client().table("posts").insert(row).execute().data[0]["id"]
 
 
 def get_published_posts(platform: str = "youtube") -> list[dict]:
     """Posts that actually shipped (have an external_id) — the analytics targets."""
+    # 'removed' posts (gone from YouTube, see analytics._flag_removed) are no longer targets,
+    # which is also what makes the removal alert fire once rather than on every run.
     return (
         get_client().table("posts").select("*")
-        .eq("platform", platform).not_.is_("external_id", "null").execute().data
+        .eq("platform", platform).not_.is_("external_id", "null")
+        .neq("status", "removed").execute().data
     )
+
+
+def backfill_script_title(script_id: int, title: str) -> None:
+    """Store the published YouTube title on a script that has none (rows from before titles
+    were saved). Only a NULL title is filled, so a stored title is never overwritten."""
+    get_client().table("scripts").update({"title": title}).eq("id", script_id) \
+        .is_("title", "null").execute()
 
 
 def insert_analytics(post_id: int, views: int, likes: int | None = None,
@@ -142,6 +203,53 @@ def insert_analytics(post_id: int, views: int, likes: int | None = None,
     get_client().table("analytics").insert(
         {"post_id": post_id, "views": views, "likes": likes, "comments": comments}
     ).execute()
+
+
+def _ranked_recent_posts() -> list[dict]:
+    """The newest WINNERS_WINDOW_POSTS published Shorts with their current views and title,
+    best first: [{title, views}]. Shared by the winners and the low performers.
+
+    Recency matters: ranked on lifetime views the list had not changed since 2026-08-26, while
+    the channel's topics and style moved on. Views now come from each post's newest snapshot."""
+    client = get_client()
+    window = max(5, int(_cfg("WINNERS_WINDOW_POSTS", "40")))
+    posts = (client.table("posts").select("id").eq("platform", "youtube")
+             .not_.is_("external_id", "null").neq("status", "removed")
+             .order("id", desc=True).limit(window).execute().data) or []
+    ids = [p["id"] for p in posts]
+    if not ids:
+        return []
+    rows = (client.table("analytics")
+            .select("post_id, views, posts(scripts(title, ideas(title)))")
+            .in_("post_id", ids).order("id", desc=True).limit(len(ids) * 4).execute().data)
+    latest: dict = {}
+    for r in rows or []:  # newest first: the first row per post is its current standing
+        if r.get("post_id") is not None and r["post_id"] not in latest:
+            latest[r["post_id"]] = r
+    out = []
+    for r in latest.values():
+        try:
+            script = r["posts"]["scripts"]
+            title = (script.get("title") or "").strip() or script["ideas"]["title"]
+        except (TypeError, KeyError):
+            continue
+        out.append({"title": title, "views": int(r.get("views") or 0)})
+    return sorted(out, key=lambda x: x["views"], reverse=True)
+
+
+def _cfg(key: str, default: str) -> str:
+    from src import config
+
+    return config.get(key, default)
+
+
+_STOP = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "with", "at", "by",
+         "from", "as", "why", "how", "what", "just", "its", "it", "this", "that", "vs"}
+
+
+def _topic_words(title: str) -> set[str]:
+    import re as _re
+    return {t for t in _re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOP and len(t) > 2}
 
 
 def top_performing_titles(limit: int = 8) -> list[str]:
@@ -162,43 +270,32 @@ def top_performing_titles(limit: int = 8) -> list[str]:
     So: collapse to ONE row per post FIRST — its newest snapshot, which for a monotonically
     rising view count is also its highest — and only then rank.
     """
-    client = get_client()
-    # A full collect_stats() pass writes one row per published post, so the newest
-    # (published posts × 3) rows contain every post's latest snapshot with room to spare
-    # even if a pass or two was partial (rule 14: one bad row never stops the pull).
-    n_posts = (
-        client.table("posts").select("id", count="exact")
-        .eq("platform", "youtube").not_.is_("external_id", "null").limit(1).execute().count
-    ) or 0
-    if not n_posts:
-        return []
-    rows = (
-        client.table("analytics")
-        .select("post_id, views, posts(scripts(title, ideas(title)))")
-        .order("id", desc=True).limit(max(n_posts * 3, limit * 4)).execute().data
-    )
-
-    latest: dict = {}
-    for r in rows:  # newest-first, so the FIRST row seen for a post is its current standing
-        pid = r.get("post_id")
-        if pid is not None and pid not in latest:
-            latest[pid] = r
-
+    # Among the newest Shorts only, and at most two per story cluster: 4 of the 6 winners were
+    # Iran/oil/Middle East, and September's ideas drifted the same way (27% Middle East, up from
+    # 16%). A cluster is two or more shared distinctive title words.
     out: list[str] = []
+    chosen: list[set[str]] = []
     seen: set[str] = set()
-    for r in sorted(latest.values(), key=lambda x: int(x.get("views") or 0), reverse=True):
-        try:
-            script = r["posts"]["scripts"]
-            title = (script.get("title") or "").strip() or script["ideas"]["title"]
-            views = int(r.get("views") or 0)
-        except (TypeError, KeyError):
+    for r in _ranked_recent_posts():
+        title, words = r["title"], _topic_words(r["title"])
+        if not title or title.lower() in seen:
             continue
-        if title and title.lower() not in seen:
-            seen.add(title.lower())
-            out.append(f'"{title}" — {views:,} views')
+        if sum(1 for c in chosen if len(words & c) >= 2) >= 2:
+            continue
+        seen.add(title.lower())
+        chosen.append(words)
+        out.append(f'"{title}" — {r["views"]:,} views')
         if len(out) >= limit:
             break
     return out
+
+
+def low_performing_titles(limit: int = 3) -> list[str]:
+    """The weakest recent Shorts, so ideation sees what to avoid as well as what to repeat."""
+    ranked = _ranked_recent_posts()
+    if len(ranked) < limit * 3:  # too few Shorts for a bottom that means anything
+        return []
+    return [f'"{r["title"]}" — {r["views"]:,} views' for r in ranked[-limit:]]
 
 
 def prune_analytics(keep_per_post: int | None = None) -> int:

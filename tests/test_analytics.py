@@ -1,6 +1,8 @@
 """Tests for the analytics module (Module 10) — stats parsing + collection, fully mocked."""
 from __future__ import annotations
 
+import pytest
+
 from src import analytics
 
 
@@ -25,8 +27,8 @@ def test_fetch_stats_parses_counts():
         {"id": "v2", "statistics": {"viewCount": "10"}},  # likes/comments hidden
     ])
     out = analytics._fetch_stats(yt, ["v1", "v2"])
-    assert out["v1"] == {"views": 1500, "likes": 42, "comments": 7}
-    assert out["v2"] == {"views": 10, "likes": None, "comments": None}
+    assert out["v1"] == {"views": 1500, "likes": 42, "comments": 7, "title": None}
+    assert out["v2"] == {"views": 10, "likes": None, "comments": None, "title": None}
 
 
 def test_collect_stats_records_each_post(monkeypatch):
@@ -79,3 +81,34 @@ def test_a_failing_prune_never_loses_the_snapshots(monkeypatch):
 
     monkeypatch.setattr(analytics.db, "prune_analytics", _boom)
     assert analytics.collect_stats() == 1
+
+
+def test_a_short_gone_from_youtube_is_marked_and_reported_once(monkeypatch):
+    marked, sent = [], []
+    monkeypatch.setattr(analytics.db, "set_post_status", lambda pid, st: marked.append((pid, st)))
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    from src import approval
+    monkeypatch.setattr(approval, "_api", lambda method, **k: sent.append(k["text"]))
+    gone = analytics._flag_removed({"AAA": {"id": 1}, "BBB": {"id": 2}}, {"AAA": {"views": 5}})
+    assert gone == ["BBB"] and marked == [(2, "removed")]
+    assert sent and "BBB" in sent[0]
+
+
+def test_nothing_is_reported_when_every_short_is_still_up(monkeypatch):
+    monkeypatch.setattr(analytics.db, "set_post_status", lambda *a: pytest.fail("nothing gone"))
+    assert analytics._flag_removed({"AAA": {"id": 1}}, {"AAA": {"views": 5}}) == []
+
+
+def test_the_real_youtube_title_is_backfilled_onto_old_scripts(monkeypatch):
+    """Old scripts had no title, so the winners list showed the dry idea title instead."""
+    monkeypatch.setattr(analytics.db, "get_published_posts",
+                        lambda platform="youtube": [{"id": 1, "external_id": "AAA", "script_id": 9}])
+    monkeypatch.setattr(analytics, "_youtube_client", lambda: None)
+    monkeypatch.setattr(analytics, "_fetch_stats", lambda yt, ids: {
+        "AAA": {"views": 5, "likes": 1, "comments": 0, "title": "Oil Export Wars"}})
+    monkeypatch.setattr(analytics.db, "insert_analytics", lambda *a: None)
+    monkeypatch.setattr(analytics.db, "prune_analytics", lambda: 0)
+    filled = []
+    monkeypatch.setattr(analytics.db, "backfill_script_title", lambda sid, t: filled.append((sid, t)))
+    analytics.collect_stats()
+    assert filled == [(9, "Oil Export Wars")]

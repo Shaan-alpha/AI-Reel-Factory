@@ -72,8 +72,8 @@ def main() -> int:
         print("\n[WARN] The call succeeded but returned no citations. Grounding may not have")
         print("       engaged for this prompt; the credential path is fine.")
         return 0
-    print("\n[PASS] Keyless Vertex grounding works end to end. The 20/day Developer-API ceiling")
-    print("       no longer applies: Vertex allows 1,500 grounded requests/day free on 2.5.")
+    print(f"\n[PASS] Keyless Vertex grounding works end to end on {llm._grounded_chain(None)[0]}.")
+    print("       Vertex grounding is free up to 1,500/day on 2.5 and 5,000/month on Gemini 3.")
     return 0
 
 

@@ -8,6 +8,13 @@ on:
   # schedule:
   #   - cron: "30 2,5,8,11,14 * * *"   # UTC, staggered — enable when ready
 
+# One pipeline run at a time. Two runs started close together re-offer the same pending ideas,
+# both wait on the same tap, and both render and upload: publish's idempotency check is empty
+# until one of them has finished uploading.
+concurrency:
+  group: reel-pipeline
+  cancel-in-progress: false
+
 jobs:
   produce:
     runs-on: ubuntu-latest
@@ -18,7 +25,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Keyless auth to Google Cloud. This org's policy blocks BOTH API keys and service-account
       # keys, so there is no credential to store — GitHub's OIDC token is exchanged for a short
@@ -29,7 +36,7 @@ jobs:
           workload_identity_provider: projects/892249248253/locations/global/workloadIdentityPools/github/providers/github-oidc
           service_account: reel-factory-ci@but-it-matters-tts.iam.gserviceaccount.com
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -37,7 +44,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
 
       - name: Cache TTS/ASR models (Kokoro + faster-whisper)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/kokoro
@@ -45,7 +52,7 @@ jobs:
           key: models-kokoro1.0-whisper-base-v1
 
       - name: Cache pip
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('requirements.txt') }}
@@ -56,8 +63,10 @@ jobs:
       - name: Run production pipeline
         env:                     # secrets configured in repo Settings -> Secrets (rule 5)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.6-flash' }}              # ungrounded text; own per-model free budget
-          GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-2.5-flash' }} # ONLY model with free grounded search — do not bump
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}              # ungrounded text; own per-model free budget
+          GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-3.5-flash-lite,gemini-3.5-flash' }} # off gemini-2.5-flash (retires 2026-10-20); a 404 moves down the chain
+          FACTCHECK_MODEL: ${{ vars.FACTCHECK_MODEL || 'gemini-3.5-flash,gemini-3.5-flash-lite' }} # the gate's own, stronger chain
+          IDEATION_MODEL: ${{ vars.IDEATION_MODEL || 'gemini-2.5-flash,gemini-3.5-flash-lite' }} # only 2.5 returns citations; 404 on 10-20 moves it on
           # Serve Gemini through Vertex AI rather than the Developer API. The free
           # Developer tier is 20 grounded requests/DAY shared by ideation, the scriptwriter and
           # the fact-check gate (~21/day of demand, so it runs dry and the GATE is what breaks).
@@ -107,6 +116,11 @@ jobs:
           ENABLE_SFX: ${{ vars.ENABLE_SFX || 'true' }}              # transition stings on clip cuts
           SFX_VOLUME: ${{ vars.SFX_VOLUME || '0.18' }}              # 0..1; 0 disables. >0.3 fights the narration
           SFX_EVERY_N_CUTS: ${{ vars.SFX_EVERY_N_CUTS || '2' }}     # sting every Nth cut (1 = every cut, busy)
+          ENABLE_LOUDNORM: ${{ vars.ENABLE_LOUDNORM || 'true' }}    # level each reel to TARGET_LUFS (reels shipped at -17..-23)
+          TARGET_LUFS: ${{ vars.TARGET_LUFS || '-14' }}              # finished-mix loudness; YouTube plays at -14
+          ENABLE_VOICE_COMPRESS: ${{ vars.ENABLE_VOICE_COMPRESS || 'true' }}  # light 3:1 broadcast compression on the voice
+          MUSIC_LU_BELOW_VOICE: ${{ vars.MUSIC_LU_BELOW_VOICE || '11' }}      # bed level under the voice (8 = more present)
+          ENABLE_MUSIC_OFFSET: ${{ vars.ENABLE_MUSIC_OFFSET || 'true' }}      # each reel starts its bed at a different bar
           ENABLE_GRAPHIC_CARDS: ${{ vars.ENABLE_GRAPHIC_CARDS || 'false' }}  # PIL stat cards vs ASS text cards
           ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append core channel tags after SEO tags
           # Optional 3rd LLM provider. GH_ prefix is REQUIRED: GitHub rejects secret/variable
@@ -124,14 +138,20 @@ jobs:
           ENABLE_TAG_FLOOR: ${{ vars.ENABLE_TAG_FLOOR || 'true' }}     # >=1 tag: [serious] on the payoff turn
           SFX_DIR: ${{ vars.SFX_DIR }}                              # where generated SFX wavs cache
           CAPTION_FONT_FILE: ${{ vars.CAPTION_FONT_FILE }}          # ttf for libass + stat cards
-          VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only
-          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}  # free; 503 falls back to 2.5-flash, same voice
+          VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only; 'off' = no direction (the pre-09-01 sound)
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}  # free; any failure tries Vertex + 2.5 with the same voice before Chirp
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Zubenelgenubi' }}  # chosen by ear; bare name
           GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}       # optional; isolates TTS quota
+          GEMINI_TTS_VERTEX_FALLBACK: ${{ vars.GEMINI_TTS_VERTEX_FALLBACK || 'true' }}  # same voice on Vertex before Chirp (billed, ~$0.5/mo)
+          GEMINI_TTS_TIMEOUT_SECONDS: ${{ vars.GEMINI_TTS_TIMEOUT_SECONDS || '120' }}  # the SDK default is no timeout at all
           DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
           APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it
           ENABLE_FACT_CHECK: ${{ vars.ENABLE_FACT_CHECK || 'true' }}   # re-verify every script pre-render
           FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
+          FACTCHECK_SAMPLES: ${{ vars.FACTCHECK_SAMPLES || '2' }}      # a finding from either of two checks blocks
+          ENABLE_FACTCHECK_REPAIR: ${{ vars.ENABLE_FACTCHECK_REPAIR || 'true' }}  # rewrite blocked claims once, re-check
+          ENABLE_SCRIPT_TIGHTEN: ${{ vars.ENABLE_SCRIPT_TIGHTEN || 'true' }}  # LLM cut to the word cap before truncation
+          IDEA_DEDUP_DAYS: ${{ vars.IDEA_DEDUP_DAYS || '10' }}           # story-level dedup window
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run
           # Groq bills gpt-oss reasoning tokens against max_tokens; at the default effort the
           # trace eats the budget and json_object mode 400s. 'low' keeps the fallback alive.

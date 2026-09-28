@@ -132,3 +132,29 @@ def test_search_stories_returns_nothing_for_an_empty_query():
     """Guard: an empty q returns Google's whole front page, which would cite unrelated articles."""
     with mock.patch("src.news.requests.get", side_effect=AssertionError("must not request")):
         assert news.search_stories("   ") == []
+
+
+def test_the_pool_interleaves_the_front_page_with_the_sections(monkeypatch):
+    feeds = {"front": [{"title": f"F{i}", "url": f"f{i}", "source": ""} for i in range(3)],
+             "WORLD": [{"title": "W0", "url": "w0", "source": ""}]}
+
+    def _get(url):
+        return feeds["WORLD"] if "WORLD" in url else feeds["front"]
+
+    monkeypatch.setattr(news, "_get_stories", _get)
+    monkeypatch.setenv("NEWS_TOPICS", "WORLD")
+    assert [s["title"] for s in news.fetch_stories(4)] == ["F0", "W0", "F1", "F2"]
+
+
+def test_the_source_search_is_limited_to_recent_days(monkeypatch):
+    seen = {}
+
+    class _R:
+        text = "<rss><channel></channel></rss>"
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(news.requests, "get", lambda url, **k: seen.update(url=url) or _R())
+    news.search_stories("India floods")
+    assert "when%3A3d" in seen["url"]

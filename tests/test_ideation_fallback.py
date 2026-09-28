@@ -218,6 +218,7 @@ def test_seed_ideas_prefers_routine_file(monkeypatch):
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [_idea(f"R{i}", est_score=0.1 * i) for i in range(6)])
     monkeypatch.setattr(fb, "_produce_ideas", lambda t: pytest.fail("must not call LLM when routine file present"))
     monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
     assert fb.seed_ideas(3) == 3
@@ -225,9 +226,11 @@ def test_seed_ideas_prefers_routine_file(monkeypatch):
 
 
 def test_seed_ideas_falls_back_to_llm(monkeypatch):
+    monkeypatch.setenv("DIGEST_MIN_IDEAS", "1")  # this test is about the fallback, not the floor
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
     monkeypatch.setattr(fb, "_produce_ideas", lambda t: [_idea(f"G{i}") for i in range(5)])
     monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     assert fb.seed_ideas(2) == 2
 
@@ -235,6 +238,7 @@ def test_seed_ideas_falls_back_to_llm(monkeypatch):
 def test_seed_ideas_dedupes_against_db(monkeypatch):
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [_idea("Dup"), _idea("New1"), _idea("New2")])
     monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: {"dup"})
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     captured = {}
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: captured.setdefault("rows", rows) or rows)
     fb.seed_ideas(5)
@@ -741,9 +745,9 @@ def test_search_prefers_distinct_publishers(monkeypatch):
     corroborates nothing. The feed names the publisher, so use it."""
     monkeypatch.setenv("MIN_SOURCES", "2")
     results = [
-        {"title": "ISRO launch - The Hindu", "url": "https://news.google/A1", "source": "The Hindu"},
-        {"title": "ISRO launch again - The Hindu", "url": "https://news.google/A2", "source": "The Hindu"},
-        {"title": "ISRO launch - Reuters", "url": "https://news.google/B1", "source": "Reuters"},
+        {"title": "ISRO's Naughty Boy launch - The Hindu", "url": "https://news.google/A1", "source": "The Hindu"},
+        {"title": "ISRO Naughty Boy again - The Hindu", "url": "https://news.google/A2", "source": "The Hindu"},
+        {"title": "ISRO Naughty Boy rocket - Reuters", "url": "https://news.google/B1", "source": "Reuters"},
     ]
     monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: results)
     idea = {"title": "Can 'Naughty Boy' Save ISRO?", "hook": "h", "angle": "a"}
@@ -771,7 +775,7 @@ def test_search_runs_when_only_the_models_own_urls_make_up_the_count(monkeypatch
     searched = []
     monkeypatch.setattr(fb.news, "search_stories",
                         lambda q, limit=6: searched.append(q) or
-                        [{"title": "t", "url": "https://news.google/EXTRA", "source": "BBC"}])
+                        [{"title": "Nepal China floods death toll climbs", "url": "https://news.google/EXTRA", "source": "BBC"}])
     ideas = [{"title": "Nepal-China Floods: 1,270+ Dead", "hook": "The toll keeps climbing.",
               "angle": "a", "sources": ["https://invented.example/articleshow/115000000.cms"]}]
 
@@ -785,3 +789,118 @@ def test_search_query_keeps_a_number_intact():
     """'1,250' must not be split into '1 250' — that is a different, much worse search."""
     assert fb._search_query({"title": "1,250 Dead: Nepal's Warning to South Asia"}) == \
         "1,250 Dead Nepal's Warning to South Asia"
+
+
+# --- 2026-09-27 audit: redirects, citation relevance, story-level dedup -------------------
+
+class _Resp:
+    def __init__(self, status, location=None):
+        self.status_code, self.headers = status, ({"Location": location} if location else {})
+
+    def close(self):
+        pass
+
+
+def test_a_grounding_redirect_resolves_from_googles_own_location_header(monkeypatch):
+    """One hop: the publisher never has to answer. WaPo resets bot traffic, which used to leave
+    the raw vertexaisearch link in idea 315's published sources."""
+    seen = {}
+
+    def _get(url, **kw):
+        seen.update(kw)
+        return _Resp(302, "https://www.washingtonpost.com/business/2026/09/21/cnn-sue/")
+
+    monkeypatch.setattr(fb.requests, "get", _get)
+    out = fb._resolve_redirect("https://vertexaisearch.cloud.google.com/grounding-api-redirect/X")
+    assert out == "https://www.washingtonpost.com/business/2026/09/21/cnn-sue/"
+    assert seen["allow_redirects"] is False
+
+
+def test_an_unresolvable_redirect_is_returned_unchanged(monkeypatch):
+    monkeypatch.setattr(fb.requests, "get", lambda url, **kw: _Resp(404))
+    url = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/X"
+    assert fb._resolve_redirect(url) == url
+
+
+def test_a_citation_about_another_story_is_not_credited():
+    """Published idea 301 (Iran-UAE) cited three UCC articles from the same batch."""
+    idea = {"title": "Iran & UAE: A BRICS Truce in West Asia?", "hook": "Rivals shake hands."}
+    ucc = "https://www.hindustantimes.com/india-news/ucc-in-all-21-states-ruled-by-nda-amit-shah"
+    assert fb._cites_this_story(idea, ucc) is False
+    own = "https://www.thenationalnews.com/gulf/iran-uae-brics-talks-truce"
+    assert fb._cites_this_story(idea, own) is True
+    assert fb._cites_this_story(idea, "https://example.com/a/123456") is True  # says nothing
+
+
+def test_a_blocked_story_cannot_return_under_a_new_title():
+    """Idea 314 was blocked by the fact-check; 315, the same story, shipped 47 minutes later."""
+    link = "https://news.google.com/rss/articles/CBMiswFBVV95cUxNSUxs"
+    recent = [{"id": 314, "status": "rejected", "title": "US Media Boycotts White House Coverage!",
+               "hook": "Networks turned their cameras off.", "sources": [link]}]
+    again = {"title": "US Networks Blackout Trump Coverage!", "hook": "The cameras went dark.",
+             "sources": [link, "https://www.afp.com/en/us-networks-halt"]}
+    assert fb._repeats_recent_story(again, recent) is True
+
+
+def test_an_unrelated_story_is_not_mistaken_for_a_repeat():
+    recent = [{"id": 1, "status": "produced", "title": "UCC by 2029: Amit Shah's Promise",
+               "hook": "A uniform code.", "sources": ["https://a.example/ucc"]}]
+    other = {"title": "Iran & UAE: A BRICS Truce?", "hook": "Rivals shake hands.",
+             "sources": ["https://b.example/iran"]}
+    assert fb._repeats_recent_story(other, recent) is False
+
+
+def test_ideation_keeps_the_only_citation_bearing_model_until_it_retires(monkeypatch):
+    """Measured 2026-09-27: on the real prompt 2.5-flash returned 15-18 citations and every 3.x
+    model returned zero, so ideation walks its own chain onto 3.5-flash-lite only on a 404."""
+    monkeypatch.delenv("IDEATION_MODEL", raising=False)
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    assert fb._ideation_model() == "gemini-2.5-flash,gemini-3.5-flash-lite"
+    monkeypatch.delenv("GEMINI_USE_VERTEX")
+    assert fb._ideation_model() is None
+    monkeypatch.setenv("IDEATION_MODEL", "gemini-3.5-flash")
+    assert fb._ideation_model() == "gemini-3.5-flash"
+
+
+def test_the_same_story_is_not_seeded_twice_in_one_batch(monkeypatch):
+    """Live 2026-09-27: the grounded pass and the top-up pitched the Trump/Iran story twice."""
+    link = "https://news.google.com/rss/articles/SAME"
+    pool = [{"niche": "impact-news", "title": "Why Trump Just Blew Up Iran's Truce Offer", "hook": "h", "angle": "a",
+             "sources": [link, "https://a.example/1"], "est_score": 0.9},
+            {"niche": "impact-news", "title": "Trump Rejects Iran Truce: Why He Wants a Better Deal", "hook": "h",
+             "angle": "a", "sources": [link, "https://b.example/2"], "est_score": 0.8},
+            {"niche": "impact-news", "title": "Rupee Hits a Record Low", "hook": "h", "angle": "a",
+             "sources": ["https://c.example/3", "https://d.example/4"], "est_score": 0.7}]
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda n: pool)
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
+    inserted = []
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: inserted.extend(rows) or rows)
+    fb.seed_ideas(3)
+    titles = [r["title"] for r in inserted]
+    assert len(titles) == 2 and "Rupee Hits a Record Low" in titles
+
+
+def test_at_least_three_ideas_are_offered_even_when_one_is_asked_for(monkeypatch):
+    pool = [{"niche": "impact-news", "title": t, "hook": "h", "angle": "a",
+             "sources": [f"https://x.example/{i}"], "est_score": 0.5}
+            for i, t in enumerate(("Rupee hits a record low", "ISRO launches Gaganyaan crew test",
+                                   "Monsoon floods in Assam", "Chess olympiad gold for India"))]
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda n: pool)
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
+    monkeypatch.delenv("DIGEST_MIN_IDEAS", raising=False)
+    assert fb.seed_ideas(1) == 3
+
+
+def test_an_unrelated_search_hit_is_not_attached(monkeypatch):
+    monkeypatch.setattr(fb.news, "search_stories", lambda q, limit=8: [
+        {"title": "Cricket: India win the toss", "url": "https://e.example/cricket", "source": "E"},
+        {"title": "Floods kill 56 in India and Nepal", "url": "https://f.example/floods",
+         "source": "F"}])
+    idea = {"title": "56 Dead in India Floods", "hook": "Floods and landslides kill 56"}
+    out = fb._search_for_more(idea, [], trusted=0)
+    assert "https://f.example/floods" in out and "https://e.example/cricket" not in out

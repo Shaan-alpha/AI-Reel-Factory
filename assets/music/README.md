@@ -6,7 +6,9 @@ are stable but different reels vary.
 
 - **Empty dir → no music** (assembly skips it gracefully — so it's safe to leave this empty).
   Disable entirely with `ENABLE_MUSIC=false`.
-- Volume is tunable via `MUSIC_VOLUME` (default `0.10` ≈ 10%).
+- Level: each reel measures its bed and sets it `MUSIC_LU_BELOW_VOICE` (default 11 LU) under the
+  narration, whatever the track's own loudness. `MUSIC_VOLUME` (default `0.10`) is used only if
+  that measurement fails. Each reel starts its bed at a different point (`ENABLE_MUSIC_OFFSET`).
 
 ## Where to get safe tracks — READ THIS FIRST
 

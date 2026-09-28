@@ -86,18 +86,22 @@ def _keywords_via_llm(script_body: str, n: int) -> list[str]:
         f"  crypto/finance -> 'bitcoin coin', 'gold bars', 'digital vault'\n"
         f"  sport -> 'football stadium', 'soccer match', 'cheering crowd'\n"
         f"Prefer visually striking, high-motion subjects (they hold attention): places, objects, "
-        f"people doing things, nature, cities, crowds, maps. AVOID proper nouns, logos, and abstract "
-        f"words (policy, economy, impact) entirely — only things a camera can film.\n\n"
+        f"people doing things, nature, cities, crowds, maps. AVOID people's names, brands, logos "
+        f"and abstract words (policy, economy, impact) — only things a camera can film.\n"
+        f"PLACES ARE THE EXCEPTION: when the story names a country, city or landmark, keep it in "
+        f"the query ('Mumbai skyline', 'the White House', 'Nepal mountain village') and never swap "
+        f"in a different one. A White House story was illustrated with the US Capitol, and "
+        f"generic queries put American skylines on Indian stories.\n\n"
         f"NARRATION:\n{script_body}\n\n"
         f'Output ONE valid JSON object and nothing else, no markdown or fences: '
         f'{{"keywords": ["query one", "query two"]}}'
     )
-    import json
-
     # prefer_groq: no web needed → reserve Gemini's free RPD for grounded research (rule 13).
-    raw = llm.generate(prompt, json=True, max_tokens=200, prefer_groq=True)
-    start, end = raw.find("{"), raw.rfind("}")
-    data = json.loads(raw[start : end + 1], strict=False)
+    # 512, not 200: Groq's gpt-oss bills its reasoning trace against this budget (39-118 tokens
+    # measured) and at 200 an occasional completion came back EMPTY, which json_object mode
+    # rejects as `400 json_validate_failed` (run 34954327606).
+    raw = llm.generate(prompt, json=True, max_tokens=512, prefer_groq=True)
+    data = llm.parse_json_object(raw)
     kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
     if not kws:
         raise ValueError("llm returned no keywords")
@@ -220,14 +224,36 @@ def _download(url: str, dest: str) -> None:
 
 # --- image-based visuals (photos / AI) → Ken Burns clips -------------------------------
 
-def _img_prompt(keyword: str) -> str:
-    """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look."""
-    style = config.get(
-        "IMAGE_STYLE",
-        "cinematic, photorealistic, dramatic lighting, shallow depth of field, "
-        "high detail, professional documentary news b-roll, no text, no watermark",
-    )
-    return f"{keyword}, {style}, vertical 9:16 composition"
+# docs/08: "AI images stay abstract/symbolic ... Never fake photoreal footage of real, named
+# people or specific real events presented as real." The old default asked for "photorealistic
+# ... documentary news b-roll", i.e. exactly the realistic look that rule rules out. Cinematic,
+# but plainly an illustration (2026-09-27). IMAGE_STYLE still overrides it.
+_DEFAULT_IMAGE_STYLE = (
+    "cinematic editorial illustration, symbolic and stylized, painterly digital art, dramatic "
+    "lighting, rich color, depth, no text, no watermark, no logos, no recognizable real people"
+)
+# One per shot, cycled: a keyword used two or three times in a reel used to get the identical
+# prompt each time, so its shots came out near-identical.
+_COMPOSITIONS = ("wide establishing shot", "close-up detail", "medium shot", "low angle",
+                 "overhead view", "silhouette against the light")
+
+
+def _img_prompt(keyword: str, index: int = 0, setting: str | None = None) -> str:
+    """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look.
+
+    `setting` places the scene: an Indian bank-strike story came out with dollar bills and "$"
+    coins because the narration never said "India" (local render, 2026-09-28)."""
+    style = config.get("IMAGE_STYLE", _DEFAULT_IMAGE_STYLE)
+    framing = _COMPOSITIONS[index % len(_COMPOSITIONS)]
+    place = f", set in {setting}" + (", Indian rupee currency" if setting == "India" else "") \
+        if setting else ""
+    return f"{keyword}{place}, {framing}, {style}, vertical 9:16 composition"
+
+
+def _image_seed(variant: str, index: int) -> int:
+    """Deterministic per reel and shot: a re-render draws the same pictures (rule 12) instead of
+    spending neurons on new ones, and two reels never share a seed."""
+    return int(hashlib.sha1(f"{variant}:{index}".encode("utf-8")).hexdigest()[:8], 16) % 2**31
 
 
 @lru_cache(maxsize=64)
@@ -250,18 +276,49 @@ def _pexels_photo_urls(keyword: str) -> tuple[str, ...]:
         return ()
 
 
-def _cloudflare_image(prompt: str, dest: str) -> bool:
-    """Generate an AI image via Cloudflare Workers AI (Flux). Needs CF_API_TOKEN + CF_ACCOUNT_ID."""
+# FLUX.2 [klein] 4B (2026-09-27): a native portrait size and a seed, where flux-1-schnell made a
+# square that assembly cropped. About 103 neurons at 768x1344 (26.05 per output 512 tile) against
+# 173 measured for schnell, so a reel's 12 images fit the free 10,000/day about 8 times over.
+_KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
+_SCHNELL = "@cf/black-forest-labs/flux-1-schnell"
+
+
+def _cloudflare_image(prompt: str, dest: str, seed: int | None = None) -> bool:
+    """Generate an AI image via Cloudflare Workers AI. Needs CF_API_TOKEN + CF_ACCOUNT_ID.
+
+    CF_IMAGE_MODEL (default klein-4b) first; flux-1-schnell is tried if it fails (rule 11)."""
     token, acct = config.get("CF_API_TOKEN"), config.get("CF_ACCOUNT_ID")
     if not (token and acct):
         return False
-    model = config.get("CF_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell")
+    first = config.get("CF_IMAGE_MODEL", _KLEIN)
+    for model in dict.fromkeys([first, _SCHNELL]):
+        if _cloudflare_run(model, prompt, dest, token, acct, seed):
+            return True
+    return False
+
+
+def _cloudflare_run(model: str, prompt: str, dest: str, token: str, acct: str,
+                    seed: int | None) -> bool:
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}"
     try:
-        r = requests.post(
-            f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{model}",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"prompt": prompt[:2000]}, timeout=90,
-        )
+        if "flux-2" in model:  # FLUX.2 takes multipart form data, even for a prompt alone
+            fields = {"prompt": prompt[:2000], "width": "768", "height": "1344"}
+            if seed is not None:
+                fields["seed"] = str(seed)
+            r = requests.post(url, headers={"Authorization": f"Bearer {token}"},
+                              files={k: (None, v) for k, v in fields.items()}, timeout=90)
+        else:
+            body = {"prompt": prompt[:2000]}
+            if seed is not None:
+                body["seed"] = seed
+            r = requests.post(url, headers={"Authorization": f"Bearer {token}"},
+                              json=body, timeout=90)
+        if r.status_code >= 400:
+            # The body carries the reason (for example 3030, an NSFW false positive on a benign
+            # prompt); raise_for_status alone threw it away, so two 400s in September could not
+            # be diagnosed.
+            log.warning("visuals: Cloudflare image gen HTTP %d for %r: %s",
+                        r.status_code, prompt[:80], r.text[:300])
         r.raise_for_status()
         if "application/json" in r.headers.get("content-type", ""):
             b64 = (r.json().get("result") or {}).get("image")
@@ -274,12 +331,12 @@ def _cloudflare_image(prompt: str, dest: str) -> bool:
                 f.write(r.content)
         return os.path.getsize(dest) > 1000
     except Exception as e:  # noqa: BLE001
-        log.warning("visuals: Cloudflare image gen failed (%s)", e)
+        log.warning("visuals: Cloudflare image gen failed on %s (%s)", model, e)
         return False
 
 
 def _fetch_image(keyword: str, dest: str, seed: int, source: str,
-                 variant: str = "") -> bool:
+                 variant: str = "", setting: str | None = None) -> bool:
     """Put one image at dest: AI (if source='ai' and CF set) else a Pexels photo. Bool = success.
 
     `variant` distinguishes one reel from another. `_pexels_photo_urls` is lru_cached for the
@@ -289,7 +346,8 @@ def _fetch_image(keyword: str, dest: str, seed: int, source: str,
     each reel its own starting point — and stays deterministic for a given (variant, cut), so
     a retry re-renders the same reel rather than a different one (rule 12).
     """
-    if source == "ai" and _cloudflare_image(_img_prompt(keyword), dest):
+    if source == "ai" and _cloudflare_image(_img_prompt(keyword, seed, setting), dest,
+                                            seed=_image_seed(variant, seed)):
         return True
     urls = _pexels_photo_urls(keyword)
     if not urls:
@@ -308,7 +366,7 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
 
     Motion alternates by index for variety (rule 16): even = slow zoom IN, odd = slow zoom OUT.
     Deterministic per index so cron retries are stable (rule 12)."""
-    from src.assembly import _ffmpeg
+    from src.assembly import BT709_TAGS, _ffmpeg, x264_args
 
     frames = int(seconds * 30)
     if index % 2 == 0:
@@ -318,11 +376,14 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
     vf = (
         "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
         f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={frames}:s=1080x1920:fps=30,setsar=1"
+        f"d={frames}:s=1080x1920:fps=30,setsar=1,"
+        # RGB stills -> YUV with the BT.709 matrix the tags declare (swscale defaults to 601).
+        "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
+        + BT709_TAGS
     )
     proc = subprocess.run(
         [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
-         "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30", dest],
+         "-vf", vf, *x264_args(), "-r", "30", dest],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -330,7 +391,7 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
 
 
 def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str,
-                       variant: str = "") -> list[str]:
+                       variant: str = "", setting: str | None = None) -> list[str]:
     """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made.
 
     One image per cut the assembler will actually make. Sizing this off a local guess (it was
@@ -345,7 +406,7 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
     for i in range(n):
         kw = keywords[i % len(keywords)]
         img = os.path.join(out_dir, f"img_{i:02d}.jpg")
-        if not _fetch_image(kw, img, i, source, variant=variant):
+        if not _fetch_image(kw, img, i, source, variant=variant, setting=setting):
             continue
         clip = os.path.join(out_dir, f"imgclip_{i:02d}.mp4")
         try:
@@ -359,7 +420,8 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
     return clips
 
 
-def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> list[str]:
+def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str,
+                setting: str | None = None) -> list[str]:
     """Return vertical clip paths covering target_seconds. VISUAL_SOURCE picks the strategy:
     'photos' (default, Pexels stock photos + Ken Burns), 'ai' (Cloudflare Flux + Ken Burns),
     or 'video' (Pexels/Pixabay stock video). Image sources fall back to stock video on failure.
@@ -377,7 +439,8 @@ def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str) -> lis
             # already-available identifier for "which reel is this" — no new parameter needed
             # at the call site, and identical across a retry of the same reel.
             return _fetch_image_broll(keywords, target_seconds, out_dir, source,
-                                      variant=os.path.basename(os.path.normpath(out_dir)))
+                                      variant=os.path.basename(os.path.normpath(out_dir)),
+                                      setting=setting)
         except Exception as e:  # noqa: BLE001 — fall back to stock video (rule 11)
             log.warning("visuals: %s source failed (%s); falling back to stock video", source, e)
 

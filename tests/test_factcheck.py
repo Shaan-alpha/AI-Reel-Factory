@@ -228,6 +228,7 @@ def test_quote_repair_leaves_valid_json_untouched():
 
 
 def test_an_unreadable_reply_is_asked_again_once(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "1")  # counts calls for ONE sample
     replies = iter(["Let me check that... the claim is false.",
                     '{"checked": 1, "blocking": ["invented"], "minor": [], "verdict": "fail"}'])
     calls = []
@@ -316,10 +317,11 @@ def test_strict_mode_does_not_affect_a_real_verdict(monkeypatch):
 
 
 def test_default_model_is_none_so_the_shared_free_model_is_used(monkeypatch):
-    """Measured 2026-07-27: every model except gemini-2.5-flash returns `limit: 0` (no free
-    allowance) on this account. A non-None default would make the gate fail every single time —
-    permanently fail-open, which is worse than having no gate."""
+    """Measured 2026-07-27: on the Developer API every model except gemini-2.5-flash returns
+    `limit: 0` (no free allowance). A non-None default there would make the gate fail every
+    single time — permanently fail-open, which is worse than having no gate."""
     monkeypatch.delenv("FACTCHECK_MODEL", raising=False)
+    monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
     assert factcheck._model() is None
 
     seen = {}
@@ -421,6 +423,7 @@ _PASS = '{"checked": 2, "blocking": [], "minor": [], "verdict": "pass"}'
 
 
 def test_a_dedicated_key_that_404s_falls_back_to_the_shared_one(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "1")  # counts calls for ONE sample
     monkeypatch.setenv("ENABLE_FACT_CHECK", "true")
     monkeypatch.setenv("FACTCHECK_API_KEY", "key-from-a-project-with-no-grounding")
     tried = []
@@ -469,3 +472,81 @@ def test_no_dedicated_key_means_exactly_one_attempt(monkeypatch):
     monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
     factcheck.verify("a body")
     assert tried == [None]
+
+
+# --- 2026-09-27 audit ---------------------------------------------------------------------
+
+def _capture_prompt(monkeypatch, replies):
+    seen = []
+    it = iter(replies)
+    monkeypatch.setattr(factcheck, "_ask_checker", lambda p: seen.append(p) or next(it))
+    return seen
+
+
+_PASS = '{"checked": 3, "blocking": [], "minor": [], "verdict": "pass"}'
+_FAIL = '{"checked": 3, "blocking": ["cameras were not turned off"], "minor": [], "verdict": "fail"}'
+
+
+def test_the_checker_is_told_todays_date(monkeypatch):
+    """Without a date the model treated this month's news as the future or a past year."""
+    seen = _capture_prompt(monkeypatch, [_PASS])
+    factcheck.verify("A claim.", ["https://a.example"])
+    assert "TODAY'S DATE: 20" in seen[0]
+
+
+def test_on_screen_text_is_checked_too(monkeypatch):
+    seen = _capture_prompt(monkeypatch, [_PASS])
+    factcheck.verify("A claim.", [], on_screen=["100% TARIFFS", "Summary line."])
+    assert "100% TARIFFS" in seen[0] and "Summary line." in seen[0]
+
+
+def test_two_samples_are_the_default(monkeypatch):
+    """2026-09-27 on gemini-3.5-flash: the Modi-Xi claim was waived on one run and blocked on
+    the next. With two samples, where either blocking counts, that pair blocks."""
+    monkeypatch.delenv("FACTCHECK_SAMPLES", raising=False)
+    seen = _capture_prompt(monkeypatch, [_PASS, _FAIL])
+    assert factcheck.verify("A claim.", [])["ok"] is False
+    assert len(seen) == 2
+
+
+def test_a_could_not_confirm_finding_does_not_block():
+    assert factcheck._only_unconfirmed("Could not independently confirm the 40% figure.")
+    assert not factcheck._only_unconfirmed("Could not confirm; in fact the bill was signed.")
+    assert not factcheck._only_unconfirmed("The quote is invented: no such speech exists.")
+
+
+def test_the_checker_gets_publisher_links_first_and_no_redirects():
+    got = factcheck._checker_sources(["https://news.google.com/rss/articles/X",
+                                      "https://vertexaisearch.cloud.google.com/grounding-api-redirect/Y",
+                                      "https://www.afp.com/en/story"])
+    assert got == ["https://www.afp.com/en/story", "https://news.google.com/rss/articles/X"]
+
+
+def test_a_second_sample_that_finds_a_contradiction_blocks(monkeypatch):
+    """Idea 314 was blocked and near-identical 315 shipped: one sample is a coin toss."""
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
+    _capture_prompt(monkeypatch, [_PASS, _FAIL])
+    result = factcheck.verify("A claim.", [])
+    assert result["ok"] is False and "cameras" in result["unsupported"][0]
+
+
+def test_an_extra_sample_that_cannot_run_does_not_undo_the_first(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
+    calls = []
+
+    def _ask(p):
+        calls.append(p)
+        if len(calls) > 1:
+            raise RuntimeError("503 UNAVAILABLE")
+        return _PASS
+
+    monkeypatch.setattr(factcheck, "_ask_checker", _ask)
+    result = factcheck.verify("A claim.", [])
+    assert result["ok"] is True and factcheck.gate_ran(result)
+
+
+def test_on_vertex_the_gate_runs_on_the_stronger_3_5_flash(monkeypatch):
+    """Operator, 2026-09-27: off the retiring model; 3.5 Flash caught the 314 error."""
+    monkeypatch.delenv("FACTCHECK_MODEL", raising=False)
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
+    assert factcheck._model() == "gemini-3.5-flash,gemini-3.5-flash-lite"

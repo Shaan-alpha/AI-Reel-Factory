@@ -19,6 +19,7 @@ so we can swap free-tier models without a code change.
 """
 from __future__ import annotations
 
+import json as _jsonlib
 import logging
 import re
 import time
@@ -52,8 +53,43 @@ log = logging.getLogger(__name__)
 # serving the original project, and every other model 429s with no allowance on BOTH keys. So
 # the 20/day on this one project is the entire grounded budget the pipeline will ever have for
 # free — it cannot be widened by minting more keys, only by paying.
-_GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.6-flash")
-_GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL", "gemini-2.5-flash")
+#
+# 2026-09-27: on Vertex (what CI runs) the picture is different, and time-limited. Google's
+# model-versions page lists gemini-2.5-flash for RETIREMENT ON 2026-10-20, replacement
+# gemini-3.5-flash-lite, while Gemini 3 models ground fine on Vertex (5,000 grounded prompts/month
+# free, then $14/1,000; 3.5 Flash-Lite tokens cost what 2.5 Flash's do). Measured the same day:
+# grounded search answers on gemini-3.5-flash-lite and gemini-3.5-flash in this project. So
+# GEMINI_GROUNDED_MODEL is now an ordered, comma-separated CHAIN (see _grounded_chain), and
+# the default depends on the backend. On Vertex the pipeline moved off gemini-2.5-flash ahead of
+# its retirement (operator, 2026-09-27) onto Google's named replacement, gemini-3.5-flash-lite,
+# with gemini-3.5-flash behind it. On the Developer API gemini-2.5-flash stays: it is the only
+# model with free grounded search there, and a fresh clone runs on that path.
+# Text model: gemini-3.8-flash (2026-09-27), Google's listed replacement for 3.6 Flash, served
+# on both backends. Its thinking floor is LOW, which _generate_content handles.
+_GEMINI_MODEL = config.get("GEMINI_MODEL", "gemini-3.8-flash")
+_GEMINI_GROUNDED_MODEL = config.get("GEMINI_GROUNDED_MODEL")  # None = the backend's default
+_GROUNDED_DEFAULT_VERTEX = "gemini-3.5-flash-lite,gemini-3.5-flash"
+_GROUNDED_DEFAULT_DEV = "gemini-2.5-flash"
+
+
+def _grounded_chain(model: str | None) -> list[str]:
+    """Grounded models to try, in order: `model` if given (a single name or its own chain),
+    else GEMINI_GROUNDED_MODEL, else the backend's default chain."""
+    raw = model or _GEMINI_GROUNDED_MODEL or (
+        _GROUNDED_DEFAULT_VERTEX if _use_vertex() else _GROUNDED_DEFAULT_DEV)
+    chain = [m.strip() for m in str(raw).split(",") if m.strip()]
+    return chain or [_GROUNDED_DEFAULT_DEV]
+
+
+def _is_model_gone(exc: Exception) -> bool:
+    """True if the backend no longer serves the model (retired, or never available here).
+
+    Vertex answers `404 NOT_FOUND ... Publisher model ... was not found`; the Developer API says
+    a model is "no longer available". Anything else (503, 429, 400) is NOT a reason to switch
+    models: the fact-check model would change on a blip."""
+    text = str(exc).lower()
+    return ("404" in text or "not_found" in text) and (
+        "not found" in text or "not_found" in text or "no longer available" in text)
 # Groq retired `llama-3.3-70b-versatile` — it 404s `model_not_found` (found 2026-08-25, live).
 # That left rule 11's mandatory chain with a DEAD second link: every Groq test mocks `_gen_groq`,
 # so the suite stayed green while the only fallback under Gemini failed on every call, turning
@@ -135,18 +171,36 @@ def _thinking_cfg(model: str):
     return types.ThinkingConfig(thinking_budget=0)
 
 
+def _generate_content(client, *, model: str, contents: str, config):
+    """`client.models.generate_content`, retried once at LOW thinking if MINIMAL is refused.
+
+    MINIMAL is not a floor every 3.x model shares: gemini-3.8-flash answers `400 Thinking level
+    is unsupported: THINKING_LEVEL_MINIMAL` (measured 2026-09-27 on Vertex) and accepts LOW and
+    up. Keyed on the error rather than a version table, so the next model that moves the floor
+    costs one extra request instead of every Gemini call silently failing over to Groq."""
+    try:
+        return client.models.generate_content(model=model, contents=contents, config=config)
+    except Exception as e:  # noqa: BLE001 — only the one refusal is handled; the rest re-raise
+        if "thinking level is unsupported" not in str(e).lower():
+            raise
+        from google.genai import types
+
+        log.warning("llm: %s refuses MINIMAL thinking; retrying at LOW", model)
+        config.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+        return client.models.generate_content(model=model, contents=contents, config=config)
+
+
 def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
     from google.genai import types
 
     cfg = types.GenerateContentConfig(
         max_output_tokens=max_tokens,
         thinking_config=_thinking_cfg(_GEMINI_MODEL),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
     if json:
         cfg.response_mime_type = "application/json"
-    resp = _gemini_client().models.generate_content(
-        model=_GEMINI_MODEL, contents=prompt, config=cfg
-    )
+    resp = _generate_content(_gemini_client(), model=_GEMINI_MODEL, contents=prompt, config=cfg)
     return resp.text or ""
 
 
@@ -272,21 +326,35 @@ def _grounded_sources(resp) -> list[dict]:
 
 def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None = None,
                               api_key: str | None = None) -> tuple[str, list[dict]]:
-    """One grounded call — returns (text, real citations). See `_grounded_sources`."""
+    """One grounded call — returns (text, real citations). See `_grounded_sources`.
+
+    Walks `_grounded_chain`: a model the backend no longer serves advances to the next one;
+    every other error propagates so `_call_with_retry` can judge it."""
     from google.genai import types
 
-    chosen = model or _GEMINI_GROUNDED_MODEL
-    cfg = types.GenerateContentConfig(
-        max_output_tokens=max_tokens,
-        tools=[types.Tool(google_search=types.GoogleSearch())],
-        # Minimise "thinking" — it eats max_output_tokens and was truncating the grounded JSON
-        # reply mid-script, forcing the ungrounded fallback. Per-generation field (_thinking_cfg).
-        thinking_config=_thinking_cfg(chosen),
-    )
-    resp = _gemini_client(api_key).models.generate_content(
-        model=chosen, contents=prompt, config=cfg
-    )
-    return resp.text or "", _grounded_sources(resp)
+    chain = _grounded_chain(model)
+    for i, chosen in enumerate(chain):
+        cfg = types.GenerateContentConfig(
+            max_output_tokens=max_tokens,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            # Search grounding is not a callable function; automatic function calling only makes
+            # the newer SDK warn on every grounded call ("Direct use of AFC ... not recommended").
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            # Minimise "thinking" — it eats max_output_tokens and was truncating the grounded
+            # JSON reply mid-script, forcing the ungrounded fallback. Per-generation field.
+            thinking_config=_thinking_cfg(chosen),
+        )
+        try:
+            resp = _generate_content(_gemini_client(api_key), model=chosen, contents=prompt,
+                                     config=cfg)
+        except Exception as e:  # noqa: BLE001 — only a retired model moves down the chain
+            if i == len(chain) - 1 or not _is_model_gone(e):
+                raise
+            log.error("llm: grounded model %s is no longer served (%s); moving to %s. Update "
+                      "GEMINI_GROUNDED_MODEL.", chosen, str(e)[:160], chain[i + 1])
+            continue
+        return resp.text or "", _grounded_sources(resp)
+    raise RuntimeError("llm: empty grounded model chain")  # unreachable: chain is never empty
 
 
 def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None = None,
@@ -333,10 +401,104 @@ def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
     return text, sources
 
 
+def today_line() -> str:
+    """A date line for prompts that write about the news.
+
+    Models do not know the date. A grounded answer about "today" opened "As of June 7, 2026" in
+    September, and the idea-308 draft called a law already signed "headed to the President's
+    desk", which the dated fact-check then blocked. Prepended by the scriptwriter and ideation;
+    the fact-check prompt carries its own."""
+    from datetime import datetime, timezone
+
+    d = datetime.now(timezone.utc).date()
+    return (f"TODAY'S DATE: {d.isoformat()} ({d:%A}), UTC. What the sources report from the last "
+            f"few days is current news: describe it in the right tense, and never date it to "
+            f"another month or year.\n\n")
+
+
+def escape_stray_quotes(blob: str) -> str:
+    """Escape double quotes that sit INSIDE a JSON string instead of ending it.
+
+    A model writing JSON by hand (the grounded path cannot use JSON mode) routinely leaves quotes
+    raw: `"script_body": "the US just "destroyed" five..."`. json.loads reads the inner quote as
+    the end of the string and dies with "Expecting ',' delimiter". That error shipped idea 291
+    unverified from the fact-check (2026-09-12) and wrote both 2026-09-22 scripts UNGROUNDED,
+    because this channel's sarcastic voice lives on scare quotes.
+
+    A quote inside a string is taken as CLOSING only when what follows can legally follow a
+    string: `:` `]` `}` or the end, or `,` followed by the start of another value. Anything else
+    (a letter, a space and then a word) means it was a quote in prose.
+    """
+    out: list[str] = []
+    in_string = escaped = False
+    n = len(blob)
+    for i, ch in enumerate(blob):
+        if not in_string:
+            in_string = ch == '"'
+            out.append(ch)
+            continue
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == '"':
+            j = i + 1
+            while j < n and blob[j].isspace():
+                j += 1
+            nxt = blob[j] if j < n else ""
+            if nxt == ",":
+                k = j + 1
+                while k < n and blob[k].isspace():
+                    k += 1
+                closes = k >= n or blob[k] in '"{['
+            else:
+                closes = nxt in ("", ":", "]", "}")
+            if closes:
+                in_string = False
+            else:
+                out.append('\\"')
+                continue
+        out.append(ch)
+    return "".join(out)
+
+
+def parse_json(raw: str):
+    """The first JSON object or array in an LLM reply. Raises ValueError if there is none.
+
+    Tolerates fences and prose around it, raw control characters in strings, text AFTER it, and
+    raw double quotes inside strings (see `escape_stray_quotes`). The old first-`{`-to-last-`}`
+    slice failed on text after the JSON and on a bare array: `[{...}, {...}]` sliced to
+    `{...}, {...}` is the "Extra data" that killed ideation's top-up (run 34954327606)."""
+    text = raw or ""
+    starts = [i for i in (text.find("{"), text.find("[")) if i != -1]
+    if not starts:
+        raise ValueError(f"no JSON in LLM reply: {text[:200]!r}")
+    blob = text[min(starts):]
+    decoder = _jsonlib.JSONDecoder(strict=False)
+    try:
+        return decoder.raw_decode(blob)[0]
+    except _jsonlib.JSONDecodeError:
+        try:
+            return decoder.raw_decode(escape_stray_quotes(blob))[0]
+        except _jsonlib.JSONDecodeError as e:
+            raise ValueError(f"unparseable JSON in LLM reply ({e}): {text[:200]!r}") from e
+
+
+def parse_json_object(raw: str) -> dict:
+    """`parse_json`, insisting on an object (the shape every caller's schema has)."""
+    data = parse_json(raw)
+    if not isinstance(data, dict):
+        raise ValueError("LLM reply is JSON but not an object")
+    return data
+
+
 # Upstream states worth ONE retry: capacity and quota-window, not "your request is wrong".
 # A 400 is a verdict — retrying it just spends the clock twice for the same answer.
+# A dropped connection is retried too (added 2026-09-27): the grounded call has no second
+# provider, so under FACTCHECK_STRICT one network blip used to hold a reel back.
 _RETRYABLE_MARKERS = ("429", "resource_exhausted", "503", "unavailable", "500", "internal",
-                      "504", "deadline", "overloaded")
+                      "504", "deadline", "overloaded", "disconnected", "timed out",
+                      "connection reset", "connection aborted")
 # Google returns its own advice as `'retryDelay': '46s'`. Honour it rather than guessing.
 _RETRY_DELAY_RE = re.compile(r"retrydelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", re.I)
 _DEFAULT_RETRY_WAIT = 2.0
@@ -401,7 +563,17 @@ def _gen_groq(prompt: str, *, json: bool, max_tokens: int) -> str:
     }
     if json:
         kwargs["response_format"] = {"type": "json_object"}
-    resp = _groq_client().chat.completions.create(**kwargs)
+    try:
+        resp = _groq_client().chat.completions.create(**kwargs)
+    except Exception as e:  # noqa: BLE001 — one specific, budget-shaped failure is retried
+        # An EMPTY failed_generation means the reasoning trace ate the budget before any content
+        # (still seen at 1024 tokens on 2026-09-27). Twice the room usually clears it; anything
+        # else re-raises so the chain fails over as before.
+        text = str(e)
+        if not (json and "json_validate_failed" in text and "'failed_generation': ''" in text):
+            raise
+        kwargs["max_tokens"] = min(8192, max_tokens * 2)
+        resp = _groq_client().chat.completions.create(**kwargs)
     return resp.choices[0].message.content or ""
 
 

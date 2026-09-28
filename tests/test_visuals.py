@@ -121,7 +121,7 @@ def test_fetch_broll_no_results_raises(monkeypatch, tmp_path):
 def test_fetch_broll_photos_makes_kenburns_clips(monkeypatch, tmp_path):
     monkeypatch.delenv("VISUAL_SOURCE", raising=False)  # default = photos
 
-    def fake_fetch_image(kw, dest, seed, source, variant=""):
+    def fake_fetch_image(kw, dest, seed, source, variant="", setting=None):
         with open(dest, "wb") as f:
             f.write(b"\xff" * 2048)
         return True
@@ -200,7 +200,7 @@ def test_live_pexels_fetch(tmp_path):
 # --- B-roll must cover every cut, not recycle ---------------------------------------------
 
 def _stub_image_pipeline(monkeypatch):
-    def fake_fetch_image(kw, dest, seed, source, variant=""):
+    def fake_fetch_image(kw, dest, seed, source, variant="", setting=None):
         with open(dest, "wb") as f:
             f.write(b"\xff" * 2048)
         return True
@@ -305,3 +305,48 @@ def test_the_same_reel_and_cut_is_still_deterministic(monkeypatch):
     visuals._fetch_image("indian flag", "/tmp/b.jpg", 2, "photos", variant="idea-7")
 
     assert picked[0] == picked[1]
+
+
+def test_the_default_image_style_is_illustrative_not_photoreal(monkeypatch):
+    """docs/08: AI images stay abstract/symbolic, never photoreal fakes of real events."""
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    prompt = visuals._img_prompt("the White House", 0).lower()
+    assert "photorealistic" not in prompt and "illustration" in prompt
+    assert "no recognizable real people" in prompt
+
+
+def test_repeated_keywords_get_different_compositions():
+    assert visuals._img_prompt("oil refinery", 0) != visuals._img_prompt("oil refinery", 1)
+
+
+def test_image_seeds_are_deterministic_per_reel_and_shot():
+    assert visuals._image_seed("idea_5", 3) == visuals._image_seed("idea_5", 3)
+    assert visuals._image_seed("idea_5", 3) != visuals._image_seed("idea_6", 3)
+
+
+def test_klein_is_asked_for_a_native_portrait_with_a_seed(monkeypatch, tmp_path):
+    monkeypatch.setenv("CF_API_TOKEN", "t")
+    monkeypatch.setenv("CF_ACCOUNT_ID", "a")
+    monkeypatch.delenv("CF_IMAGE_MODEL", raising=False)
+    sent = {}
+
+    class _R:
+        status_code = 200
+        headers = {"content-type": "image/jpeg"}
+        content = b"x" * 5000
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(visuals.requests, "post",
+                        lambda url, **k: sent.update(url=url, **k) or _R())
+    assert visuals._cloudflare_image("p", str(tmp_path / "i.jpg"), seed=42)
+    assert "flux-2-klein-4b" in sent["url"]
+    assert sent["files"]["height"] == (None, "1344") and sent["files"]["seed"] == (None, "42")
+
+
+def test_an_indian_story_gets_an_indian_setting():
+    """An Indian bank-strike story was illustrated with dollar bills."""
+    p = visuals._img_prompt("atm cash", 0, "India")
+    assert "set in India" in p and "rupee" in p
+    assert "set in" not in visuals._img_prompt("atm cash", 0)

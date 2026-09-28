@@ -61,7 +61,7 @@ create table ideas (
   angle text,
   est_score numeric,
   sources text[],                         -- source URLs (news niche: >=2 required)
-  status text default 'pending'           -- pending | approved | rejected
+  status text default 'pending'           -- pending | approved | rejected | passed | produced | blocked
 );
 
 create table scripts (
@@ -235,3 +235,8 @@ MIN_SOURCES=2             # min independent sources before an idea becomes a ree
 
 > Copy each into GitHub Actions secrets (and the Routine's secrets where relevant).
 > Commit only `.env.example` (blank values).
+
+
+-- 2026-09-27 migration `record_factcheck_verdict_and_voice` (applied to the live project):
+--   alter table public.scripts add column if not exists factcheck jsonb;  -- the gate's verdict
+--   alter table public.posts   add column if not exists voice text;       -- which engine/model spoke

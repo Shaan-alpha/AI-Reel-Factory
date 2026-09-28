@@ -16,14 +16,36 @@ from PIL import Image, ImageDraw, ImageFont
 from src import config
 
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _get_font(size: int = 48) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
+    """The caption font at `size`. A relative path is tried from the working directory, then
+    from the repo root: resolved against the cwd alone, a run started elsewhere fell back to
+    PIL's 10 px bitmap font."""
     font_path = config.get("CAPTION_FONT_FILE", os.path.join("assets", "fonts", "Montserrat-Bold.ttf"))
-    try:
-        if os.path.isfile(font_path):
-            return ImageFont.truetype(font_path, size)
-    except Exception:  # noqa: BLE001
-        pass
+    for candidate in (font_path, os.path.join(_REPO_ROOT, font_path)):
+        try:
+            if os.path.isfile(candidate):
+                return ImageFont.truetype(candidate, size)
+        except Exception:  # noqa: BLE001
+            continue
     return ImageFont.load_default()
+
+
+def _wrap(text: str, font, max_width: int) -> list[str]:
+    lines, cur = [], ""
+    for w in text.split():
+        test = f"{cur} {w}".strip()
+        bbox = font.getbbox(test)
+        if bbox[2] - bbox[0] > max_width and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = test
+    if cur:
+        lines.append(cur)
+    return lines
 
 
 def create_stat_card(text: str, out_path: str, width: int = 800, height: int = 240,
@@ -47,26 +69,17 @@ def create_stat_card(text: str, out_path: str, width: int = 800, height: int = 2
         width=4,
     )
 
-    # Wrap & measure text
-    font = _get_font(size=52)
-    lines = []
+    # Wrap, stepping the size down until the lines fit the card: at a fixed 52 px a four-line
+    # point ran 256 px tall on a 240 px card.
     cleaned = text.strip()
-    words = cleaned.split()
-    cur = ""
-    for w in words:
-        test = f"{cur} {w}".strip()
-        bbox = font.getbbox(test)
-        w_len = bbox[2] - bbox[0]
-        if w_len > width - 80 and cur:
-            lines.append(cur)
-            cur = w
-        else:
-            cur = test
-    if cur:
-        lines.append(cur)
+    for size in (52, 46, 40, 34, 30):
+        font = _get_font(size=size)
+        lines = _wrap(cleaned, font, width - 80)
+        line_height = int(size * 1.23)
+        if len(lines) * line_height <= height - 32:
+            break
 
     # Vertical centering
-    line_height = 64
     total_text_h = len(lines) * line_height
     start_y = (height - total_text_h) // 2
 

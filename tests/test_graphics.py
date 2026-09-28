@@ -38,3 +38,19 @@ def test_create_stat_card_creates_missing_parent_dir(tmp_path):
     out_path = str(tmp_path / "nested" / "deeper" / "card.png")
     assert graphics.create_stat_card("Ok", out_path) == out_path
     assert os.path.isfile(out_path)
+
+
+def test_a_long_point_shrinks_to_fit_the_card(tmp_path):
+    out = graphics.create_stat_card(
+        "Four whole lines of key point text that would overflow the card at the old size",
+        str(tmp_path / "c.png"))
+    from PIL import Image
+    alpha = Image.open(out).split()[-1]
+    assert alpha.getbbox() is not None
+
+
+def test_the_font_resolves_from_another_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CAPTION_FONT_FILE", raising=False)
+    font = graphics._get_font(40)
+    assert getattr(font, "size", None) == 40, "fell back to the 10 px bitmap font"

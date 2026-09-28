@@ -43,7 +43,7 @@ a Telegram "Morning Digest."
 | Database/state | Supabase Postgres | Free |
 | Approval UI | Telegram Bot (Make-it / Pass / Reject) | Free |
 | Scripts | Gemini API (Groq failover) | Free |
-| **Narration** | **Google Chirp 3 HD** → edge-tts (en-IN) → Kokoro | ≤ $5/mo cap (free at our volume) |
+| **Narration** | **Gemini TTS** (Zubenelgenubi; same voice on Vertex) → Chirp 3 HD → edge-tts (en-IN) → Kokoro | ≤ $5/mo cap (free at our volume) |
 | **Visuals** | **AI B-roll: Cloudflare Workers AI / Flux + Ken Burns** → Pexels/Pixabay stock | Free |
 | **Video edit** | FFmpeg: crossfade transitions · cinematic grade · vignette/grain · **music ducking** · **brand-logo bug** · loop-friendly endings | Free |
 | Captions | faster-whisper: word-by-word karaoke + frame-1 hook + key-point cards + **source lower-third** | Free |
@@ -59,9 +59,9 @@ effectively $0; Google Cloud TTS and Cloudflare AI both sit inside free tiers at
 See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.md](CHANGELOG.md).
 
 - [x] Full pipeline **built, tested, and publishing** captioned Shorts to **@butitmatters**
-- [x] Every module done + tested in isolation; **313 tests** (config · db · llm · ideation · approval · scriptwriter · factcheck · voice · visuals · assembly · subtitles · publish · orchestrator)
+- [x] Every module done + tested in isolation; **614 tests** (config · db · llm · ideation · approval · scriptwriter · factcheck · voice · visuals · assembly · subtitles · publish · orchestrator)
 - [x] All credentials collected & verified (Gemini · Groq · Supabase · Telegram · Pexels · Cloudflare · Google TTS · YouTube OAuth)
-- [x] **Near-human voice** — Google Chirp 3 HD (en-IN), graceful fallback chain
+- [x] **Near-human voice** — Gemini TTS (Zubenelgenubi), the same voice on Vertex as its first fallback, then Chirp 3 HD
 - [x] **Story-specific AI B-roll** — Cloudflare Flux images + Ken Burns motion
 - [x] **Premium auto-editing** — crossfade transitions, cinematic grade, music ducking, brand-logo bug, loop-friendly endings
 - [x] **News-niche compliance** — ≥2 sources/claim, on-screen source citation, AI-disclosure + synthetic-content flag, CC0/own-words
@@ -98,7 +98,7 @@ flowchart TD
 
     subgraph MEDIA ["3 · Media generation"]
         direction TB
-        V1["<b>Narration</b> · Google Chirp 3 HD (en-IN)<br/>→ edge-tts → Kokoro"]
+        V1["<b>Narration</b> · Gemini TTS (Zubenelgenubi)<br/>→ Vertex → Chirp 3 HD → edge-tts → Kokoro"]
         V2["<b>Visuals</b> · Cloudflare Workers AI / Flux<br/>+ Ken Burns motion → Pexels / Pixabay"]
     end
 

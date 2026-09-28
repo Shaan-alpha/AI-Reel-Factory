@@ -17,6 +17,7 @@ the next word starts so there's never a blank frame. Model size is env-overridab
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
 import os
@@ -27,7 +28,7 @@ import subprocess
 from functools import lru_cache
 
 from src import config
-from src.assembly import _ffmpeg
+from src.assembly import BT709_TAGS, _ffmpeg, x264_args
 
 log = logging.getLogger(__name__)
 
@@ -54,8 +55,9 @@ def _load_model(size: str):
 
 
 # A whisper token that CONTINUES the previous number rather than starting a new word: a comma or
-# period immediately followed by a digit (",270", ".4").
-_NUMBER_CONTINUATION = re.compile(r"^[.,]\d")
+# period immediately followed by a digit (",270", ".4"), the second half of a range ("-5"), or a
+# bare percent sign. '3-5% drop' was burned as '3 5 %' on r2YTZ1GAtbE.
+_NUMBER_CONTINUATION = re.compile(r"^(?:[.,\-–]\d|%$)")
 
 
 def _merge_number_tokens(
@@ -96,6 +98,62 @@ def _transcribe_words(audio_path: str) -> list[tuple[float, float, str]]:
     return _merge_number_tokens(words)
 
 
+def _norm(token: str) -> str:
+    """A token reduced to what ASR and the script can agree on: lowercase letters and digits."""
+    return re.sub(r"[^a-z0-9]", "", token.lower())
+
+
+def _align_to_script(words: list[tuple[float, float, str]],
+                     script_text: str | None) -> list[tuple[float, float, str]]:
+    """Caption the SCRIPT's words at whisper's timings.
+
+    The burned captions used to be whatever faster-whisper heard: 7.6% of words differed from
+    the fact-checked script over 10 published reels, including numbers ('3-5% drop' -> '3 5 %',
+    'A 769-crore defense deal' -> 'A 769 croned') and meaning ('Unofficially' -> 'On
+    officially'). The script is what was approved and what the narrator read, so whisper is
+    kept for WHEN each word is spoken and the script supplies WHAT it is.
+
+    difflib aligns the two token streams: matched and substituted runs take the script's text
+    with the heard timing (spread by length when the counts differ); script words whisper
+    missed are slotted into the gap before the next heard word; words only whisper heard are
+    dropped. If the two barely agree, the script is not what was spoken, so the ASR words are
+    returned untouched.
+    """
+    # Split on dashes too: 'drama—it' is two spoken words and needs two karaoke timings.
+    text = re.sub(r"\s*[—–]\s*", " ", _DELIVERY_TAG.sub(" ", script_text or ""))
+    spoken = [t for t in text.split() if _norm(t)]
+    if not words or not spoken:
+        return words
+    heard = [_norm(w[2]) for w in words]
+    matcher = difflib.SequenceMatcher(None, heard, [_norm(t) for t in spoken], autojunk=False)
+    if matcher.ratio() < 0.6:
+        log.warning("subtitles: script and narration disagree (match %.2f); captioning the ASR",
+                    matcher.ratio())
+        return words
+    out: list[tuple[float, float, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "delete":
+            continue
+        tokens = spoken[j1:j2]
+        if tag in ("equal", "replace") and i2 > i1:
+            if tag == "equal":
+                out.extend((words[i1 + k][0], words[i1 + k][1], tokens[k])
+                           for k in range(len(tokens)))
+                continue
+            start, end = words[i1][0], words[i2 - 1][1]
+        else:  # insert: script words whisper did not hear
+            start = out[-1][1] if out else (words[i1][0] if i1 < len(words) else 0.0)
+            end = words[i1][0] if i1 < len(words) else start + 0.3 * len(tokens)
+            end = max(end, start + 0.05 * len(tokens))
+        weights = [max(1, len(_norm(t))) for t in tokens]
+        total, t0 = float(sum(weights)), start
+        for token, w in zip(tokens, weights):
+            t1 = t0 + (end - start) * w / total
+            out.append((t0, t1, token))
+            t0 = t1
+    return out
+
+
 def _format_ts(seconds: float) -> str:
     """Seconds → ASS timestamp H:MM:SS.cc (centiseconds)."""
     cs = max(0, int(round(seconds * 100)))
@@ -115,33 +173,57 @@ def _clean_caption_word(word: str) -> str:
     return word.strip().strip("-—–.,;:!?\"'").strip()
 
 
-def _hook_banner_text(title: str, max_chars: int = 16, max_lines: int = 3) -> str:
+def _wrap(words: list[str], max_chars: int) -> list[str]:
+    lines: list[str] = []
+    cur = ""
+    for word in words:
+        if cur and len(cur) + 1 + len(word) > max_chars:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}".strip()
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _hook_banner_text(title: str, max_chars: int = 16, max_lines: int = 3,
+                      base_size: int = 94) -> str:
     """Turn the punchy title into an UPPERCASE, emoji-free, word-wrapped banner for frame 1.
 
     Returns the ASS-ready string (lines joined with '\\N'), or '' if nothing renderable
     remains. Strips characters the burn font can't draw so the banner never shows tofu boxes.
+
+    The text is FITTED, not cut: the font steps down (an inline \\fs override) until every
+    word fits in `max_lines`. The old version stopped at the last full line and threw the rest
+    away with no ellipsis, which truncated 20 of the last 40 banners mid-phrase ('...CLAIM: WHY
+    IT', '...TRADE UNDER'). Only a title too long even at the smallest size is cut, at a word,
+    with an ellipsis.
     """
     # Strip inline delivery tags FIRST. The scriptwriter is instructed to emit [pause]/[sarcastic],
     # and if one leaks into the title or a key point it would be BURNED onto the video as literal
     # "[SARCASTIC]" — brackets are plain ASCII, so _NON_RENDERABLE does not catch them.
     cleaned = _DELIVERY_TAG.sub(" ", title or "")
     cleaned = _NON_RENDERABLE.sub("", cleaned)
+    # "MINUTE—WHY" is one unbreakable word to the wrapper; spaced, the dash can end a line.
+    cleaned = re.sub(r"\s*[—–]\s*", " — ", cleaned)
     cleaned = _ass_escape(re.sub(r"\s+", " ", cleaned)).upper()
     if not cleaned:
         return ""
-    lines: list[str] = []
-    cur = ""
-    for word in cleaned.split():
-        if cur and len(cur) + 1 + len(word) > max_chars:
-            lines.append(cur)
-            cur = word
-            if len(lines) >= max_lines:
-                break
-        else:
-            cur = f"{cur} {word}".strip()
-    if cur and len(lines) < max_lines:
-        lines.append(cur)
-    return "\\N".join(lines)
+    words = cleaned.split()
+    # Down to 0.58 (55 px at the hook's 94): still legible on a phone, and enough for a 7-word
+    # title that word-wrapping pushed onto a fourth line at 0.72 (local render, 2026-09-27).
+    scales = (1.0, 0.89, 0.8, 0.72, 0.64, 0.58)
+    for scale in scales:
+        chars = int(max_chars / scale)
+        lines = _wrap(words, chars)
+        if len(lines) <= max_lines:
+            size = int(round(base_size * scale))
+            text = "\\N".join(lines)
+            return text if scale == 1.0 else f"{{\\fs{size}}}{text}"
+    lines = _wrap(words, int(max_chars / scales[-1]))[:max_lines]
+    return (f"{{\\fs{int(round(base_size * scales[-1]))}}}"
+            + "\\N".join(lines).rstrip(" :,;-") + "…")
 
 
 def _build_events(words: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
@@ -161,6 +243,61 @@ def _build_events(words: list[tuple[float, float, str]]) -> list[tuple[float, fl
         end = nxt if nxt > start else start + 0.10
         events.append((start, end, text))
     return events
+
+
+# libass draws the bundled Montserrat at 0.632x the width PIL measures at the same size
+# (calibrated 2026-09-27 on three real renders, 0.630-0.632). Karaoke is 104 px.
+_LIBASS_WIDTH = 0.632
+_KARAOKE_PX = 104
+# 1080 minus MarginL 90 and MarginR 150: the right-hand 120 px is the Shorts action rail.
+_MAX_CAPTION_PX = 840
+_SENTENCE_END = re.compile(r"[.!?:;…]['\")\]]*$")
+
+
+@lru_cache(maxsize=1)
+def _caption_font():
+    try:
+        from PIL import ImageFont
+
+        return ImageFont.truetype(config.get(
+            "CAPTION_FONT_FILE", os.path.join("assets", "fonts", "Montserrat-Bold.ttf")),
+            _KARAOKE_PX)
+    except Exception:  # noqa: BLE001 — fall back to a character estimate
+        return None
+
+
+def _caption_px(text: str) -> float:
+    font = _caption_font()
+    if font is not None:
+        return font.getlength(text) * _LIBASS_WIDTH
+    return len(text) * _KARAOKE_PX * 0.36  # Montserrat Bold averages about 0.57 em a glyph
+
+
+def _caption_groups(words: list[tuple[float, float, str]],
+                    size: int) -> list[list[tuple[float, float, str]]]:
+    """Up to `size` words per caption, never across a sentence end, never wider than the safe
+    width. Fixed chunks of 3 put 13% of captions across a sentence break ('matters When news')
+    and ran 1% off the frame ('Germany's ThyssenKrupp Marine' is 1130 px)."""
+    groups: list[list[tuple[float, float, str]]] = []
+    cur: list[tuple[float, float, str]] = []
+    for w in words:
+        if not _clean_caption_word(w[2]):
+            continue
+        trial = " ".join(_clean_caption_word(x[2]) for x in [*cur, w])
+        if cur and (len(cur) >= size or _caption_px(trial) > _MAX_CAPTION_PX):
+            groups.append(cur)
+            cur = []
+        cur.append(w)
+        if _SENTENCE_END.search(w[2].strip()):
+            groups.append(cur)
+            cur = []
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+# The longest pause a caption is held across (seconds).
+_HOLD_GAP = 0.6
 
 
 def _cs(seconds: float) -> int:
@@ -198,23 +335,33 @@ def _ass_header() -> str:
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
-WrapStyle: 2
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,640,1
+Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,90,150,640,1
 Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
 Style: Card,{font},90,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,5,40,40,0,1
-Style: Source,{font},46,&H20FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,40,40,120,1
+Style: Source,{font},46,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,40,40,440,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
+def _spoken_at(point: str, words: list[tuple[float, float, str]], after: float) -> float | None:
+    """When the narration first says a distinctive word of `point`, after `after`; else None."""
+    wanted = {_norm(t) for t in point.split() if len(_norm(t)) > 3 or _norm(t).isdigit()}
+    for start, _end, text in words or []:
+        if start >= after and _norm(text) in wanted:
+            return start
+    return None
+
+
 def _card_events(key_points: list[str], total_dur: float, start_after: float,
-                 card_dur: float) -> list[tuple[float, float, str]]:
+                 card_dur: float,
+                 words: list[tuple[float, float, str]] | None = None) -> list[tuple[float, float, str]]:
     """Place each key-point card briefly at its beat across (start_after, total_dur].
 
     Cards are SPARSE — one short flash per point with gaps between — because constant on-screen
@@ -225,11 +372,20 @@ def _card_events(key_points: list[str], total_dur: float, start_after: float,
         return []
     slot = span / len(pts)
     out: list[tuple[float, float, str]] = []
+    cursor = start_after
     for i, p in enumerate(pts):
+        # On the beat where the point is SAID when it can be found (audit 2026-09-27: evenly
+        # spaced cards flashed a number seconds before or after the narration reached it);
+        # otherwise the old even slot.
+        heard = _spoken_at(p, words, cursor)
         center = start_after + slot * (i + 0.5)
-        s = max(start_after, center - card_dur / 2)
+        s = heard if heard is not None else max(start_after, center - card_dur / 2)
+        s = max(s, cursor)
         e = min(total_dur, s + card_dur)
+        if e - s < 0.5:
+            continue
         out.append((round(s, 3), round(e, 3), p))
+        cursor = e
     return out
 
 
@@ -295,19 +451,24 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
         dur = total_dur if total_dur else (words[-1][1] if words else 0.0)
         start_after = float(config.get("HOOK_SECONDS", "1.8"))
         card_dur = float(config.get("CARD_SECONDS", "1.8"))
-        for cs, ce, text in _card_events(key_points, dur, start_after, card_dur):
-            banner = _hook_banner_text(text, max_chars=18, max_lines=2)
+        for cs, ce, text in _card_events(key_points, dur, start_after, card_dur, words):
+            banner = _hook_banner_text(text, max_chars=18, max_lines=2, base_size=90)
             if banner:
                 lines.append(f"Dialogue: 2,{_format_ts(cs)},{_format_ts(ce)},Card,,0,0,0,,{banner}")
 
     # Group words into short phrases; each phrase is ONE karaoke line whose words fill to the
     # highlight colour exactly as spoken (active-word highlight — a retention driver).
     size = max(1, int(config.get("CAPTION_WORDS", "3")))
-    for i in range(0, len(words), size):
-        chunk = [w for w in words[i : i + size] if _clean_caption_word(w[2])]
-        if not chunk:
-            continue
+    groups = _caption_groups(words, size)
+    for gi, chunk in enumerate(groups):
         start, end = chunk[0][0], chunk[-1][1]
+        # Hold the caption to the next one across a short gap: dropping it for a breath between
+        # phrases made the captions blink. The 'no blank frame' rule lived only in
+        # _build_events, which production never calls. A real pause (over HOLD_GAP) still clears.
+        if gi + 1 < len(groups):
+            nxt = groups[gi + 1][0][0]
+            if 0 < nxt - end <= _HOLD_GAP:
+                end = nxt
         end = end if end > start else start + 0.10
         lines.append(
             f"Dialogue: 0,{_format_ts(start)},{_format_ts(end)},Karaoke,,0,0,0,,{_karaoke_line(chunk)}"
@@ -344,9 +505,9 @@ def _burn(video_path: str, ass_path: str, out_path: str,
         cmd += ["-loop", "1", "-i", os.path.basename(png)]  # basename + cwd: no path escaping
 
     if not cards:
-        cmd += ["-vf", f"ass={os.path.basename(ass_path)}:fontsdir=."]
+        cmd += ["-vf", f"ass={os.path.basename(ass_path)}:fontsdir=.,{BT709_TAGS}"]
     else:
-        parts = [f"[0:v]ass={os.path.basename(ass_path)}:fontsdir=.[base]"]
+        parts = [f"[0:v]ass={os.path.basename(ass_path)}:fontsdir=.,{BT709_TAGS}[base]"]
         label = "[base]"
         for i, (cs, ce, _png) in enumerate(cards, start=1):
             nxt = f"[c{i}]"
@@ -357,7 +518,7 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 
     cmd += [
         "-c:a", "copy",
-        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        *x264_args(final=True),
         "-movflags", "+faststart",
         os.path.abspath(out_path),
     ]
@@ -368,7 +529,7 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 
 def burn_captions(video_path: str, audio_path: str, out_path: str,
                   hook_text: str | None = None, key_points: list[str] | None = None,
-                  source_label: str | None = None) -> str:
+                  source_label: str | None = None, script_text: str | None = None) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
@@ -378,6 +539,9 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     With ENABLE_GRAPHIC_CARDS the key points render as PIL stat-card PNGs overlaid on the video
     instead of ASS text; if that render or its filtergraph fails we fall back to the ASS cards,
     so the styled-card path can never cost us a reel (rules 11, 14).
+
+    `script_text` (the narration as written) supplies the caption WORDS; whisper supplies only
+    their timing (see _align_to_script).
     """
     if not os.path.exists(video_path):
         raise ValueError(f"subtitles: video not found: {video_path}")
@@ -387,6 +551,7 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     words = _transcribe_words(audio_path)
     if not words:
         raise RuntimeError("subtitles: transcription produced no words — cannot caption reel.")
+    words = _align_to_script(words, script_text)
 
     out_dir = os.path.dirname(os.path.abspath(out_path))
     os.makedirs(out_dir, exist_ok=True)

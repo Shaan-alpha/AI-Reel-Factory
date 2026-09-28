@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -54,15 +55,24 @@ class FactCheckUnavailable(RuntimeError):
     digest rather than be rejected as if the story were false (`_release_failed_idea`)."""
 
 
+# Aggregator and redirect hosts: they carry a story, they are not its source.
+_NOT_A_PUBLISHER = ("news.google.com", "vertexaisearch.cloud.google.com")
+
+
 def _source_domain(sources: list[str] | None) -> str | None:
-    """Bare domain of the first source URL (for an on-screen citation), or None."""
+    """Bare domain of the first PUBLISHER source (for the on-screen citation), or None.
+
+    It burned "Source: news.google.com" when every source was a Google News link (local render,
+    2026-09-28). Publishers come first; with only aggregator links the label says Google News,
+    which is at least what it is."""
+    hosts = []
     for s in sources or []:
         host = urlparse(s if "://" in str(s) else "http://" + str(s)).netloc.lower()
-        if host.startswith("www."):
-            host = host[4:]
-        if host:
+        hosts.append(host[4:] if host.startswith("www.") else host)
+    for host in hosts:
+        if host and not host.endswith(_NOT_A_PUBLISHER):
             return host
-    return None
+    return "Google News" if any(h.endswith("news.google.com") for h in hosts) else None
 
 _PLATFORM = "youtube"
 
@@ -72,7 +82,7 @@ _PLATFORM = "youtube"
 # Override the whole block via the DESCRIPTION_FOOTER env var; disable via ENABLE_DESC_FOOTER=false.
 _DEFAULT_FOOTER = (
     "—\n"
-    "📌 But It Matters — the news that actually matters, in 60 seconds.\n"
+    "📌 But It Matters — the news that actually matters, in 30 seconds.\n"
     "🔔 New explainer Shorts every day → Subscribe @butitmatters\n\n"
     "#ButItMatters #NewsShorts #WhyItMatters"
 )
@@ -99,7 +109,11 @@ def _work_root() -> str:
     return root
 
 
-_CORE_CHANNEL_TAGS = ("But It Matters", "News Shorts", "Why It Matters", "India News Explainer", "Trending News")
+_CORE_CHANNEL_TAGS = ("But It Matters", "News Shorts", "Why It Matters", "Trending News")
+# Added only when the story involves India: it was on every upload, US-only stories included.
+_INDIA_TAG = "India News Explainer"
+_INDIA_RE = re.compile(r"(?i)\b(india|indian|indians|modi|delhi|mumbai|rupee|isro|bjp|lok sabha|"
+                       r"rajya sabha|kolkata|chennai|bengaluru|bangalore|hyderabad)\b")
 
 
 def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True) -> dict:
@@ -110,7 +124,10 @@ def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True)
     """
     title = (script.get("title") or idea.get("title") or "").strip()
     seen, tags = set(), []
-    extra_tags = _CORE_CHANNEL_TAGS if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True) else ()
+    extra_tags: tuple = ()
+    if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True):
+        story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+        extra_tags = _CORE_CHANNEL_TAGS + ((_INDIA_TAG,) if _INDIA_RE.search(story) else ())
     for t in [*script.get("hashtags", []), *script.get("tags", []), *extra_tags]:
         t = str(t).lstrip("#").strip()
         if t and t.lower() not in seen:
@@ -140,48 +157,96 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     # monetization gate (rule 6) — a strike costs far more than a skipped reel.
     # Only FABRICATION-grade findings block (2026-08-07): imprecision is waived and logged, so
     # the gate stops false stories rather than stopping the channel. See src/factcheck.py.
-    check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "")
-    if check.get("minor"):
+    # The cards and the description are published claims too, and were never checked.
+    summary_text = (script.get("caption") or "").split("\nSources:")[0].strip()
+    check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "",
+                             on_screen=[*(script.get("key_points") or []), summary_text])
+    if check.get("minor") and check["ok"]:
         log.warning("produce: idea %s shipped with %d waived minor fact issue(s): %s",
                     idea_id, len(check["minor"]), " | ".join(check["minor"][:3]))
     # `ok=True` is ALSO what a fail-open returns, so "passed" and "could not be checked" were
     # indistinguishable here and an unverified reel shipped looking exactly like a verified one.
-    # The gate shares a 20/day grounded budget with ideation and the scriptwriter, so it runs dry
-    # on precisely the busiest days (audit 2026-09-03). Accuracy is the monetization gate (rule 6):
-    # if it did not run, say so on the operator's phone rather than in a log nobody reads.
+    # On the Developer API the gate shared a 20/day grounded budget and ran dry on the busiest days
+    # (audit 2026-09-03); on Vertex an outage is rarer but not impossible. Accuracy is the
+    # monetization gate (rule 6): if it did not run, say so on the operator's phone.
     if check["ok"] and factcheck.enabled() and not factcheck.gate_ran(check):
         log.warning("produce: idea %s is shipping UNVERIFIED — %s", idea_id, check.get("reason"))
         _notify(f"⚠️ Idea {idea_id} ({idea.get('title')!r}) shipped UNVERIFIED — the fact-check "
-                f"gate could not run ({check.get('reason')}). Set FACTCHECK_API_KEY to give it "
-                f"its own quota, or FACTCHECK_STRICT=true to block instead.")
+                f"gate could not run ({check.get('reason')}). Set FACTCHECK_STRICT=true to hold "
+                f"such reels back instead (it is the live setting; this means it is off).")
     if not check["ok"] and str(check.get("reason", "")).startswith("checker-failed"):
         raise FactCheckUnavailable(
             f"idea {idea_id} held back: the fact-check could not run ({check.get('reason')}). "
             f"FACTCHECK_STRICT is on, so it was not published unverified; it goes back to the "
             f"digest.")
+    first_check = check
+    if not check["ok"] and check.get("unsupported") and \
+            config.get_bool("ENABLE_FACTCHECK_REPAIR", True):
+        # One repair pass, then the SAME gate again. It can only make a reel eligible: the
+        # rewrite is re-verified, and a second block stands.
+        fixed = scriptwriter.repair_script(script["script_body"], check["unsupported"],
+                                           topic=idea.get("title"))
+        if fixed:
+            recheck = factcheck.verify(fixed, idea.get("sources"), script.get("title") or "",
+                                       on_screen=[*(script.get("key_points") or []), summary_text])
+            if recheck["ok"] and factcheck.gate_ran(recheck):
+                log.warning("produce: idea %s repaired after the fact-check block (%s)",
+                            idea_id, factcheck.summary(check))
+                script["script_body"] = fixed
+                db.update_script_body(script["script_id"], fixed)
+                check = recheck
+            else:
+                log.warning("produce: idea %s repair did not pass the gate either", idea_id)
+    _record_verdict(script, check, repaired=check is not first_check)
     if not check["ok"]:
-        db.set_idea_status(idea_id, "rejected")
+        db.set_idea_status(idea_id, "blocked")
         raise FactCheckFailed(
             f"idea {idea_id} failed fact check: {factcheck.summary(check)}")
 
     work = os.path.join(work_root, f"idea_{idea_id}")
     os.makedirs(work, exist_ok=True)
     try:
-        audio, duration = voice.synthesize(script["script_body"], work)
+        spoke: dict = {}
+        audio, duration = voice.synthesize(script["script_body"], work, meta=spoke,
+                                           tone=script.get("tone"))
+        log.info("produce: idea %s voiced by %s", idea_id, spoke.get("voice"))
+        # The channel has ONE narrator, and it lives only on the Gemini engine. Three reels in
+        # September left it for Chirp's voice with nothing but a log line to show for it, which
+        # is how "the sound is very different" reached the operator before any alert did.
+        if spoke.get("engine") != "gemini":
+            _notify(f"🎙️ Idea {idea_id} ({idea.get('title')!r}) was voiced by the "
+                    f"{spoke.get('voice')} fallback, not the channel voice: every Gemini "
+                    f"attempt failed. It will sound different from the other Shorts.")
         keywords = visuals.extract_keywords(script["script_body"])
-        clips = visuals.fetch_broll(keywords, duration, work)
+        story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+        clips = visuals.fetch_broll(keywords, duration, work,
+                                    setting="India" if _INDIA_RE.search(story) else None)
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
         # Pass the punchy title so subtitles burn it as a frame-1 hook banner (the first frame
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
         hook = script.get("title") or idea.get("title")
         final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
                                         hook_text=hook, key_points=script.get("key_points"),
-                                        source_label=_source_domain(idea.get("sources")))
-        video_id, url = publish_youtube.publish(final, _build_metadata(idea, script), script["script_id"])
+                                        source_label=_source_domain(idea.get("sources")),
+                                        script_text=script["script_body"])
+        metadata = _build_metadata(idea, script)
+        metadata["voice"] = spoke.get("voice")
+        video_id, url = publish_youtube.publish(final, metadata, script["script_id"])
         db.set_idea_status(idea_id, "produced")
         return video_id, url
     finally:
         shutil.rmtree(work, ignore_errors=True)  # render artifacts are disposable (rule 15)
+
+
+def _record_verdict(script: dict, check: dict, repaired: bool) -> None:
+    """Keep the verdict on the script row. Best-effort: bookkeeping never costs a reel."""
+    verdict = {"ok": bool(check.get("ok")), "reason": check.get("reason"),
+               "checked": check.get("checked"), "blocking": check.get("unsupported") or [],
+               "minor": check.get("minor") or [], "repaired": repaired}
+    try:
+        db.set_script_factcheck(script["script_id"], verdict)
+    except Exception as e:  # noqa: BLE001 — rule 14
+        log.warning("produce: could not store the fact-check verdict (%s)", e)
 
 
 def _notify_failure(idea: dict, error: Exception) -> None:
@@ -206,7 +271,8 @@ def _release_failed_idea(idea_id: int, error: Exception) -> None:
     not a verdict on the idea, so it belongs in front of the operator again rather than in the
     bin. A FactCheckFailed is the exception — produce_one already set it to 'rejected' because
     that IS a verdict on the content, and re-offering it would just re-spend quota to reach the
-    same answer. Best-effort: never let bookkeeping kill the batch (rule 14).
+    same answer. (It is 'blocked' since 2026-09-27, so a gate verdict no longer looks like the
+    operator's own Reject.) Best-effort: never let bookkeeping kill the batch (rule 14).
     """
     if isinstance(error, FactCheckFailed):
         return
@@ -279,10 +345,14 @@ def run() -> None:
 
     ensure_ideas_and_digest()
 
-    try:  # apply any queued approvals; Telegram being down must not block production
-        approval.process_responses(max_seconds=int(config.get("DRAIN_SECONDS", "20")))
-    except Exception as e:  # noqa: BLE001
-        log.warning("production: approval drain failed (continuing): %s", e)
+    # In webhook mode the Vercel bot has already written every tap to the database, and polling
+    # getUpdates against an active webhook is refused by Telegram (409). Only the polling mode
+    # needs the drain.
+    if _approval_mode() != "webhook":
+        try:  # apply any queued approvals; Telegram being down must not block production
+            approval.process_responses(max_seconds=int(config.get("DRAIN_SECONDS", "20")))
+        except Exception as e:  # noqa: BLE001
+            log.warning("production: approval drain failed (continuing): %s", e)
 
     summary = run_production()
     log.info("production: done — %d published, %d failed.",
@@ -293,13 +363,26 @@ def _approval_mode() -> str:
     return (config.get("TELEGRAM_APPROVAL_MODE") or "polling").strip().lower()
 
 
-def _wait_for_webhook_decisions(max_seconds: int, poll_seconds: int = 5) -> int:
-    """Wait while the Vercel Telegram webhook writes approval taps into Supabase."""
+def _wait_for_webhook_decisions(max_seconds: int, poll_seconds: int = 5,
+                                offered: list[int] | None = None) -> int:
+    """Wait while the Vercel Telegram webhook writes approval taps into Supabase.
+
+    Scoped to the ideas THIS run offered, and done as soon as the approval cap is reached: it
+    used to wait for every pending idea in the table, so 5 of 14 sampled runs sat out the full
+    30 minutes while an approved reel waited behind ideas nobody was going to tap."""
     deadline = time.monotonic() + max_seconds
+    wanted = {int(i) for i in offered} if offered is not None else None
+    cap = int(config.get("APPROVAL_CAP", config.get("DAILY_REEL_CAP", "3")))
     while True:
-        pending = db.get_pending_ideas()
+        pending = [i for i in db.get_pending_ideas()
+                   if wanted is None or int(i["id"]) in wanted]
         if not pending:
             log.info("approval: all ideas decided via webhook.")
+            break
+        approved_now = [i for i in db.get_approved_ideas()
+                        if wanted is None or int(i["id"]) in wanted]
+        if len(approved_now) >= cap:
+            log.info("approval: approval cap (%d) reached; not waiting for the rest.", cap)
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -329,7 +412,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     existing = db.get_pending_ideas()
     if existing:
         n = len(existing)
-        log.info("make_on_demand: %d pending idea(s) already queued (Routine).", n)
+        log.info("make_on_demand: %d pending idea(s) already queued from an earlier run.", n)
     else:
         try:
             n = ideation_fallback.seed_ideas(num_ideas)
@@ -350,7 +433,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     offered = [i["id"] for i in db.get_pending_ideas()]
     approval.send_digest()
     if _approval_mode() == "webhook":
-        _wait_for_webhook_decisions(max_seconds=wait_minutes * 60)
+        _wait_for_webhook_decisions(max_seconds=wait_minutes * 60, offered=offered)
     else:
         approval.process_responses(max_seconds=wait_minutes * 60)
 
@@ -369,6 +452,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "make":
-        make_on_demand(int(os.environ.get("IDEAS", "3")), int(os.environ.get("WAIT_MIN", "20")))
+        # config.get, not os.environ.get: a scheduled run passes IDEAS="" and int("") crashed.
+        make_on_demand(int(config.get("IDEAS", "3")), int(config.get("WAIT_MIN", "20")))
     else:
         run()

@@ -96,7 +96,8 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 ### D. Runtime reliability (this is a headless, free-tier, cron-driven system)
 
 11. **Fallbacks are mandatory — the digest never dies.** Every external dependency has a
-    fallback chain: ideation **Claude → Gemini → Groq**, voice **edge-tts → Kokoro**, visuals
+    fallback chain: ideation **Claude → Gemini → Groq**, voice **Gemini TTS (same voice on
+    Vertex) → Chirp 3 HD → edge-tts → Kokoro**, visuals
     **Pexels → Pixabay**. A single upstream failure must never kill the daily run.
 12. **Idempotent, safe reruns.** Cron can and will retry. Check Supabase state before acting —
     never double-publish, double-insert, or re-spend quota. Every step is safe to run twice.
@@ -144,7 +145,7 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 - **Phase:** 1 (MVP) — **built and live.** The full chain (ideation → Telegram approval →
   script → fact-check → voice → visuals → assembly → captions → YouTube) runs unattended; 76
   Shorts published as of 2026-09-03. Every module in [src/](src/) is implemented and tested.
-- **Primary trigger is ON-DEMAND**, not cron: run the `make-short` workflow (or send
-  `/makeshort` to the Telegram bot) and approve from the digest. `production.yml`'s schedule
-  stays commented out on purpose.
+- **Trigger: on demand plus two scheduled digests a day.** `make-short` runs at 09:00 and
+  18:30 IST (and whenever you run it or send `/makeshort`); each proposes ideas and produces only
+  what you tap. `production.yml`'s schedule stays commented out on purpose.
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.
