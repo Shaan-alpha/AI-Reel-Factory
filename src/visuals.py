@@ -1,13 +1,17 @@
 """Module 5 — Visuals (stock B-roll).
 
 Contract:
-    what it does : finds + downloads CC0 vertical B-roll for a script's keywords.
+    what it does : finds + downloads licence-clean vertical B-roll for a script's keywords.
     input        : script_body or keyword list; target duration; output dir.
     output       : list of local clip paths covering the narration length.
     depends on   : Pexels API (primary) -> Pixabay (backup) (rule 11); requests; src.config.
 
-COPYRIGHT SAFETY (docs/08 §3): CC0 stock only — NEVER broadcaster/agency footage. Both
-Pexels and Pixabay are commercial-use, no-attribution. Prefer maps/charts/data-viz for impact
+COPYRIGHT SAFETY (docs/08 §3): our own AI illustrations or Pexels/Pixabay stock, NEVER
+broadcaster/agency footage. Neither stock licence is CC0 (both checked 2026-09-28): they are free
+for commercial use without attribution, but the Pexels License says identifiable people "may not
+appear in a bad light", and Pixabay's forbids misleading use "especially Content which features
+recognisable people". A news Short can be exactly that, so the queries keep faces out of frame
+(hands, silhouettes, distant crowds, places and objects). Prefer maps/charts/data-viz for impact
 stories (push that via keywords). Assembly cuts every `CLIP_SECONDS` (3.5s by default), so we
 gather several short clips for variety, not one long one — and ask `assembly.slice_count()` how
 many rather than guessing, so image B-roll covers every cut instead of looping.
@@ -79,15 +83,18 @@ def _keywords_via_llm(script_body: str, n: int) -> list[str]:
         f"  court case/legal -> 'courtroom', 'judge gavel', 'law books'\n"
         f"  ISRO/space mission -> 'rocket launch', 'satellite orbit', 'mission control'\n"
         f"  economy/stocks -> 'stock market screen', 'indian currency', 'city skyline'\n"
-        f"  AI/tech -> 'data center', 'circuit board', 'person using laptop'\n"
+        f"  AI/tech -> 'data center', 'circuit board', 'hands typing laptop'\n"
         f"  oil/energy -> 'oil refinery', 'oil pump jack', 'cargo ship'\n"
         f"  defense/military -> 'military jet', 'naval warship', 'radar screen'\n"
         f"  infrastructure -> 'bullet train', 'highway traffic', 'construction crane'\n"
         f"  crypto/finance -> 'bitcoin coin', 'gold bars', 'digital vault'\n"
         f"  sport -> 'football stadium', 'soccer match', 'cheering crowd'\n"
         f"Prefer visually striking, high-motion subjects (they hold attention): places, objects, "
-        f"people doing things, nature, cities, crowds, maps. AVOID people's names, brands, logos "
-        f"and abstract words (policy, economy, impact) — only things a camera can film.\n"
+        f"nature, cities, maps, and people only as hands, silhouettes or distant crowds. NEVER a "
+        f"query built around a face or one identifiable person: the stock licences forbid showing "
+        f"identifiable people in a bad light, and a news story can be exactly that. AVOID "
+        f"people's names, brands, logos and abstract words (policy, economy, impact) — only "
+        f"things a camera can film.\n"
         f"PLACES ARE THE EXCEPTION: when the story names a country, city or landmark, keep it in "
         f"the query ('Mumbai skyline', 'the White House', 'Nepal mountain village') and never swap "
         f"in a different one. A White House story was illustrated with the US Capitol, and "

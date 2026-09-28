@@ -43,7 +43,7 @@
 | 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
 | 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; honest framing + why-it-matters + **key-point cards**; compliance enforced; **25-30s length enforced** (punch-up no longer lengthens + hard word cap); 20 tests |
 | 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain + **opt-in Gemini TTS** head (promptable, free Flash model) and **per-engine delivery tags** (`[pause]`→Chirp markup, `[sarcastic]`→Gemini); 47 tests (incl. gated live) |
-| 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + CC0 portrait B-roll; 11 tests (incl. live) · *Phase B: story-specific* |
+| 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + licence-clean portrait B-roll (Pexels/Pixabay licences, not CC0); 11 tests (incl. live) · *Phase B: story-specific* |
 | 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel + **premium polish** (crossfade transitions, cinematic grade, vignette/grain) + **retention v2** (music ducking, brand-logo bug, loop-friendly endings), all toggle-gated + fail-soft; 29 tests (incl. live full render) |
 | 7 | Subtitles (faster-whisper) | ✅ Done — **karaoke + frame-1 hook + key-point cards** (Montserrat) + **source lower-third**; 22 tests (incl. live burn) |
 | 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |

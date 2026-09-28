@@ -61,7 +61,9 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 6. **News-niche compliance is the monetization gate** (see [docs/08](docs/08-news-niche-playbook.md)):
    - **Originality** — every reel adds analysis ("why it matters"), never a bare summary.
    - **AI disclosure** — set YouTube's synthetic-content flag + a description disclosure line.
-   - **Copyright** — CC0 B-roll only (no broadcaster/agency footage); cut every 5–8s; own words + cite.
+   - **Copyright** — licence-clean B-roll only: our own AI illustrations, or Pexels/Pixabay stock
+     (free, no attribution, but NOT CC0: no identifiable person shown in a bad light). No
+     broadcaster/agency footage; cut every 5–8s; own words + cite.
    - **Accuracy — truth over neutrality** (operator policy, 2026-07-27). ≥2 independent sources
      per claim. The channel **may reach a verdict and name who is responsible**; a well-sourced
      conclusion is not "taking a side", and the earlier "neutral framing" requirement is retired.

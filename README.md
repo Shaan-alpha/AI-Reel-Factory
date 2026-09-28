@@ -64,7 +64,7 @@ See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.m
 - [x] **Near-human voice** — Gemini TTS (Zubenelgenubi), the same voice on Vertex as its first fallback, then Chirp 3 HD
 - [x] **Story-specific AI B-roll** — Cloudflare Flux images + Ken Burns motion
 - [x] **Premium auto-editing** — crossfade transitions, cinematic grade, music ducking, brand-logo bug, loop-friendly endings
-- [x] **News-niche compliance** — ≥2 sources/claim, on-screen source citation, AI-disclosure + synthetic-content flag, CC0/own-words
+- [x] **News-niche compliance** — ≥2 sources/claim, on-screen source citation, AI-disclosure + synthetic-content flag, licence-clean visuals/own words
 - [x] **On-demand operation**; trigger the `make-short` workflow → ideas → Telegram digest → approve → render → published link
 
 ---

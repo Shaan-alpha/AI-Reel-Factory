@@ -350,3 +350,15 @@ def test_an_indian_story_gets_an_indian_setting():
     p = visuals._img_prompt("atm cash", 0, "India")
     assert "set in India" in p and "rupee" in p
     assert "set in" not in visuals._img_prompt("atm cash", 0)
+
+
+def test_stock_queries_keep_identifiable_faces_out(monkeypatch):
+    """Pexels and Pixabay are not CC0: identifiable people may not appear in a bad light, and a
+    news Short can be exactly that. The prompt used to ask for "people doing things"."""
+    seen = {}
+    monkeypatch.setattr(visuals.llm, "generate",
+                        lambda prompt, **k: seen.setdefault("p", prompt) and '{"keywords": ["a"]}')
+    visuals.extract_keywords(SCRIPT, n=3)
+    p = seen["p"]
+    assert "people doing things" not in p
+    assert "silhouettes" in p and "identifiable" in p

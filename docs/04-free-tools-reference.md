@@ -56,8 +56,8 @@ Google Cloud TTS gives **1M chars/month free** (≈ our entire volume), so the $
 | Tool | Notes | Link |
 |------|-------|------|
 | **Cloudflare Workers AI — Flux** ★ primary | `VISUAL_SOURCE=ai` — story-specific AI images (`@cf/black-forest-labs/flux-1-schnell`) + Ken Burns. Free tier; needs `CF_API_TOKEN`+`CF_ACCOUNT_ID` | https://developers.cloudflare.com/workers-ai/ |
-| **Pexels API** | CC0, commercial OK, no attribution, has video (stock fallback) | https://www.pexels.com/api/ |
-| **Pixabay API** | CC0-like, download & self-host friendly (stock fallback) | https://pixabay.com/api/docs/ |
+| **Pexels API** | Pexels License (not CC0): commercial OK, no attribution, has video; identifiable people may not appear in a bad light (stock fallback) | https://www.pexels.com/api/ |
+| **Pixabay API** | Pixabay Content License (not CC0): commercial OK, no attribution; no misleading use of recognisable people (stock fallback) | https://pixabay.com/api/docs/ |
 | Coverr | Free AI + stock clips | https://coverr.co/ |
 | (Generative video) | Veo/Runway free tiers — rate-capped, **not** for daily volume | — |
 
