@@ -777,21 +777,30 @@ def seed_ideas(n: int = 3, already_pending: int = 0) -> int:
     n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "3"))) - max(0, already_pending)
     if n <= 0:
         return 0
-    routine = load_routine_ideas()
-    pool = routine if routine else _produce_ideas(max(n * 2, 4))
-    source = "routine file" if routine else "gemini/groq fallback"
-
     seen = db.existing_idea_titles()
     recent = _recent_ideas()
-    pool = [i for i in pool if not _repeats_recent_story(i, recent)]
-    fresh: list[dict] = []
-    for idea in sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key):
-        # Within the batch too: the grounded pass and the top-up pitched the same Trump/Iran and
-        # LPU stories twice each, sharing a source link (live, 2026-09-27).
-        if not _repeats_recent_story(idea, fresh):
-            fresh.append(idea)
-        if len(fresh) >= n:
-            break
+
+    def _pick(pool: list[dict]) -> list[dict]:
+        pool = [i for i in pool if not _repeats_recent_story(i, recent)]
+        fresh: list[dict] = []
+        for idea in sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key):
+            # Within the batch too: the grounded pass and the top-up pitched the same Trump/Iran
+            # and LPU stories twice each, sharing a source link (live, 2026-09-27).
+            if not _repeats_recent_story(idea, fresh):
+                fresh.append(idea)
+            if len(fresh) >= n:
+                break
+        return fresh
+
+    routine = load_routine_ideas()
+    fresh = _pick(routine) if routine else []
+    source = "routine file"
+    if not fresh:
+        # A routine file holding only ideas already pitched used to end the run here with "no
+        # fresh ideas", although the generator had never been asked (audit 2026-09-27).
+        if routine:
+            log.info("ideation: nothing fresh in the routine file; using the generator.")
+        fresh, source = _pick(_produce_ideas(max(n * 2, 4))), "gemini/groq fallback"
     if not fresh:
         raise RuntimeError(f"ideation: no fresh ideas to seed (source: {source}).")
     log.info("ideation: seeding %d idea(s) from %s.", len(fresh), source)

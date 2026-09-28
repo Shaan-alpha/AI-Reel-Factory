@@ -912,3 +912,19 @@ def test_seed_ideas_generates_only_what_the_digest_still_needs(monkeypatch):
                         lambda n: pytest.fail("a full digest must not spend an ideation call"))
     monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
     assert fb.seed_ideas(3, already_pending=3) == 0
+
+
+def test_a_routine_file_with_nothing_fresh_falls_back_to_the_generator(monkeypatch):
+    """Only already-pitched ideas in the routine file ended the run before the generator ran."""
+    old = {"title": "Old Story", "hook": "h", "angle": "a", "sources": ["https://a.com/1"],
+           "est_score": 0.5, "niche": "impact-news"}
+    new = {"title": "New Story", "hook": "h2", "angle": "a2", "sources": ["https://b.com/2"],
+           "est_score": 0.6, "niche": "impact-news"}
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [old])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda n: [new])
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: {"old story"})
+    monkeypatch.setattr(fb, "_recent_ideas", lambda: [])
+    inserted = []
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: inserted.extend(rows) or rows)
+    assert fb.seed_ideas(1) == 1
+    assert [r["title"] for r in inserted] == ["New Story"]
