@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.18.0 (**PUBLIC**, tagged) + **unreleased: the 2026-09-13 fixes and the 2026-09-27/28 audit** (**614 pass, 5 skipped** — measured 2026-09-28)
+**Version:** 0.18.0 (**PUBLIC**, tagged) + **untagged on `main`: the 2026-09-13 fixes and the 2026-09-27/28 audit** (PR #12, merged 2026-09-28 · **614 pass, 5 skipped**)
 **Last updated:** 2026-09-28 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp · somber read for tragedies · whoosh removed
@@ -156,6 +156,12 @@ and a full local render of a current story (the 2026-09-28 bank strike) through 
   verified on both versions first); checkout/setup-python v7, cache v6.
 - **Two bugs of mine caught before shipping:** a status update that never executed (live DB
   test) and a removal alert that would have repeated daily (found while reading the code).
+- **Shipped.** PR #12 merged to `main` (`3ac1ac0`) after its `tests` run passed (614 pass,
+  5 skipped), with `verify-vertex` and `verify-tts` passing on the branch. The Vercel bot was
+  redeployed (`telegram-k2wvf1c1q`, aliased to `telegram-bot-gilt-omega.vercel.app`): GET 200,
+  an unsigned POST 401 (configured and authenticating, not the fail-closed 503), webhook with no
+  errors. The two scheduled digests are live from this merge. The local `.venv` is on the new pins
+  and passes the suite.
 
 ### 2026-09-27 — Full audit: why the sound changed, a model retiring in 3 weeks, and 60+ findings
 
