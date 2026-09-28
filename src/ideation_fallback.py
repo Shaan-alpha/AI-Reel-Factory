@@ -762,16 +762,21 @@ def _repeats_recent_story(idea: dict, recent: list[dict]) -> bool:
     return False
 
 
-def seed_ideas(n: int = 3) -> int:
+def seed_ideas(n: int = 3, already_pending: int = 0) -> int:
     """Seed ~n fresh 'pending' ideas for the on-demand digest. Return the count inserted.
 
     Prefers the daily Routine's web-researched ideas (data/daily-ideas.json); falls back to
     the Gemini/Groq generator when that file is absent/empty. De-duplicates against ideas
     already in the table so repeated triggers don't re-propose the same ones.
+
+    `already_pending` ideas from an earlier run go in the same digest, so only the difference
+    is generated; none at all when the digest is already full.
     """
     # At least DIGEST_MIN_IDEAS go in front of the operator: every observed run asked for 1, and
     # 3 of the 4 candidates already built and validated were thrown away (audit 2026-09-27).
-    n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "3")))
+    n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "3"))) - max(0, already_pending)
+    if n <= 0:
+        return 0
     routine = load_routine_ideas()
     pool = routine if routine else _produce_ideas(max(n * 2, 4))
     source = "routine file" if routine else "gemini/groq fallback"

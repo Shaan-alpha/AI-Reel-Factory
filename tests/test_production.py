@@ -205,7 +205,7 @@ def test_make_on_demand_flow(monkeypatch):
     monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])  # empty → generate
     calls = []
     monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
-                        lambda n: calls.append(("gen", n)) or 3)
+                        lambda n, already_pending=0: calls.append(("gen", n)) or 3)
     monkeypatch.setattr(production.approval, "send_digest", lambda: calls.append(("digest",)))
     monkeypatch.setattr(production.approval, "process_responses",
                         lambda **k: calls.append(("drain", k)) or 1)
@@ -223,23 +223,74 @@ def test_make_on_demand_flow(monkeypatch):
     assert any("https://yt/x" in n for n in notes)  # link sent to Telegram
 
 
-def test_make_on_demand_prefers_existing_pending(monkeypatch):
+def test_make_on_demand_tops_up_ideas_already_queued(monkeypatch):
+    """Leftovers go in the digest WITH fresh ideas. Any pending idea used to switch ideation off,
+    so the evening digest would have re-sent the morning's untapped ideas and nothing new."""
     monkeypatch.setattr(production.config, "validate", lambda: None)
     monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 1}, {"id": 2}])
+    calls = []
     monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
-                        lambda n: pytest.fail("must not generate when ideas already queued"))
+                        lambda n, already_pending=0: calls.append((n, already_pending)) or 1)
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 1)
     monkeypatch.setattr(production, "run_production",
                         lambda limit=None, only_ids=None: {"published": [], "failed": []})
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+    production.make_on_demand()
+    assert calls == [(3, 2)]
+    assert any("3 idea(s) ready" in n for n in notes), notes
+
+
+def test_make_on_demand_keeps_queued_ideas_when_the_top_up_comes_up_dry(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 1}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
+                        _raiser(RuntimeError("ideation: no fresh ideas to seed")))
+    sent = []
+    monkeypatch.setattr(production.approval, "send_digest", lambda: sent.append(1))
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: {"published": [], "failed": []})
     monkeypatch.setattr(production, "_notify", lambda t: None)
-    production.make_on_demand()  # uses the 2 queued ideas, no generation
+    production.make_on_demand()
+    assert sent, "the queued idea must still be offered"
+
+
+def test_leftover_approvals_go_back_to_the_digest(monkeypatch):
+    """A late tap, or a job killed mid-chain, left an idea at 'approved' that no run produces,
+    holding one of the bot's three approval slots for good."""
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 7}, {"id": 8}])
+    moves = []
+    monkeypatch.setattr(production.db, "set_idea_status",
+                        lambda i, s, from_status=None: moves.append((i, s, from_status)) or i == 7)
+    assert production._release_leftover_approvals() == 1
+    assert moves == [(7, "pending", "approved"), (8, "pending", "approved")]
+
+
+def test_make_on_demand_releases_leftover_approvals_before_the_age_out(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    order = []
+    monkeypatch.setattr(production, "_release_leftover_approvals",
+                        lambda: order.append("release") or 0)
+    monkeypatch.setattr(production.db, "expire_stale_pending_ideas",
+                        lambda: order.append("expire") or 0)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 9}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n, already_pending=0: 0)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: 1)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: {"published": [], "failed": []})
+    monkeypatch.setattr(production, "_notify", lambda t: None)
+    production.make_on_demand(3, 1)
+    assert order == ["release", "expire"], "a released idea must still be aged out if it is old"
 
 
 def test_make_on_demand_nothing_approved(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
     monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])
-    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n: 3)
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
+                        lambda n, already_pending=0: 3)
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
     monkeypatch.setattr(production, "run_production",
@@ -428,6 +479,7 @@ def test_a_factcheck_failure_stays_rejected_and_is_not_re_offered(monkeypatch):
 def test_make_on_demand_scopes_production_to_the_ideas_it_offered(monkeypatch):
     monkeypatch.setattr(production.config, "validate", lambda: None)
     monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 11}, {"id": 12}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n, already_pending=0: 0)
     monkeypatch.setattr(production.approval, "send_digest", lambda: None)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 1)
     monkeypatch.setattr(production, "_notify", lambda t: None)
@@ -516,6 +568,7 @@ def test_make_on_demand_expires_stale_pending_before_reusing_it(monkeypatch):
                         lambda: order.append("expire") or 2)
     monkeypatch.setattr(production.db, "get_pending_ideas",
                         lambda: order.append("read") or [{"id": 9}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n, already_pending=0: 0)
     monkeypatch.setattr(production.approval, "send_digest", lambda: 1)
     monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
     monkeypatch.setattr(production, "_wait_for_webhook_decisions", lambda **k: 0)

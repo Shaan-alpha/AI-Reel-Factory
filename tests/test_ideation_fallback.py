@@ -904,3 +904,11 @@ def test_an_unrelated_search_hit_is_not_attached(monkeypatch):
     idea = {"title": "56 Dead in India Floods", "hook": "Floods and landslides kill 56"}
     out = fb._search_for_more(idea, [], trusted=0)
     assert "https://f.example/floods" in out and "https://e.example/cricket" not in out
+
+
+def test_seed_ideas_generates_only_what_the_digest_still_needs(monkeypatch):
+    """Leftovers from an earlier run count toward the digest; a full digest generates nothing."""
+    monkeypatch.setattr(fb, "_produce_ideas",
+                        lambda n: pytest.fail("a full digest must not spend an ideation call"))
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
+    assert fb.seed_ideas(3, already_pending=3) == 0

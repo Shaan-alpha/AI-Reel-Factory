@@ -282,6 +282,26 @@ def _release_failed_idea(idea_id: int, error: Exception) -> None:
         log.warning("production: could not release idea %s back to pending.", idea_id)
 
 
+def _release_leftover_approvals() -> int:
+    """Put ideas an earlier run left at 'approved' back in front of the operator. Returns how many.
+
+    make_on_demand produces only the ideas it offered, while the bot's approval cap counts EVERY
+    approved row. An idea tapped after its run stopped waiting (a late tap on a scheduled
+    digest), or one stranded when the job was killed mid-chain (a timeout skips
+    `_release_failed_idea`), was never produced and held a cap slot for good: three of them and
+    every later tap answers "capped" (STATUS 2026-09-01). The `reel-pipeline` concurrency group
+    means no other run is in flight, so anything approved at the start of a run is a leftover.
+    Back to 'pending', needing a fresh tap, rather than produced: a stranded approval was already
+    spent on an attempt that failed.
+    """
+    released = [i["id"] for i in db.get_approved_ideas()
+                if db.set_idea_status(i["id"], "pending", from_status="approved")]
+    if released:
+        log.warning("make_on_demand: %d idea(s) left at 'approved' by an earlier run go back to "
+                    "the digest for a fresh tap: %s", len(released), released)
+    return len(released)
+
+
 def run_production(limit: int | None = None, only_ids: list[int] | None = None) -> dict:
     """Produce the approved queue (capped). One failure is logged + skipped (rule 14).
 
@@ -398,8 +418,10 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     """On-demand 'make a Short': propose fresh ideas to Telegram, wait for taps, produce the
     approved ones, and reply with the links. Triggered by the make-short workflow button."""
     config.validate()
-    # Prefer ideas already queued (the daily Anthropic Routine inserts these straight into
-    # Supabase). Only generate via the Gemini/Groq fallback when the queue is empty.
+    try:  # best-effort, like the age-out below: bookkeeping must never block a run (rule 14)
+        _release_leftover_approvals()
+    except Exception as e:  # noqa: BLE001
+        log.warning("make_on_demand: could not release leftover approvals (%s)", e)
     # BEFORE reading the queue: a stale idea reused as "today's digest" is worse than no idea
     # at all on a daily-news channel. Best-effort — bookkeeping must never block a run (rule 14).
     try:
@@ -409,22 +431,28 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     except Exception as e:  # noqa: BLE001
         log.warning("make_on_demand: could not age out stale ideas (%s)", e)
 
+    # Ideas still pending from an earlier run (untapped, or released above) go in this digest,
+    # topped up with fresh ones. Any leftover used to switch ideation off entirely, so with two
+    # scheduled digests a day the evening one would have re-sent the morning's untapped ideas
+    # and no news from the nine hours between.
     existing = db.get_pending_ideas()
     if existing:
-        n = len(existing)
-        log.info("make_on_demand: %d pending idea(s) already queued from an earlier run.", n)
-    else:
-        try:
-            n = ideation_fallback.seed_ideas(num_ideas)
-        except Exception as e:  # noqa: BLE001 — a dry ideation pass is runtime, not misconfig
-            # Rule 14: fail loud on misconfig, SOFT on runtime. "No story cleared sourcing right
-            # now" is the soft kind — an upstream 503, a thin news feed, a search that returned
-            # nothing citable. Run 33755597063 raised here and exited 1, so the only signal the
-            # operator got was a red X in the Actions UI; a tap on the phone deserves an answer
-            # on the phone. config.validate() above still hard-stops a missing secret.
-            log.warning("make_on_demand: ideation produced nothing (%s)", e)
+        log.info("make_on_demand: %d pending idea(s) already queued from an earlier run.",
+                 len(existing))
+    try:
+        seeded = ideation_fallback.seed_ideas(num_ideas, already_pending=len(existing))
+    except Exception as e:  # noqa: BLE001 — a dry ideation pass is runtime, not misconfig
+        # Rule 14: fail loud on misconfig, SOFT on runtime. "No story cleared sourcing right
+        # now" is the soft kind — an upstream 503, a thin news feed, a search that returned
+        # nothing citable. Run 33755597063 raised here and exited 1, so the only signal the
+        # operator got was a red X in the Actions UI; a tap on the phone deserves an answer
+        # on the phone. config.validate() above still hard-stops a missing secret.
+        log.warning("make_on_demand: ideation produced nothing (%s)", e)
+        if not existing:
             _notify(f"🤷 No Short this time — ideation came up dry: {e}")
             return {"published": [], "failed": []}
+        seeded = 0
+    n = len(existing) + seeded
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
     # The ideas THIS run is putting in front of the operator. Captured before the digest so
