@@ -106,7 +106,9 @@ or they can be measuring different things. Block only when the WEIGHT of the evi
 contradicts the script — not when it merely fails to line up exactly.
 
 NOT your concern: tone, sarcasm, opinion, or whether the take is harsh. A sharply worded verdict \
-that the evidence supports is FINE. You are checking facts, not manners.
+that the evidence supports is FINE. You are checking facts, not manners. Opinion lines, rhetorical \
+questions, predictions and value judgements ("if the press can't show up, you don't get the \
+truth") are not factual claims: never list them in either bucket.
 
 Calibrate: most scripts should pass. If your only objections are precision, phrasing or \
 confidence, the verdict is "pass" and every item goes in "minor".
@@ -342,7 +344,11 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
     screen_block = ("\nALSO PUBLISHED WITH IT (on-screen cards and the description; check these "
                     "claims too):\n" + "\n".join(f"- {t}" for t in extra) + "\n") if extra else ""
     today = datetime.now(timezone.utc).date()
-    prompt = _PROMPT.format(body=f"{title}\n\n{body}".strip(), sources=src_block,
+    # Labelled: unlabelled, the title read as a headline the script was quoting, and one check
+    # blocked script 314 for "mentioning" it (audit 2026-09-27). It is published, so it is checked.
+    titled = (f"OUR VIDEO TITLE (ours, not a quoted headline; check its claims like the rest): "
+              f"{title.strip()}\n\n{body}") if (title or "").strip() else body
+    prompt = _PROMPT.format(body=titled, sources=src_block,
                             on_screen=screen_block, today=today.isoformat(), year=today.year)
 
     raw = ""

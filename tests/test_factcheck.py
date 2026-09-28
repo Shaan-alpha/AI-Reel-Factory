@@ -186,6 +186,8 @@ def test_prompt_sends_the_sources_and_asks_for_graded_findings(monkeypatch):
     assert "NON-CONFIRMATION does not" in p          # not-found is minor, not fatal
     assert "disagreeing does not make the script wrong" in p   # the operator's own reasoning
     assert "tone" in p.lower()                       # tone/opinion explicitly out of scope
+    assert "OUR VIDEO TITLE (ours, not a quoted headline" in p   # 314 was blocked for its title
+    assert "never list them in either bucket" in p   # opinion lines are not claims
 
 
 def test_tolerates_json_in_markdown_fences(monkeypatch):
