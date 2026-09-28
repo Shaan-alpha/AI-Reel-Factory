@@ -31,7 +31,7 @@ def test_format_idea_escapes_and_lists_sources():
     body = approval._format_idea(IDEA)
     assert "&lt;reusable&gt;" in body          # HTML-escaped
     assert "https://a.example" in body and "https://b.example" in body
-    assert "0.82" in body
+    assert "0.82" not in body                  # est_score orders the digest; it is not shown
 
 
 def test_digest_sources_fit_on_one_line_however_many_there_are():
@@ -46,7 +46,8 @@ def test_digest_sources_fit_on_one_line_however_many_there_are():
 
     assert body.count("<a href=") == 3, "at most three publishers are named"
     assert "+14 more" in body
-    assert "📰" in body and body.count("\n") == 3, "title, hook, angle, then ONE score+sources line"
+    assert "📰" in body and body.count("\n") == 3, "title, hook, angle, then ONE sources line"
+    assert "⭐" not in body and "0.82" not in body, "est_score does not predict views"
     assert ">Google News<" in body and ">theguardian.com<" in body
     visible = re.sub(r"<[^>]+>", "", body)
     assert len(visible) < 400 and "news.google.com/rss" not in visible

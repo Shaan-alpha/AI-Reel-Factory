@@ -99,15 +99,17 @@ def _format_sources(sources: list[str]) -> str:
 
 
 def _format_idea(idea: dict) -> str:
-    """Compact HTML message body for one idea: title, hook, angle, then score + sources on ONE
-    line. Sources stay tappable so the operator can still sanity-check one (docs/08 §6)."""
+    """Compact HTML message body for one idea: title, hook, angle, then the sources on ONE line.
+    Sources stay tappable so the operator can still sanity-check one (docs/08 §6).
+
+    No score: a "⭐ 0.72" read as a quality rating, and est_score does not predict views
+    (Spearman 0.13 against day-1 views over 78 published ideas, audit 2026-09-27). It still
+    orders the digest and the production queue."""
     def esc(x):
         return html.escape(str(x or ""))
 
     from src import scriptwriter  # local: the tone rule lives in ONE place (rule 7)
 
-    score = idea.get("est_score")
-    score_str = f"{float(score):.2f}" if score is not None else "—"
     # The sensitivity filter was prompt-only; a story about deaths or serious harm is now
     # flagged for the approver, who also learns it will be read in a serious tone.
     flag = ("⚠️ <i>Sensitive: deaths or serious harm. It will be written and read in a "
@@ -116,7 +118,7 @@ def _format_idea(idea: dict) -> str:
         f"{flag}<b>{esc(idea.get('title'))}</b>\n"
         f"<i>Hook:</i> {esc(idea.get('hook'))}\n"
         f"<i>Why it matters:</i> {esc(idea.get('angle'))}\n"
-        f"⭐ {score_str}  {_format_sources(idea.get('sources') or [])}"
+        f"{_format_sources(idea.get('sources') or [])}"
     )
 
 
