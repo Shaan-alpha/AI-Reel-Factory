@@ -331,6 +331,7 @@ def test_thinking_config_is_picked_per_model_generation():
 
 # --- the fallback itself must be alive (rule 11) ------------------------------------------
 
+@pytest.mark.live
 @pytest.mark.skipif(not os.environ.get("GROQ_API_KEY"),
                     reason="needs a live Groq key (.env / Actions secrets)")
 @pytest.mark.parametrize("as_json", [False, True])
@@ -402,6 +403,7 @@ def test_gen_groq_reasoning_effort_is_overridable(monkeypatch):
     assert seen.get("reasoning_effort") == "medium"
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not os.environ.get("GROQ_API_KEY"),
                     reason="needs a live Groq key (.env / Actions secrets)")
 def test_groq_survives_the_real_keyword_prompt_at_its_real_budget():

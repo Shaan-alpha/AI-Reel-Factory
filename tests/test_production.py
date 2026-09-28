@@ -59,6 +59,9 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     produced = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: produced.append((i, s)))
     monkeypatch.setattr(production.db, "set_script_factcheck", lambda *a, **k: None)
+    # The repair pass is a grounded rewrite: left real, a blocked reel made live model calls.
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "update_script_body", lambda *a, **k: None)
     return produced
 
 
