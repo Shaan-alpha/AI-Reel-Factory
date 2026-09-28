@@ -89,7 +89,8 @@ Source: [fair-use guide 2026](https://joyspace.ai/copyright-proof-shorts-fair-us
 
 - **Two-source minimum** for any claim before it becomes a reel; Claude must capture source
   URLs in the idea row.
-- **Neutral, factual framing.** No sensationalism, no unverified rumor, no "BREAKING" bait.
+- **Factual framing; a verdict only where the evidence supports it** (§5, truth over neutrality,
+  2026-07-27). No sensationalism, no unverified rumor, no "BREAKING" bait.
 - **Cite the source** out loud and in the caption ("according to …").
 - Prefer **established developments** over fast-moving rumors (the "daily explainer" cadence
   intentionally avoids the breaking-news accuracy trap).
@@ -161,7 +162,7 @@ line; set `FACTCHECK_STRICT=true` to block instead.
 |--------|------------------------|
 | **1 Ideation (Claude)** | Research today's developments in the lane; prefer high-impact under-covered angles; capture **source URLs**; apply the sensitivity filter; output `{title, hook, angle, est_score, sources}`. |
 | **2 Approval** | Digest shows the source link per idea so you can sanity-check before approving. |
-| **3 Scriptwriter** | Template N; **rewrite facts in own words + cite**; the core of the script is **original "why it matters" analysis**; neutral framing. |
+| **3 Scriptwriter** | Template N; **rewrite facts in own words + cite**; the core of the script is **original "why it matters" analysis**; a verdict only where the evidence supports it (§5). |
 | **5 Visuals** | AI-generated illustrative B-roll (symbolic stand-ins) + Pexels/Pixabay stock without identifiable faces + maps/charts/data viz; **no broadcaster footage**; AI images stay abstract, never photoreal fakes of real people/events; high edit density. |
 | **7 Subtitles** | Burn an on-screen **"Source: <domain>"** citation in the first seconds (reinforces sourcing on-screen). |
 | **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; description includes sources + disclosure line; `#Shorts`. |

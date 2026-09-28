@@ -130,8 +130,10 @@ create table hook_performance (
 
 ## 6c. Cloudflare Workers AI — AI-generated B-roll (free tier) ★ recommended
 
-The default visual source is **AI imagery** (`VISUAL_SOURCE=ai`): story-specific Flux images +
-Ken Burns motion, falling back to stock when unavailable.
+Production runs on **AI imagery** (`VISUAL_SOURCE=ai`, set as a repo variable): story-specific
+illustrative Flux images + Ken Burns motion, falling back to stock for any image that fails. The
+code and workflow default is `photos` (Pexels stills), so a fresh fork without the variable uses
+stock until you set it.
 
 1. Create a Cloudflare account → **Workers & Pages** → note your **Account ID**.
 2. **My Profile → API Tokens → Create Token** with the **Workers AI** permission.

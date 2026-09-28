@@ -56,8 +56,12 @@ log = logging.getLogger(__name__)
 #
 # 2026-09-27: on Vertex (what CI runs) the picture is different, and time-limited. Google's
 # model-versions page lists gemini-2.5-flash for RETIREMENT ON 2026-10-20, replacement
-# gemini-3.5-flash-lite, while Gemini 3 models ground fine on Vertex (5,000 grounded prompts/month
-# free, then $14/1,000; 3.5 Flash-Lite tokens cost what 2.5 Flash's do). Measured the same day:
+# gemini-3.5-flash-lite, while Gemini 3 models ground fine on Vertex (5,000 search QUERIES/month
+# free, then $14/1,000; 3.5 Flash-Lite tokens cost what 2.5 Flash's do). The allowance counts
+# queries, not prompts, and a fact-check prompt runs about 3: measured 2026-09-28, one reel
+# spends 7 (1 for the grounded write, 3 for each of the gate's 2 samples), about 14 with a
+# repair pass. Six reels a day, every one repaired, plus ideation is about 3,000 a month, so
+# the schedule stays inside the free allowance with room to spare. Measured the same day:
 # grounded search answers on gemini-3.5-flash-lite and gemini-3.5-flash in this project. So
 # GEMINI_GROUNDED_MODEL is now an ordered, comma-separated CHAIN (see _grounded_chain), and
 # the default depends on the backend. On Vertex the pipeline moved off gemini-2.5-flash ahead of
@@ -380,9 +384,11 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
     callers can fall back to plain generate(). Gemini-only — Groq has no grounding.
 
     Pass `model` to spend a DIFFERENT model's free-tier quota (see _gen_gemini_grounded), or
-    `api_key` to spend a different PROJECT's. Both matter: measured 2026-09-03, ideation +
-    the scriptwriter + the fact-check gate share ONE 20/day grounded budget, a 3-reel run
-    costs 7 calls, and once it is gone the gate fails open (factcheck.verify).
+    `api_key` to spend a different PROJECT's. Both matter on the Developer API: measured
+    2026-09-03, ideation + the scriptwriter + the fact-check gate share ONE 20/day grounded
+    budget, a 3-reel run costs 7 calls, and once it is gone the gate fails open
+    (factcheck.verify). Vertex, the production backend since 2026-09-04, has no such daily cap
+    (see the grounding note at the top of this module).
 
     Retried once on a transient error, because this path has NO second provider (Groq has no
     grounding) and its failure is silent: `factcheck.verify` treats a checker outage as

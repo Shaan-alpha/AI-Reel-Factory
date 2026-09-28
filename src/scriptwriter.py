@@ -225,9 +225,10 @@ def _generate_script_json(prompt: str) -> dict:
     JSON mode if grounding is unavailable or returns unusable JSON. Accuracy guard for a public
     channel — grounding lets the model catch a fabricated premise instead of repeating it.
 
-    ENABLE_GROUNDED_SCRIPT=false skips the grounded attempt entirely. It exists because this call
-    is one of the 7 a 3-reel run spends from the single 20/day grounded budget shared with
-    ideation and `factcheck.verify` (audit 2026-09-03) — and when that budget runs dry it is the
+    ENABLE_GROUNDED_SCRIPT=false skips the grounded attempt entirely. It exists because on the
+    Developer API this call is one of the 7 a 3-reel run spends from the single 20/day grounded
+    budget shared with ideation and `factcheck.verify` (audit 2026-09-03; production has run on
+    Vertex, without that cap, since 2026-09-04) — and when that budget runs dry it is the
     fact-check GATE that stops working. If one of the two has to go, the gate is worth more: it
     re-verifies the finished script, so a fabricated premise is still caught downstream. Default
     stays ON — this is a lever for a busy day, not a silent quality cut."""

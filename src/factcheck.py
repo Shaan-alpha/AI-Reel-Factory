@@ -164,7 +164,8 @@ def _model() -> str | None:
 def _api_key() -> str | None:
     """A dedicated Gemini key for the gate, or None to share GEMINI_API_KEY.
 
-    Free grounded search is 20 requests/day and is metered per PROJECT as well as per model.
+    On the Developer API (production has used Vertex, which has no such cap, since 2026-09-04),
+    free grounded search is 20 requests/day and is metered per PROJECT as well as per model.
     Ideation (1/run), the scriptwriter (1/reel) and this gate (1/reel) all draw on the same
     bucket, so a 3-reel run costs 7 and a third run in a day exhausts it — measured live on
     2026-09-03 (`429 ... limit: 20, model: gemini-2.5-flash`). When it runs dry the gate
