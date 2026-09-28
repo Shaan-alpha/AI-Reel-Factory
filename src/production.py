@@ -55,6 +55,34 @@ class FactCheckUnavailable(RuntimeError):
     digest rather than be rejected as if the story were false (`_release_failed_idea`)."""
 
 
+# The job's hard kill (timeout-minutes) is invisible to Python, and a kill skips every except
+# block: an idea mid-chain stays 'approved', and one killed between the upload and insert_post
+# is invisible to both idempotency guards, so a rerun would publish it twice. The workflow
+# passes its timeout as JOB_TIMEOUT_MINUTES. The clock starts when this module is imported, a
+# few minutes after the job itself (checkout, pip, FFmpeg): JOB_SETUP_MINUTES covers that.
+_STARTED = time.monotonic()
+
+
+def _seconds_left() -> float | None:
+    """Seconds before the job is killed, or None when no timeout is configured (a local run)."""
+    try:
+        total = float(config.get("JOB_TIMEOUT_MINUTES", "0") or 0)
+        setup = float(config.get("JOB_SETUP_MINUTES", "5") or 0)
+    except (TypeError, ValueError):
+        return None
+    if total <= 0:
+        return None
+    return (total - setup) * 60 - (time.monotonic() - _STARTED)
+
+
+def _reel_seconds() -> float:
+    """Time to allow one reel end to end (about 6 min measured on CI, more with a repair pass)."""
+    try:
+        return float(config.get("REEL_BUDGET_MINUTES", "12")) * 60
+    except (TypeError, ValueError):
+        return 720.0
+
+
 # Aggregator and redirect hosts: they carry a story, they are not its source.
 _NOT_A_PUBLISHER = ("news.google.com", "vertexaisearch.cloud.google.com")
 
@@ -325,7 +353,19 @@ def run_production(limit: int | None = None, only_ids: list[int] | None = None) 
 
     work_root = _work_root()
     published, failed = [], []
-    for idea in approved:
+    for done, idea in enumerate(approved):
+        left = _seconds_left()
+        if left is not None and left < _reel_seconds():
+            rest = approved[done:]
+            ids = [i.get("id") for i in rest]
+            log.warning("production: %.0f s left before the job timeout, less than a reel needs; "
+                        "%d approved idea(s) go back to the digest: %s", left, len(rest), ids)
+            for i in rest:
+                _release_failed_idea(i.get("id"), RuntimeError("out of time"))
+            failed.extend({"idea_id": i, "error": "out of time"} for i in ids)
+            _notify(f"⏱️ Out of time for {len(rest)} approved idea(s) before the job's limit; "
+                    f"they go back to the next digest.")
+            break
         try:
             video_id, url = produce_one(idea, work_root)
             published.append({"idea_id": idea["id"], "video_id": video_id, "url": url})
@@ -453,6 +493,15 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
             return {"published": [], "failed": []}
         seeded = 0
     n = len(existing) + seeded
+    # The wait must leave time for at least one reel before the job is killed. A manual
+    # wait_min is unbounded, and 60 with a 60-minute job guaranteed a kill (audit 2026-09-27).
+    left = _seconds_left()
+    if left is not None:
+        room = max(1, int((left - _reel_seconds()) // 60))
+        if room < wait_minutes:
+            log.warning("make_on_demand: waiting %d min, not %d, so a reel still fits before "
+                        "the job's time limit.", room, wait_minutes)
+            wait_minutes = room
     _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
             f"(waiting up to {wait_minutes} min).")
     # The ideas THIS run is putting in front of the operator. Captured before the digest so
@@ -469,6 +518,8 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     if summary["published"]:
         for p in summary["published"]:
             _notify(f"✅ Published: {p['url']}")
+    elif summary["failed"]:  # each failure (or the time limit) was already reported
+        _notify("No Short published this time.")
     else:
         _notify("Nothing approved — no Short produced this time.")
     log.info("make_on_demand: %d published, %d failed.",

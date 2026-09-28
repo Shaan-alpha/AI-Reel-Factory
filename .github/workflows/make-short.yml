@@ -193,4 +193,7 @@ jobs:
           IDEA_MAX_AGE_HOURS: ${{ vars.IDEA_MAX_AGE_HOURS || '24' }}
           IDEAS: ${{ inputs.ideas || '3' }}         # a scheduled run has no inputs
           WAIT_MIN: ${{ inputs.wait_min || '45' }}
+          # Keep equal to timeout-minutes above: the wait is shortened, and a reel is not
+          # started, when the job would be killed before it finished.
+          JOB_TIMEOUT_MINUTES: '90'
         run: python -m src.production make

@@ -175,4 +175,7 @@ jobs:
           # Pending ideas older than this are aged out to 'passed' rather than re-offered
           # as today's digest. 0 disables.
           IDEA_MAX_AGE_HOURS: ${{ vars.IDEA_MAX_AGE_HOURS || '24' }}
+          # Keep equal to timeout-minutes above: a reel is not started when the job would be
+          # killed before it finished.
+          JOB_TIMEOUT_MINUTES: '60'
         run: python -m src.production

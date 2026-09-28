@@ -703,3 +703,56 @@ def test_the_on_screen_source_is_a_publisher_not_the_aggregator():
                                       "https://www.thehindu.com/news/a"]) == "thehindu.com"
     assert production._source_domain(["https://news.google.com/rss/articles/X"]) == "Google News"
     assert production._source_domain([]) is None
+
+
+# --- the job's time limit (audit 2026-09-27, ops) ---------------------------------------------
+# A kill at timeout-minutes skips every except block: the idea stays 'approved', and one killed
+# between the upload and insert_post would be published twice by a rerun.
+
+def test_no_time_limit_is_assumed_when_none_is_configured(monkeypatch):
+    monkeypatch.setattr(production.config, "get",
+                        lambda k, d=None: None if k == "JOB_TIMEOUT_MINUTES" else d)
+    assert production._seconds_left() is None
+
+
+def test_the_time_left_counts_down_from_the_job_limit(monkeypatch):
+    monkeypatch.setattr(production.config, "get",
+                        lambda k, d=None: {"JOB_TIMEOUT_MINUTES": "90",
+                                           "JOB_SETUP_MINUTES": "5"}.get(k, d))
+    monkeypatch.setattr(production, "_STARTED", production.time.monotonic() - 600)
+    left = production._seconds_left()
+    assert 74 * 60 < left <= 75 * 60, left  # 90 - 5 setup - 10 already spent
+
+
+def test_a_reel_that_cannot_finish_in_time_is_not_started(monkeypatch):
+    monkeypatch.setattr(production.db, "get_approved_ideas",
+                        lambda: [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}])
+    monkeypatch.setattr(production, "_seconds_left", lambda: 300.0)
+    monkeypatch.setattr(production, "produce_one",
+                        lambda *a, **k: pytest.fail("must not start a reel it cannot finish"))
+    moved = []
+    monkeypatch.setattr(production.db, "set_idea_status",
+                        lambda i, s, from_status=None: moved.append((i, s)) or True)
+    notes = []
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+    summary = production.run_production()
+    assert moved == [(1, "pending"), (2, "pending")]
+    assert [f["error"] for f in summary["failed"]] == ["out of time", "out of time"]
+    assert any("Out of time" in n for n in notes)
+
+
+def test_the_wait_leaves_room_for_a_reel(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 1}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n, already_pending=0: 0)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: 1)
+    waited = []
+    monkeypatch.setattr(production.approval, "process_responses",
+                        lambda **k: waited.append(k["max_seconds"]) or 0)
+    monkeypatch.setattr(production, "_seconds_left", lambda: 30 * 60.0)  # 30 min left
+    monkeypatch.setattr(production, "_approval_mode", lambda: "polling")
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: {"published": [], "failed": []})
+    monkeypatch.setattr(production, "_notify", lambda t: None)
+    production.make_on_demand(3, 45)
+    assert waited == [18 * 60], "30 min left minus a 12-minute reel leaves an 18-minute wait"
