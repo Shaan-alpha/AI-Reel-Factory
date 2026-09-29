@@ -330,6 +330,23 @@ def _release_leftover_approvals() -> int:
     return len(released)
 
 
+def _pass_untapped(offered: list[int]) -> int:
+    """Mark ideas this digest offered and nobody tapped as 'passed'. Returns how many.
+
+    Left 'pending', they came back as the next digest and, filling it, kept fresh stories out:
+    on 2026-09-28 the same three ideas were sent at 15:35 and again at 01:32 IST. The operator
+    saw them and let them go, which is what 'passed' means. Conditional on 'pending', so a tap
+    that lands first wins, and a tap on the old message afterwards answers "already decided".
+    Story dedup keeps a passed story from being pitched again for IDEA_DEDUP_DAYS.
+    """
+    wanted = {int(i) for i in offered}
+    untapped = [i["id"] for i in db.get_pending_ideas() if int(i["id"]) in wanted]
+    passed = [i for i in untapped if db.set_idea_status(i, "passed", from_status="pending")]
+    if passed:
+        log.info("make_on_demand: %d untapped idea(s) marked passed: %s", len(passed), passed)
+    return len(passed)
+
+
 def run_production(limit: int | None = None, only_ids: list[int] | None = None) -> dict:
     """Produce the approved queue (capped). One failure is logged + skipped (rule 14).
 
@@ -513,6 +530,10 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
         _wait_for_webhook_decisions(max_seconds=wait_minutes * 60, offered=offered)
     else:
         approval.process_responses(max_seconds=wait_minutes * 60)
+    try:  # best-effort: bookkeeping must never block a run (rule 14)
+        _pass_untapped(offered)
+    except Exception as e:  # noqa: BLE001
+        log.warning("make_on_demand: could not mark untapped ideas passed (%s)", e)
 
     summary = run_production(only_ids=offered)
     if summary["published"]:

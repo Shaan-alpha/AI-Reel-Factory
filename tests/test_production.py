@@ -756,3 +756,35 @@ def test_the_wait_leaves_room_for_a_reel(monkeypatch):
     monkeypatch.setattr(production, "_notify", lambda t: None)
     production.make_on_demand(3, 45)
     assert waited == [18 * 60], "30 min left minus a 12-minute reel leaves an 18-minute wait"
+
+
+# --- an untapped digest is a pass (2026-09-29) --------------------------------------------------
+# The same three ideas went out at 15:35 and again at 01:32 IST: left 'pending', they became the
+# next digest and filled it, so no fresh story was generated.
+
+def test_untapped_ideas_from_this_digest_are_passed(monkeypatch):
+    monkeypatch.setattr(production.db, "get_pending_ideas",
+                        lambda: [{"id": 1}, {"id": 2}, {"id": 9}])
+    moves = []
+    monkeypatch.setattr(production.db, "set_idea_status",
+                        lambda i, s, from_status=None: moves.append((i, s, from_status)) or i != 2)
+    assert production._pass_untapped([1, 2]) == 1  # 2 was tapped meanwhile; 9 is not ours
+    assert moves == [(1, "passed", "pending"), (2, "passed", "pending")]
+
+
+def test_make_on_demand_passes_untapped_ideas_before_production(monkeypatch):
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 5}])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas", lambda n, already_pending=0: 0)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: 1)
+    monkeypatch.setattr(production, "_approval_mode", lambda: "polling")
+    order = []
+    monkeypatch.setattr(production.approval, "process_responses",
+                        lambda **k: order.append("wait") or 0)
+    monkeypatch.setattr(production, "_pass_untapped", lambda offered: order.append(("pass", offered)))
+    monkeypatch.setattr(production, "run_production",
+                        lambda limit=None, only_ids=None: order.append("produce")
+                        or {"published": [], "failed": []})
+    monkeypatch.setattr(production, "_notify", lambda t: None)
+    production.make_on_demand(3, 1)
+    assert order == ["wait", ("pass", [5]), "produce"]
