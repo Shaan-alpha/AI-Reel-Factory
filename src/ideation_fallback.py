@@ -789,9 +789,9 @@ def seed_ideas(n: int = 3, already_pending: int = 0) -> int:
     `already_pending` ideas from an earlier run go in the same digest, so only the difference
     is generated; none at all when the digest is already full.
     """
-    # At least DIGEST_MIN_IDEAS go in front of the operator: every observed run asked for 1, and
-    # 3 of the 4 candidates already built and validated were thrown away (audit 2026-09-27).
-    n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "3"))) - max(0, already_pending)
+    # The operator gets the number asked for: "/makeshort 1" is one idea (operator, 2026-09-29).
+    # DIGEST_MIN_IDEAS can still set a floor; the audit's default of 3 is withdrawn.
+    n = max(1, n, int(config.get("DIGEST_MIN_IDEAS", "1"))) - max(0, already_pending)
     if n <= 0:
         return 0
     seen = db.existing_idea_titles()

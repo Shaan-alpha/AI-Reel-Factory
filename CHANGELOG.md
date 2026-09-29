@@ -15,6 +15,7 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 
 ### Changed (2026-09-29, first day on the merged audit)
 - `make-short` is on demand only again (operator): the scheduled digests ran 6.5-7 hours late.
+- `/makeshort N` offers N ideas: `DIGEST_MIN_IDEAS` defaults to 1 (it was 3).
 - An untapped digest idea is marked `passed` when the wait ends; leftover approvals go back to the
   digest at the start of a run; leftovers are topped up with fresh ideas.
 - A job time budget (`JOB_TIMEOUT_MINUTES`): the wait is shortened and no reel starts it cannot

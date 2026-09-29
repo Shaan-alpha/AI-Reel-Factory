@@ -126,6 +126,9 @@ Each change below is its own commit; **642 pass, 5 skipped**; pushed to `main`, 
 
 - **Schedule removed** from `make-short.yml` (pushed before the next slot). `/makeshort` and the
   workflow button are the triggers again.
+- **`/makeshort N` offers N ideas** (operator): the audit's floor of 3 (`DIGEST_MIN_IDEAS`) now
+  defaults to 1, so `/makeshort 1` is one idea. Ideas still pending from an earlier run (a failed
+  reel, a leftover approval) count toward N.
 - **An untapped digest idea is passed**, not re-offered: left pending, the three ideas became the
   next digest and, filling it, kept fresh ideation from running. The three live rows (432-434)
   were set to `passed` by hand, so the next `/makeshort` brings fresh stories.

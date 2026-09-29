@@ -882,7 +882,8 @@ def test_the_same_story_is_not_seeded_twice_in_one_batch(monkeypatch):
     assert len(titles) == 2 and "Rupee Hits a Record Low" in titles
 
 
-def test_at_least_three_ideas_are_offered_even_when_one_is_asked_for(monkeypatch):
+def test_the_number_of_ideas_asked_for_is_the_number_offered(monkeypatch):
+    """"/makeshort 1" offered three (operator, 2026-09-29: one means one). A floor stays opt-in."""
     pool = [{"niche": "impact-news", "title": t, "hook": "h", "angle": "a",
              "sources": [f"https://x.example/{i}"], "est_score": 0.5}
             for i, t in enumerate(("Rupee hits a record low", "ISRO launches Gaganyaan crew test",
@@ -893,6 +894,9 @@ def test_at_least_three_ideas_are_offered_even_when_one_is_asked_for(monkeypatch
     monkeypatch.setattr(fb.db, "recent_ideas", lambda days=10: [])
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: rows)
     monkeypatch.delenv("DIGEST_MIN_IDEAS", raising=False)
+    assert fb.seed_ideas(1) == 1
+    assert fb.seed_ideas(3) == 3
+    monkeypatch.setenv("DIGEST_MIN_IDEAS", "3")
     assert fb.seed_ideas(1) == 3
 
 
