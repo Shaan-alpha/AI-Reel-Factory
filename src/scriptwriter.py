@@ -30,10 +30,13 @@ log = logging.getLogger(__name__)
 # synthetic-content FLAG set on upload (publish_youtube); this short line is the discreet
 # description backup. Removing disclosure entirely risks forced labels + YPP suspension and
 # does NOT help reach (researched 2026-06-09), so we keep a minimal honest line.
-DISCLOSURE_LINE = "AI-generated narration; stock visuals."
+DISCLOSURE_LINE = "AI-generated narration and music; stock visuals."
 # With VISUAL_SOURCE=ai (the live setting) the reel shows Flux images, not stock footage, so the
 # line above under-disclosed on every reel. Over-disclosing is safe; under-disclosing is not.
-DISCLOSURE_LINE_AI = "AI-generated narration and images."
+DISCLOSURE_LINE_AI = "AI-generated narration, images and music."
+# Music joined both lines on 2026-09-29: the beds in assets/music are generated with Google Lyria
+# (tools/generate_music_beds.py). With the music switched off the line over-discloses, which is
+# the safe direction.
 
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)

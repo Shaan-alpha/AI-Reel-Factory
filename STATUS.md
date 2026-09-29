@@ -62,8 +62,6 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
     `NKPb-InUoJU` (the pipeline's YouTube token cannot edit videos);
   - re-run `tools/get_youtube_token.py` when convenient: it now asks for `yt-analytics.readonly`,
     which unlocks retention data;
-  - optionally swap the music beds for calmer YouTube Audio Library tracks (the four in
-    `assets/music` are tagged Dark/Dramatic; the channel leans soft/positive).
 
 - ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**486 pass, 5 skipped** — 2026-09-13).
 - ⚠️ **Operator action (2026-09-13):** Short `NKPb-InUoJU` (idea 291, Modi-Xi) is public with a
@@ -126,6 +124,13 @@ Each change below is its own commit; **642 pass, 5 skipped**; pushed to `main`, 
 
 - **Schedule removed** from `make-short.yml` (pushed before the next slot). `/makeshort` and the
   workflow button are the triggers again.
+- **New music beds** (operator: "non-copyright bg music"): four calm, neutral instrumentals
+  generated with Google Lyria 2 on the Vertex project replace the four Dark/Dramatic Audio Library
+  tracks. Original, so nothing for Content ID to match; nine candidates cost $0.66 once. Picked by
+  measurement (least bass per style, no vocals, even intros), looped to 62.5 s with an
+  equal-power crossfade (a linear one dipped 2-4.5 dB at the seam). In the production mix all four
+  land at -14.5 LUFS, TP -2.1 dBTP. The description now discloses AI-generated music.
+  `tools/generate_music_beds.py` records the prompts and seeds and spends nothing without `--yes`.
 - **`/makeshort N` offers N ideas** (operator): the audit's floor of 3 (`DIGEST_MIN_IDEAS`) now
   defaults to 1, so `/makeshort 1` is one idea. Ideas still pending from an earlier run (a failed
   reel, a leftover approval) count toward N.
