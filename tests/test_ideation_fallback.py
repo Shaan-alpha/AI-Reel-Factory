@@ -928,3 +928,22 @@ def test_a_routine_file_with_nothing_fresh_falls_back_to_the_generator(monkeypat
     monkeypatch.setattr(fb.db, "insert_ideas", lambda rows: inserted.extend(rows) or rows)
     assert fb.seed_ideas(1) == 1
     assert [r["title"] for r in inserted] == ["New Story"]
+
+
+def test_two_ideas_on_one_story_are_caught_despite_different_wording():
+    """Both went out in the 2026-09-28 digests; a different Indian story must still pass."""
+    a = {"title": "Supreme Court Challenges UPI Transaction Fees",
+         "hook": "Could free UPI payments in India be coming to an end?"}
+    b = {"title": "India's Top Court Grills Govt Over New UPI Charges",
+         "hook": "India's Supreme Court is demanding answers from the government on its decision "
+                 "to charge fees on certain UPI transactions."}
+    other = {"title": "Indian Stock Markets Plunge, Erasing Lakhs of Crores",
+             "hook": "India's SENSEX and NIFTY50 plunged sharply today, wiping out over Rs 6 lakh "
+                     "crore in investor wealth."}
+    assert fb._repeats_recent_story(a, [b])
+    assert not fb._repeats_recent_story(other, [a, b])
+
+
+def test_tokens_fold_plurals_and_drop_filler():
+    assert fb._tokens("India's UPI transactions could be over") == {"india", "upi", "transaction"}
+    assert fb._tokens("press crisis") == {"press", "crisis"}  # not every final s is a plural

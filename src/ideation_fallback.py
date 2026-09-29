@@ -48,12 +48,29 @@ def _rank_key(idea: dict):
 
 # Tiny stopword set so near-identical titles overlap on meaningful words, not glue words.
 _STOPWORDS = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "with",
-              "at", "by", "from", "as", "new", "today"}
+              "at", "by", "from", "as", "new", "today", "be", "been", "are", "was", "were",
+              "could", "would", "will", "can", "may", "its", "it", "this", "that", "over",
+              "into", "after", "about", "just", "now", "why", "how", "what", "has", "have",
+              "s", "t"}  # the leftovers of "India's" and "don't"
+
+
+def _fold(token: str) -> str:
+    """Fold a plural onto its singular ('transactions' -> 'transaction', 'fees' -> 'fee').
+    Crude, but it only has to agree with itself: both sides of every comparison are folded."""
+    if len(token) > 3 and token.endswith("s") and not token.endswith(("ss", "us", "is")):
+        return token[:-1]
+    return token
 
 
 def _tokens(title: str) -> set[str]:
-    """Significant lowercased word tokens of a title (numbers kept, stopwords dropped)."""
-    return {t for t in re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOPWORDS}
+    """Significant lowercased word tokens of a title (numbers kept, stopwords dropped, plurals
+    folded, and the stray 's' of a possessive dropped).
+
+    Two ideas on one story, "Supreme Court Challenges UPI Transaction Fees" and "India's Top
+    Court Grills Govt Over New UPI Charges", went out in the same digest (2026-09-28): they
+    shared five words, but 'transaction'/'transactions' did not match and filler ('be',
+    'could', 'its', 's') diluted the overlap to 0.38, under the 0.4 needed."""
+    return {_fold(t) for t in re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOPWORDS}
 
 # The daily Anthropic Routine (Claude + web research) commits its ideas here; the on-demand
 # flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
