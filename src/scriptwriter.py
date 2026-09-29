@@ -696,6 +696,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # Scroll-stop judge: punch up a weak hook+title before we spend a render (fail-soft, no new facts).
     if config.get_bool("ENABLE_HOOK_JUDGE", True):
         title, body = _punch_up_hook(title, body)
+        title = _fit_title(title)  # the punch-up writes its own title, and nothing capped it
 
     hashtags = data.get("hashtags")
     if not isinstance(hashtags, list):

@@ -632,3 +632,16 @@ def test_a_long_title_is_cut_at_its_dash():
     assert scriptwriter._fit_title(t) == "Nationwide Bank Strike Cancelled at the Last Minute"
     assert len(scriptwriter._fit_title("word " * 30)) <= 70
     assert scriptwriter._fit_title("Short title") == "Short title"
+
+
+def test_a_punched_up_title_is_held_to_the_limit_too(monkeypatch):
+    """_fit_title ran on the writer's title only; the hook doctor's replacement went out as is."""
+    reply = json.dumps({"title": "Short Title",
+                        "script_body": "A clear analysis of why this matters for everyone. " * 6,
+                        "caption": "hook line.", "hashtags": ["#Shorts"]})
+    _patch(monkeypatch, reply)
+    long_title = ("Nationwide Bank Strike Cancelled at the Last Minute—Why It Almost Crashed "
+                  "the System")
+    monkeypatch.setattr(scriptwriter, "_punch_up_hook", lambda t, b: (long_title, b))
+    out = scriptwriter.write_script(IDEA)
+    assert out["title"] == "Nationwide Bank Strike Cancelled at the Last Minute"
