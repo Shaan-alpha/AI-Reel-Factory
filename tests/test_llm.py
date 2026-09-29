@@ -874,3 +874,20 @@ def test_a_dropped_connection_on_a_grounded_call_is_retried():
     """Under FACTCHECK_STRICT one network blip on the gate's call held a reel back."""
     assert llm._retry_wait(RuntimeError("Server disconnected without sending a response.")) == 2.0
     assert llm._retry_wait(RuntimeError("400 INVALID_ARGUMENT")) is None
+
+
+@pytest.mark.parametrize("reply", [
+    'Per the search [1][2], here it is: {"ok": true}',
+    '[pause] {"ok": true}',
+    'Sure.\n```json\n{"ok": true}\n```',
+])
+def test_a_bracket_before_the_json_is_not_the_json(reply):
+    """A preamble bracket used to be decoded as the reply ('[1]') or fail the parse outright."""
+    assert llm.parse_json(reply) == {"ok": True}
+
+
+def test_a_list_of_objects_and_an_empty_list_still_parse():
+    assert llm.parse_json('[{"a": 1}, {"a": 2}] trailing') == [{"a": 1}, {"a": 2}]
+    assert llm.parse_json("[]") == []
+    with pytest.raises(ValueError):
+        llm.parse_json("[1, 2] and nothing else")

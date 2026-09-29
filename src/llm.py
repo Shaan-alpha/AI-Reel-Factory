@@ -491,20 +491,31 @@ def parse_json(raw: str):
     Tolerates fences and prose around it, raw control characters in strings, text AFTER it, and
     raw double quotes inside strings (see `escape_stray_quotes`). The old first-`{`-to-last-`}`
     slice failed on text after the JSON and on a bare array: `[{...}, {...}]` sliced to
-    `{...}, {...}` is the "Extra data" that killed ideation's top-up (run 34954327606)."""
+    `{...}, {...}` is the "Extra data" that killed ideation's top-up (run 34954327606).
+
+    Only an object or a list of objects counts, tried from each `{` or `[` in turn: a bracket in
+    a preamble ('per [1]: {...}', a stray '[pause]') used to be taken as the start of the JSON,
+    which failed, or returned `[1]` in place of the object after it."""
     text = raw or ""
-    starts = [i for i in (text.find("{"), text.find("[")) if i != -1]
+    starts = [m.start() for m in re.finditer(r"[{\[]", text)][:40]
     if not starts:
         raise ValueError(f"no JSON in LLM reply: {text[:200]!r}")
-    blob = text[min(starts):]
     decoder = _jsonlib.JSONDecoder(strict=False)
-    try:
-        return decoder.raw_decode(blob)[0]
-    except _jsonlib.JSONDecodeError:
-        try:
-            return decoder.raw_decode(escape_stray_quotes(blob))[0]
-        except _jsonlib.JSONDecodeError as e:
-            raise ValueError(f"unparseable JSON in LLM reply ({e}): {text[:200]!r}") from e
+    error: Exception | None = None
+    for pos in starts:
+        blob = text[pos:]
+        for candidate in (blob, None):
+            try:
+                data = decoder.raw_decode(candidate if candidate is not None
+                                          else escape_stray_quotes(blob))[0]
+            except _jsonlib.JSONDecodeError as e:
+                error = error or e
+                continue
+            if isinstance(data, dict) or (isinstance(data, list)
+                                          and all(isinstance(x, dict) for x in data)):
+                return data
+            break  # valid JSON, but not the reply's payload ('[1]'): try the next bracket
+    raise ValueError(f"unparseable JSON in LLM reply ({error}): {text[:200]!r}")
 
 
 def parse_json_object(raw: str) -> dict:
