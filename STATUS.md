@@ -10,7 +10,7 @@
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp · somber read for tragedies · whoosh removed
 **Models (Vertex):** text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` · fact-check `gemini-3.5-flash` · ideation `gemini-2.5-flash` until its 2026-10-20 retirement, then `3.5-flash-lite`
-**Trigger:** on demand **plus two scheduled digests a day** (09:00 and 18:30 IST); nothing is produced without a tap
+**Trigger:** **on demand only** (`/makeshort` or the workflow button); the scheduled digests were removed 2026-09-29 (operator); nothing is produced without a tap
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
 

@@ -5,14 +5,9 @@
 name: make-short
 
 on:
-  # Two digests a day (2026-09-27): 0.72 Shorts/day against a 4-5 goal, because every run was
-  # hand-triggered with 1-2 ideas. A scheduled run only PROPOSES: nothing is produced unless you
-  # tap Make it, so an ignored digest costs a Telegram message and runner minutes, not a reel.
-  # Times are UTC: 03:30 = 09:00 IST, 13:00 = 18:30 IST. Delete these two lines to go back to
-  # on-demand only.
-  schedule:
-    - cron: "30 3 * * *"
-    - cron: "0 13 * * *"
+  # On demand only (operator, 2026-09-29). Two scheduled digests ran for one day: GitHub started
+  # them 6.5-7 hours late, so the 18:30 IST digest landed at 01:32 IST. If a schedule comes back,
+  # trigger it from somewhere punctual rather than `schedule:`.
   workflow_dispatch:
     inputs:
       ideas:
