@@ -89,11 +89,17 @@ def _is_model_gone(exc: Exception) -> bool:
     """True if the backend no longer serves the model (retired, or never available here).
 
     Vertex answers `404 NOT_FOUND ... Publisher model ... was not found`; the Developer API says
-    a model is "no longer available". Anything else (503, 429, 400) is NOT a reason to switch
-    models: the fact-check model would change on a blip."""
+    a model is "no longer available". A retirement may also be worded as one (410, "has been
+    retired", "deprecated"), and 2026-10-20 is a day nobody is watching, so those count too.
+    Anything else (503, 429, an ordinary 400) is NOT a reason to switch models: the fact-check
+    model would change on a blip."""
     text = str(exc).lower()
-    return ("404" in text or "not_found" in text) and (
-        "not found" in text or "not_found" in text or "no longer available" in text)
+    if ("404" in text or "not_found" in text) and (
+            "not found" in text or "not_found" in text or "no longer available" in text):
+        return True
+    return any(m in text for m in ("410 gone", "has been retired", "was retired",
+                                   "is retired", "been deprecated", "is deprecated",
+                                   "no longer supported", "no longer available"))
 # Groq retired `llama-3.3-70b-versatile` — it 404s `model_not_found` (found 2026-08-25, live).
 # That left rule 11's mandatory chain with a DEAD second link: every Groq test mocks `_gen_groq`,
 # so the suite stayed green while the only fallback under Gemini failed on every call, turning

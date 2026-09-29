@@ -891,3 +891,17 @@ def test_a_list_of_objects_and_an_empty_list_still_parse():
     assert llm.parse_json("[]") == []
     with pytest.raises(ValueError):
         llm.parse_json("[1, 2] and nothing else")
+
+
+@pytest.mark.parametrize("message, gone", [
+    ("404 NOT_FOUND. Publisher model gemini-2.5-flash was not found", True),
+    ("400 FAILED_PRECONDITION. Model gemini-2.5-flash has been retired.", True),
+    ("410 Gone: gemini-2.5-flash is no longer supported", True),
+    ("400 INVALID_ARGUMENT. The model gemini-2.5-flash is deprecated.", True),
+    ("503 UNAVAILABLE. The model is overloaded.", False),
+    ("429 RESOURCE_EXHAUSTED. Quota exceeded.", False),
+    ("400 INVALID_ARGUMENT. Request contains an invalid argument.", False),
+])
+def test_a_retired_model_is_recognised_however_it_is_worded(message, gone):
+    """gemini-2.5-flash retires on Vertex on 2026-10-20; the chain must move on unattended."""
+    assert llm._is_model_gone(RuntimeError(message)) is gone
