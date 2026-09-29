@@ -5,8 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.18.0 (**PUBLIC**, tagged) + **untagged on `main`: the 2026-09-13 fixes and the 2026-09-27/28 audit** (PR #12, merged 2026-09-28 · **614 pass, 5 skipped**)
-**Last updated:** 2026-09-28 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
+**Version:** 0.18.0 (**PUBLIC**, tagged) + **untagged on `main`: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12) and the 2026-09-29 follow-ups** (**642 pass, 5 skipped**)
+**Last updated:** 2026-09-29 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp · somber read for tragedies · whoosh removed
 **Models (Vertex):** text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` · fact-check `gemini-3.5-flash` · ideation `gemini-2.5-flash` until its 2026-10-20 retirement, then `3.5-flash-lite`
@@ -54,6 +54,9 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
+- **After 2026-10-20** (optional tidy-up): once `gemini-2.5-flash` has retired, drop it from
+  `IDEATION_MODEL` in both pipeline workflows. The chain already moves past it on its own; this
+  only saves the one failed request per ideation call.
 - ⚠️ **Operator actions left from the 2026-09-27/28 audit** (everything else is done):
   - unlist or delete the two public Shorts that never passed the gate, `xRUo6GxYwYo` and
     `NKPb-InUoJU` (the pipeline's YouTube token cannot edit videos);
@@ -113,6 +116,48 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-09-29 — Scheduled digests off; leftovers, dedup and a post-merge review
+
+The first day on the merged audit. The operator reported "my ideas are generating itself": the two
+scheduled digests had started 6.5 and 7 hours late (15:35 and **01:32 IST**), and the night one
+re-sent the afternoon's three ideas, two of them the same UPI story. Operator: **on demand only**.
+Each change below is its own commit; **642 pass, 5 skipped**; pushed to `main`, CI green.
+
+- **Schedule removed** from `make-short.yml` (pushed before the next slot). `/makeshort` and the
+  workflow button are the triggers again.
+- **An untapped digest idea is passed**, not re-offered: left pending, the three ideas became the
+  next digest and, filling it, kept fresh ideation from running. The three live rows (432-434)
+  were set to `passed` by hand, so the next `/makeshort` brings fresh stories.
+- **Leftover approvals** (a late tap, or a job killed mid-chain) go back to the digest at the
+  start of a run instead of holding one of the bot's three approval slots for good; leftover
+  pending ideas are topped up with fresh ones.
+- **Story dedup** folds plurals and drops filler: the two UPI ideas shared five words at 0.38
+  overlap, under 0.4. Over 60 days of real ideas this adds exactly that match (and loses one pair
+  that matched only on "just").
+- **A job time budget:** the wait is shortened so a reel still fits, and no reel starts with
+  under 12 minutes before the job's limit (`JOB_TIMEOUT_MINUTES`, set in the workflows).
+- **`gemini-3.8-flash` refuses MINIMAL thinking** in two wordings; only Vertex's was caught, so
+  on the Developer API every text call went to Groq (seen live in a test run). Both are caught
+  now, and the refusal is remembered per model. Verified live.
+- **Retirement wording:** a 410, "has been retired" or "deprecated" also moves a grounded chain on,
+  so 2026-10-20 does not depend on Vertex saying exactly "404 not found".
+- **The unit suite reached live services:** the local `.env` and CI give it real Supabase keys, so
+  un-stubbed tests wrote to the live `ideas` table, and the repair pass made live Gemini and Groq
+  calls. A `conftest.py` now blocks both outside the opt-in live tests (241 s -> 90 s).
+- **Fact-check:** the title is labelled as ours and opinion lines are ruled out of both buckets
+  (script 314 live: 3/3 pass vs 2/3 with the old prompt; no measured gain claimed for that part).
+- **Stock licences are not CC0** (both pages checked): Pexels forbids identifiable people "in a
+  bad light", Pixabay misleading use of "recognisable people". The keyword prompt now keeps faces
+  out; CLAUDE.md, docs/04 and docs/08 name the real licences.
+- **Smaller fixes:** the punched-up title is capped at 70 too; `est_score` is no longer shown as a
+  star rating (Spearman 0.13 against views); `parse_json` skips a preamble bracket; a routine file
+  with nothing fresh falls back to the generator; stale quota, framing and default notes corrected.
+- **Grounding spend, measured:** 7 search queries per reel (1 write + 3 per gate sample), about 14
+  with a repair. Six repaired reels a day plus ideation is about 3,000 a month, inside Gemini 3's
+  5,000 free on Vertex.
+- **The first reel on the new code** (idea 397, Starship, `pe-LTPYxEEU`) ran clean: tightened
+  95 -> 72 words, gate passed, the channel voice on the Developer API, published in 6 minutes.
 
 ### 2026-09-28 — The audit's decisions, carried out one change at a time
 

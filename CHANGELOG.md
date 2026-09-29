@@ -13,6 +13,24 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Changed (2026-09-29, first day on the merged audit)
+- `make-short` is on demand only again (operator): the scheduled digests ran 6.5-7 hours late.
+- An untapped digest idea is marked `passed` when the wait ends; leftover approvals go back to the
+  digest at the start of a run; leftovers are topped up with fresh ideas.
+- A job time budget (`JOB_TIMEOUT_MINUTES`): the wait is shortened and no reel starts it cannot
+  finish.
+- Story dedup folds plurals and drops filler words.
+- The digest no longer shows `est_score`; the fact-check labels the title and rules out opinion.
+- Stock B-roll licences named correctly (not CC0); the keyword prompt keeps faces out of frame.
+
+### Fixed (2026-09-29)
+- `gemini-3.8-flash`'s MINIMAL-thinking refusal is caught in the Developer API's wording too, and
+  remembered per model.
+- A retired model is recognised in more wordings (410, "retired", "deprecated").
+- The punched-up title is capped at 70 characters; `parse_json` skips a preamble bracket; a routine
+  file with nothing fresh falls back to the generator.
+- The unit suite can no longer reach the live database or a live model (`tests/conftest.py`).
+
 ### Fixed
 - **The grounding model retires on 2026-10-20** (`llm`): `GEMINI_GROUNDED_MODEL` is now an
   ordered chain (default `gemini-2.5-flash,gemini-3.5-flash-lite`); only a 404 "model gone"
