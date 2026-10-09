@@ -22,6 +22,8 @@ Replies are best-effort; the function always 200s so Telegram doesn't retry-stor
 """
 from __future__ import annotations
 
+import hmac
+import html
 import json
 import os
 import urllib.error
@@ -72,7 +74,8 @@ def tg_send(chat_id, text: str) -> None:
         _http("POST", f"https://api.telegram.org/bot{token}/sendMessage",
               {"Content-Type": "application/json"},
               {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-               "disable_web_page_preview": True})
+               # Bot API 7.0 replaced disable_web_page_preview with this.
+               "link_preview_options": {"is_disabled": True}})
     except Exception:  # noqa: BLE001 — replying is best-effort
         pass
 
@@ -175,7 +178,9 @@ def top_performer() -> str | None:
         try:
             script = r["posts"]["scripts"]
             title = (script.get("title") or "").strip() or script["ideas"]["title"]
-            return f'"{title}" — {int(r.get("views") or 0):,} views'
+            # Escaped: database text inside parse_mode=HTML, where one '&' or '<' made
+            # Telegram refuse the whole reply.
+            return f'"{html.escape(title, quote=False)}" — {int(r.get("views") or 0):,} views'
         except (TypeError, KeyError):
             return None
     return None
@@ -195,6 +200,7 @@ _DECISION_TEXT = {  # same labels as src/approval.py, so both approval modes loo
     "capped": "⚠️ Daily approval cap reached — not approved",
     "unknown": "Could not process that.",
     "stale": "Already decided — this idea is no longer waiting for a tap.",
+    "error": "Couldn't reach the database. Tap again.",
 }
 
 
@@ -268,7 +274,7 @@ def apply_callback_action(action: str, idea_id: int) -> str:
     result = set_idea_status(idea_id, status)
     if result == "stale":
         return "stale"
-    return status if result else "unknown"
+    return status if result else "error"
 
 
 def handle_callback(cq: dict) -> None:
@@ -283,12 +289,18 @@ def handle_callback(cq: dict) -> None:
         idea_id = int(sid)
     except ValueError:
         idea_id = 0
-    decision = apply_callback_action(action, idea_id) if idea_id else "unknown"
+    try:
+        decision = apply_callback_action(action, idea_id) if idea_id else "unknown"
+    except Exception:  # noqa: BLE001 — a dropped connection to Supabase
+        decision = "error"
     label = _DECISION_TEXT[decision]
 
     if cq.get("id"):
-        tg_api("answerCallbackQuery", {"callback_query_id": cq["id"], "text": label})
-    if chat_id and msg.get("message_id"):
+        tg_api("answerCallbackQuery", {"callback_query_id": cq["id"], "text": label,
+                                       "show_alert": decision == "error"})
+    # The tap did not land: keep the buttons so it can be tapped again. Editing the message
+    # used to remove them, and the decision was lost with nothing logged.
+    if decision != "error" and chat_id and msg.get("message_id"):
         tg_api("editMessageText", {"chat_id": chat_id, "message_id": msg["message_id"],
                                    **decided_message(label, msg)})
 
@@ -336,7 +348,7 @@ def dispatch(cmd: str, arg: str) -> str:
         titles = pending_ideas()
         if not titles:
             return "✅ No ideas waiting. Send /makeshort to generate a fresh batch."
-        body = "\n".join(f"• {t}" for t in titles)
+        body = "\n".join(f"• {html.escape(t, quote=False)}" for t in titles)
         return f"⏳ <b>{len(titles)} idea(s) awaiting approval:</b>\n{body}"
 
     if cmd == "latest":
@@ -387,7 +399,8 @@ class handler(BaseHTTPRequestHandler):
         if not (secret and chat):
             self._reply(503, "bot not configured")
             return
-        if self.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
+        given = self.headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
+        if not hmac.compare_digest(given.encode("utf-8"), secret.encode("utf-8")):
             self._reply(401, "unauthorized")
             return
         length = int(self.headers.get("Content-Length") or 0)

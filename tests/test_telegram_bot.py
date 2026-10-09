@@ -215,3 +215,29 @@ def test_the_bot_refuses_every_update_when_it_is_not_configured(bot, monkeypatch
     h._reply = lambda code, text: replies.append(code)
     h.do_POST()
     assert replies == [503]
+
+
+def test_a_tap_that_cannot_reach_the_database_keeps_its_buttons(bot, monkeypatch):
+    """A failed write used to edit the message (buttons gone) and lose the decision."""
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
+    monkeypatch.setattr(bot, "approved_count", lambda: 0)
+
+    def _down(i, s):
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(bot, "set_idea_status", _down)
+    calls = []
+    monkeypatch.setattr(bot, "tg_api", lambda method, payload: calls.append((method, payload)))
+    bot.handle_update({"callback_query": {
+        "id": "cb1", "data": "a:7",
+        "message": {"message_id": 50, "text": "Idea text", "chat": {"id": 111}},
+    }})
+    assert [m for m, _ in calls] == ["answerCallbackQuery"]  # no edit: the buttons stay
+    assert calls[0][1]["show_alert"] is True and "Tap again" in calls[0][1]["text"]
+
+
+def test_pending_titles_are_escaped_for_html(bot, monkeypatch):
+    """A title with '&' or '<' made Telegram refuse the whole /pending reply."""
+    monkeypatch.setattr(bot, "pending_ideas", lambda: ["AT&T <outage> hits users"])
+    out = bot.dispatch("pending", "")
+    assert "AT&amp;T &lt;outage&gt;" in out
