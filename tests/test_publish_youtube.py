@@ -170,3 +170,80 @@ def test_a_transient_upload_error_is_retried(monkeypatch):
     monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
     assert pub._upload(yt, {}, "x.mp4") == {"id": "VID"}
     assert len(calls) == 2
+
+
+def test_a_tls_error_mid_upload_is_retried(monkeypatch):
+    """An SSLEOFError on a chunk lost the reel: only HttpError and ConnectionError retried."""
+    import ssl
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    calls = []
+
+    class _Req:
+        def next_chunk(self):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ssl.SSLEOFError("EOF occurred in violation of protocol")
+            return None, {"id": "VID"}
+
+    class _Videos:
+        def insert(self, **kw):
+            return _Req()
+
+    yt = type("YT", (), {"videos": lambda self: _Videos()})()
+    monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
+    assert pub._upload(yt, {}, "x.mp4") == {"id": "VID"}
+
+
+def test_the_description_and_tags_are_made_acceptable_to_youtube():
+    """'<' or '>' anywhere is an invalidDescription; the limit is 5,000 BYTES, not characters."""
+    body = pub._build_body({"title": "T", "description": "Prices rose <5% -> fell\n\nAI line.",
+                            "tags": ["a<b", "x,y", "#Shorts"]})
+    desc = body["snippet"]["description"]
+    assert "<" not in desc and ">" not in desc and desc.endswith("#Shorts")
+    assert all("<" not in t and "," not in t for t in body["snippet"]["tags"])
+
+    long = ("₹" * 3000) + "\n\nAI-generated narration, images and music.\n\n#Shorts"
+    cut = pub._clean_description(long)
+    assert len(cut.encode("utf-8")) <= 5000
+    assert cut.endswith("AI-generated narration, images and music.\n\n#Shorts")
+
+
+def test_a_lost_post_row_is_reported_on_telegram(monkeypatch, tmp_path):
+    from src import approval
+
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr(pub.db, "find_post", lambda sid, plat: None)
+    monkeypatch.setattr(pub, "_youtube_client", lambda: object())
+    monkeypatch.setattr(pub, "_upload", lambda yt, body, path: {"id": "NEWID"})
+    monkeypatch.setattr(pub.db, "insert_post",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    sent = []
+    monkeypatch.setattr(approval, "_api", lambda method, **kw: sent.append(kw["text"]))
+    pub.publish(str(video), {"title": "t", "description": "d", "tags": []}, 1)
+    assert sent and "NEWID" in sent[0] and "don't approve" in sent[0]
+
+
+def test_preflight_stops_a_run_on_a_refused_token(monkeypatch):
+    from google.auth.exceptions import RefreshError
+    from google.oauth2 import credentials
+
+    for k in ("YOUTUBE_REFRESH_TOKEN", "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(credentials.Credentials, "refresh",
+                        lambda self, req: (_ for _ in ()).throw(RefreshError("invalid_grant")))
+    with pytest.raises(RuntimeError, match="get_youtube_token"):
+        pub.preflight()
+
+
+def test_preflight_does_not_stop_a_run_on_a_network_blip(monkeypatch):
+    from google.auth.exceptions import TransportError
+    from google.oauth2 import credentials
+
+    for k in ("YOUTUBE_REFRESH_TOKEN", "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(credentials.Credentials, "refresh",
+                        lambda self, req: (_ for _ in ()).throw(TransportError("dns")))
+    pub.preflight()  # logged, not raised

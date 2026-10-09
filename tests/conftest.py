@@ -35,6 +35,18 @@ def _no_live_database(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_youtube_preflight(request, monkeypatch):
+    """The entry points refresh the YouTube token before any work (publish_youtube.preflight);
+    a unit test of make_on_demand must not reach Google for it. Tests of the pre-flight itself
+    are named test_preflight_*."""
+    if request.node.name.startswith(("test_preflight", "test_live")):
+        return
+    from src import publish_youtube
+
+    monkeypatch.setattr(publish_youtube, "preflight", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_models(request, monkeypatch):
     if (request.node.name.startswith("test_live") or request.node.get_closest_marker("live")
             or request.node.path.name in _LIVE_DB_MODULES):

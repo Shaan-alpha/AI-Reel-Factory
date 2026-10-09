@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 from src import config, db
 
@@ -43,6 +44,63 @@ def _youtube_client():
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
+def preflight() -> None:
+    """Prove the refresh token still works and may upload, BEFORE the digest and the render.
+
+    A revoked or expired token used to surface only at the upload: after the operator's taps,
+    the fact-check and the full render had all been spent. A refresh costs no quota. A token the
+    server rejects is a misconfiguration and stops the run (rule 14: fail loud); a network blip
+    here is only logged, so it cannot cost a run on its own."""
+    from google.auth.exceptions import RefreshError
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+
+    creds = Credentials(  # no scopes: report what the token really carries
+        token=None,
+        refresh_token=config.require("YOUTUBE_REFRESH_TOKEN"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=config.require("YOUTUBE_CLIENT_ID"),
+        client_secret=config.require("YOUTUBE_CLIENT_SECRET"),
+    )
+    try:
+        creds.refresh(Request())
+    except RefreshError as e:
+        raise RuntimeError(f"publish: the YouTube token was refused ({e}). Re-run "
+                           "tools/get_youtube_token.py and update the YOUTUBE_REFRESH_TOKEN "
+                           "secret.") from e
+    except Exception as e:  # noqa: BLE001 — a transport blip is not a verdict on the token
+        log.warning("publish: YouTube pre-flight could not reach Google (%s); continuing.", e)
+        return
+    granted = set(getattr(creds, "granted_scopes", None) or [])
+    if granted and _SCOPES[0] not in granted:
+        raise RuntimeError("publish: the YouTube token has no upload scope. Re-run "
+                           "tools/get_youtube_token.py and update the YOUTUBE_REFRESH_TOKEN "
+                           "secret.")
+
+
+def _clean_tag(tag: str) -> str:
+    """A tag YouTube accepts: no '<', '>' or comma (each is an invalidTags error), no '#'."""
+    return re.sub(r"[<>,]", " ", str(tag)).lstrip("#").strip()
+
+
+_DESC_BYTES = 5000
+
+
+def _clean_description(desc: str) -> str:
+    """A description YouTube accepts: no '<' or '>' (invalidDescription) and at most 5,000
+    BYTES, which ₹ and emoji reach sooner than 5,000 characters. When it must shorten, it cuts
+    the body and keeps the closing lines whole (disclosure, footer, #Shorts)."""
+    desc = desc.replace("<", "‹").replace(">", "›")
+    if len(desc.encode("utf-8")) <= _DESC_BYTES:
+        return desc
+    split = max(0, len(desc) - 1200)
+    split = desc.rfind("\n", 0, split + 1) if "\n" in desc[:split + 1] else split
+    head, tail = desc[:split], desc[split:]
+    budget = _DESC_BYTES - len(tail.encode("utf-8"))
+    head = head.encode("utf-8")[:max(0, budget)].decode("utf-8", "ignore").rstrip()
+    return (head + tail).encode("utf-8")[:_DESC_BYTES].decode("utf-8", "ignore")
+
+
 def _cap_tags(tags: list[str], limit: int = 480) -> list[str]:
     """Keep tags within YouTube's ~500-char total budget (quotes count); preserve order."""
     out, used = [], 0
@@ -64,8 +122,10 @@ def _build_body(metadata: dict) -> dict:
     desc = metadata.get("description") or ""
     if "#shorts" not in desc.lower():
         desc = (desc.rstrip() + "\n\n#Shorts").strip()
+    desc = _clean_description(desc)
 
-    tags = [str(t).lstrip("#").strip() for t in (metadata.get("tags") or []) if str(t).strip()]
+    tags = [_clean_tag(t) for t in (metadata.get("tags") or [])]
+    tags = [t for t in tags if t]
     tags = _cap_tags(tags)  # YouTube allows ~500 chars of tags total
     category = str(metadata.get("category_id") or config.get("YOUTUBE_CATEGORY_ID", "25"))
     privacy = metadata.get("privacy") or config.get("YOUTUBE_PRIVACY", "public")
@@ -89,10 +149,12 @@ def _upload(youtube, body: dict, video_path: str) -> dict:
     """Resumable upload of the reel; returns the inserted video resource."""
     from googleapiclient.http import MediaFileUpload
 
+    import http.client
     import random
-    import socket
     import time
 
+    import httplib2
+    from google.auth.exceptions import TransportError
     from googleapiclient.errors import HttpError
 
     media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)
@@ -104,7 +166,11 @@ def _upload(youtube, body: dict, video_path: str) -> dict:
     while response is None:
         try:
             _status, response = request.next_chunk()
-        except (HttpError, ConnectionError, socket.timeout, TimeoutError) as e:
+        # OSError covers ConnectionError, socket timeouts and ssl.SSLError (an SSLEOFError on a
+        # chunk used to lose the reel); httplib2 and http.client raise their own protocol errors.
+        # A RefreshError is not a TransportError, so a dead token still fails at once.
+        except (HttpError, OSError, httplib2.HttpLib2Error, http.client.HTTPException,
+                TransportError) as e:
             code = getattr(getattr(e, "resp", None), "status", None)
             if isinstance(e, HttpError) and code not in (500, 502, 503, 504):
                 if code == 403 and "quota" in str(e).lower():
@@ -151,6 +217,14 @@ def publish(video_path: str, metadata: dict, script_id: int) -> tuple[str, str]:
         log.error("publish: video %s IS LIVE at %s but its post row could not be written (%s). "
                   "Reconcile manually — analytics will miss it, and the idempotency guard for "
                   "script %s is now blind.", video_id, url, e, script_id)
+        try:  # a log line nobody reads was the only trace; the operator reads Telegram
+            from src import approval
+
+            approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
+                          text=f"⚠️ {url} is live, but its posts row (script {script_id}) could "
+                               f"not be saved. Add it by hand, and don't approve the idea again.")
+        except Exception:  # noqa: BLE001
+            log.warning("publish: the missing-row alert could not be sent either.")
 
     # Asset policy (rule 15): the upload is the source of truth now — drop the local render.
     try:

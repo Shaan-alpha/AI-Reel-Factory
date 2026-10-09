@@ -451,6 +451,7 @@ def _notify(text: str) -> None:
 def run() -> None:
     """Run one production cycle. See module docstring for the step order."""
     config.validate()  # fail loud on misconfig (rule 14)
+    publish_youtube.preflight()  # a dead YouTube token stops the run before any work
 
     ensure_ideas_and_digest()
 
@@ -513,6 +514,9 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     """On-demand 'make a Short': propose fresh ideas to Telegram, wait for taps, produce the
     approved ones, and reply with the links. Triggered by the make-short workflow button."""
     config.validate()
+    # Before the digest: a dead token used to surface at the upload, after the taps and
+    # the render.
+    publish_youtube.preflight()
     try:  # best-effort, like the age-out below: bookkeeping must never block a run (rule 14)
         _release_leftover_approvals()
     except Exception as e:  # noqa: BLE001
