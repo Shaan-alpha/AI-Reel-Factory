@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 import requests
@@ -405,6 +406,15 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
         raise RuntimeError(f"ken burns failed ({proc.returncode}): {proc.stderr[-400:]}")
 
 
+def _visual_workers() -> int:
+    """Shots generated at once (VISUALS_CONCURRENCY, default 4: the runners have 4 vCPUs for
+    the Ken Burns encodes, and Workers AI allows far more than 4 requests in flight)."""
+    try:
+        return max(1, min(8, int(config.get("VISUALS_CONCURRENCY", "4"))))
+    except (TypeError, ValueError):
+        return 4
+
+
 def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str, source: str,
                        variant: str = "", setting: str | None = None) -> list[str]:
     """Build Ken Burns clips from photos/AI images covering the narration. Raises if none made.
@@ -417,18 +427,24 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
     from src import assembly  # local: keeps the module importable without ffmpeg present
 
     n = min(_MAX_IMG_CLIPS, assembly.slice_count(target_seconds))
-    clips: list[str] = []
-    for i in range(n):
+
+    def _one(i: int) -> str | None:
         kw = keywords[i % len(keywords)]
         img = os.path.join(out_dir, f"img_{i:02d}.jpg")
         if not _fetch_image(kw, img, i, source, variant=variant, setting=setting):
-            continue
+            return None
         clip = os.path.join(out_dir, f"imgclip_{i:02d}.mp4")
         try:
             _image_to_kenburns_clip(img, clip, _IMAGE_CLIP_SECONDS, index=i)
-            clips.append(clip)
+            return clip
         except Exception as e:  # noqa: BLE001
             log.warning("visuals: ken burns failed (%s); skipping", e)
+            return None
+
+    # Shots in parallel, in order. One at a time, FLUX.2 klein took 198-238 s a reel (11 images,
+    # run 36803555194) against a 12-minute reel budget. Same images, same neurons, less waiting.
+    with ThreadPoolExecutor(max_workers=max(1, min(n, _visual_workers()))) as pool:
+        clips = [c for c in pool.map(_one, range(n)) if c]
     if not clips:
         raise RuntimeError(f"visuals: produced no image clips from source={source}")
     log.info("visuals: %d %s Ken Burns clips for target %.0fs", len(clips), source, target_seconds)

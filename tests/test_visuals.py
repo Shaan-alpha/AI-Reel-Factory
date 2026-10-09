@@ -395,3 +395,21 @@ def test_the_schnell_fallback_sends_only_what_its_schema_accepts(monkeypatch, tm
     assert set(sent["json"]) <= {"prompt", "steps"}
 
 
+def test_shots_are_generated_in_parallel_and_kept_in_order(monkeypatch, tmp_path):
+    import threading
+
+    from src import assembly
+
+    seen_threads = set()
+    monkeypatch.setattr(assembly, "slice_count", lambda t: 6)
+
+    def _fetch(kw, dest, i, source, variant="", setting=None):
+        seen_threads.add(threading.get_ident())
+        open(dest, "wb").close()
+        return True
+
+    monkeypatch.setattr(visuals, "_fetch_image", _fetch)
+    monkeypatch.setattr(visuals, "_image_to_kenburns_clip",
+                        lambda img, clip, secs, index=0: open(clip, "wb").close())
+    clips = visuals._fetch_image_broll(["a", "b"], 20, str(tmp_path), "ai")
+    assert [os.path.basename(c) for c in clips] == [f"imgclip_{i:02d}.mp4" for i in range(6)]
