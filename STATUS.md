@@ -57,8 +57,6 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 ## Next actions
 
 - ⚠️ **Operator actions from the 2026-10-09 audit** (details in its log entry):
-  - run `verify-tts`, `verify-vertex` and one `/makeshort` to watch a reel through on the
-    pushed code (the first reel since 2026-09-28);
   - **redeploy the Vercel bot** (`vercel deploy --prod` from `telegram-bot/`): its fixes do
     nothing until then;
   - **before 2026-11-17**: ear-test `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts`
@@ -134,6 +132,21 @@ Asked for "a full audit, deep checks, fixes, zero-cost upgrades, and model/API d
 Made on branch `fix/audit-2026-10-09`, then committed one change at a time and pushed to `main`
 (operator: "commit and push"). **The bot fixes need a Vercel redeploy** before they are live.
 Suite with live keys: **688 pass, 5 skipped** (was 645 + 5; every skip is an opt-in live test).
+
+**Shipped and verified (2026-10-09).** CI on the push: 688 pass on ubuntu-24.04 with PyAV 18.1.0,
+and the live caption test ran instead of skipping. `verify-tts` passed (the channel voice on both
+the Developer API and Vertex; Chirp listed with the key in a header); `verify-vertex` passed
+(real citations on 3.5-flash-lite and 3.5-flash). **The first run on the new code** (`/makeshort
+3`, run 37884778710) researched 6 stories with citations for all 6 and offered 3 ideas with named
+outlets; the operator approved 2 and rejected the weakly sourced one. Both published, the first
+Shorts since 09-28: `rJjqfdltLvg` (Indian pilot honoured by Israel) and `KbWEI-G61dA` (US
+sanctions on Mumbai firms). Images took 62-67 s a reel (198-238 s before); the second reel's
+Developer-API TTS hit its daily quota (429) and was voiced on Vertex in the same voice.
+Two follow-ups, each pushed: a unit test had sent a real "post row could not be saved" alert to
+the operator's chat (a guard in `tests/conftest.py` now refuses Telegram in unit tests); and the
+tighten pass ran out of its 1,024-token budget on both providers (reasoning counts against it),
+so the pilot reel shipped at 42 s. It is 4,096 now (repair fallback too), verified live: idea
+488's script tightened 80 -> 72 words with the payoff kept. CI: **689 pass, 5 skipped**.
 
 **How it was audited.** 15 subsystem auditors and 3 live probes (models, dependencies, live
 state) ran as a multi-agent workflow. The account's session limit stopped it after 16 of 134

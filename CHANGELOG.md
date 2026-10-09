@@ -44,6 +44,9 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
   `gha-creds-*.json` ignored; `production.yml` uses webhook approval mode.
 - **Bot** (`telegram-bot`, needs a redeploy): escaped titles, taps that fail keep their buttons,
   constant-time secret check, `link_preview_options`.
+- **Follow-ups after the first run on the new code**: unit tests can no longer message the
+  operator's Telegram (one did); the tighten and repair passes get a 4,096-token budget, since
+  reasoning used up 1,024 on both providers and a reel shipped at 42 s.
 
 ### Changed (2026-09-29, first day on the merged audit)
 - `make-short` is on demand only again (operator): the scheduled digests ran 6.5-7 hours late.
