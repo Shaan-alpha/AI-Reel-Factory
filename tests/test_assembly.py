@@ -380,10 +380,15 @@ def test_build_cmd_without_sfx_adds_no_input(monkeypatch):
 
 # --- live end-to-end render ------------------------------------------------------------
 
-def test_live_full_reel(tmp_path):
-    """Real edge-tts → Pexels → FFmpeg render. Skips if any dependency is unavailable."""
+def test_live_full_reel(monkeypatch, tmp_path):
+    """Real Kokoro → Pexels → FFmpeg render. Skips off CI if a dependency is unavailable.
+
+    Kokoro, not the default Gemini voice: this runs on every CI push and schedule, and the
+    production key's TTS quota is the channel voice's. In CI every prerequisite is installed,
+    so a failure there fails instead of turning into a skip nobody reads."""
     from src import visuals, voice
 
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
     try:
         ffprobe = assembly._ffprobe()  # forces a clear skip if FFmpeg isn't installed
         audio, dur = voice.synthesize(
@@ -394,6 +399,8 @@ def test_live_full_reel(tmp_path):
                                     out_dir=str(tmp_path))
         out = assembly.assemble(audio, clips, str(tmp_path / "reel.mp4"))
     except Exception as e:  # noqa: BLE001
+        if os.environ.get("CI"):
+            raise
         pytest.skip(f"live render unavailable (offline / no FFmpeg): {e}")
 
     assert os.path.exists(out) and os.path.getsize(out) > 50_000

@@ -68,11 +68,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          # Gemini's free tier is 20 requests/day PER MODEL and it is SHARED with production.
-          # Nothing in the suite spends it today: the one test that did (test_live_real_llm_ideation)
-          # is now gated behind IDEATION_LIVE_TEST, like every other live test.
+          # Gemini's free tier is about 20 requests/day PER MODEL and it is SHARED with production.
+          # The live render tests voice with Kokoro (until 2026-10-09 they spent the channel
+          # voice's TTS quota on every run); the test that grounds ideation is opt-in below.
           # >>> If you add a test that calls Gemini, gate it behind an opt-in env var. An ungated
           # >>> one runs on every push and can starve the day's real reels of their provider.
+          # Live tests that skip on a missing prerequisite re-raise here instead: GitHub sets
+          # CI=true, and every prerequisite is installed on this runner.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # Live opt-ins are deliberately NOT set here — they publish to YouTube, message the
           # operator's Telegram, or spend metered quota:
@@ -81,4 +83,6 @@ jobs:
         # `python -m pytest`, not bare `pytest`: it does not depend on the console script
         # landing on PATH, and it puts the repo root on sys.path so `from src import ...`
         # resolves the same way it does locally.
-        run: python -m pytest -q --durations=10
+        # -rs prints every skip's reason. From 2026-10-01 to 10-09 a broken caption step
+        # showed up here only as "10 skipped" instead of 5, with nothing saying why.
+        run: python -m pytest -q -rs --durations=10

@@ -209,6 +209,8 @@ def test_live_kokoro(monkeypatch, tmp_path):
         path, duration = voice._kokoro() and voice.synthesize(
             "This is a Kokoro narration test for But It Matters.", str(tmp_path))
     except Exception as e:  # noqa: BLE001
+        if os.environ.get("CI"):  # installed and cached there: a failure is real
+            raise
         pytest.skip(f"kokoro unavailable: {e}")
     assert os.path.exists(path) and path.endswith(".wav") and 0 < duration < 60
 
@@ -219,6 +221,8 @@ def test_live_edge_tts(monkeypatch, tmp_path):
     try:
         path, duration = voice.synthesize("A short edge test for But It Matters.", str(tmp_path))
     except Exception as e:  # noqa: BLE001
+        if os.environ.get("CI"):  # the narration fallback must answer from the runners
+            raise
         pytest.skip(f"edge-tts unreachable: {e}")
     assert os.path.exists(path) and os.path.getsize(path) > 1000 and 0 < duration < 60
 

@@ -192,6 +192,8 @@ def test_live_pexels_fetch(tmp_path):
     try:
         paths = visuals.fetch_broll(["nature", "city skyline"], target_seconds=10, out_dir=str(tmp_path))
     except Exception as e:  # noqa: BLE001
+        if os.environ.get("CI"):  # tests.yml passes the key: a failure is real
+            raise
         pytest.skip(f"Pexels unreachable / unkeyed: {e}")
     assert len(paths) >= 1
     assert all(os.path.exists(p) and os.path.getsize(p) > 10_000 for p in paths)
