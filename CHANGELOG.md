@@ -13,6 +13,38 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Fixed (2026-10-09 audit, production down since 2026-10-01; details: STATUS.md)
+- **Every reel failed at the caption step** (`subtitles`): CI resolved PyAV 19, an unpinned
+  dependency of faster-whisper, and faster-whisper 1.2.1's `av.open(..., metadata_errors=...)`
+  raises `TypeError` on it. `av==18.1.0` is pinned, and the narration is now decoded with FFmpeg
+  and passed as an array, so PyAV's `av.open` is off our path. The model loads from cache first.
+- **The daily tests could not see it**: live tests turned every exception into a skip. They skip
+  only on a missing prerequisite, and re-raise in CI; a test pins the decode on a real file; CI
+  prints each skip's reason (`-rs`); the render tests voice with Kokoro (no TTS quota spent).
+- **Runs died or lied** (`db`, `production`, workflows): a retrying HTTP/1.1 Supabase client
+  (inserts resent only when nothing was sent); the approval wait survives a failed poll; crashes,
+  kills and cancels reach Telegram; a live Short is never reported as failed or re-offered.
+- **Gemini calls had no timeout** (`llm`): 120 s (`LLM_TIMEOUT_SECONDS`); connection errors retried.
+- **Fact-check gate** (`factcheck`): off-shape replies no longer pass; a "minor" finding the
+  checker calls contradicted blocks; the "could not confirm" waiver no longer covers invented
+  quotes, rulings, laws or blame; merged samples keep unwrapped findings; the repair has the date.
+- **Tone and disclosure** (`scriptwriter`): harm stories worded "kill"/"deadliest"/crash/attack
+  get the somber read and no punch-up; the AI line is checked exactly and sits in its own paragraph.
+- **Ideation survives 2026-10-20** (`ideation_fallback`): stories are researched in prose, where
+  3.x keeps citations, and written as JSON from the notes; `IDEATION_MODEL` defaults to
+  `gemini-3.5-flash-lite,gemini-3.5-flash`. Google News gets one retry; curly apostrophes no
+  longer split search words; an empty search retries shorter.
+- **Visuals**: the flux-1-schnell fallback no longer sends the `seed` it rejects; shots are made
+  4 at a time (`VISUALS_CONCURRENCY`); the rupee appears only in money shots.
+- **YouTube** (`publish_youtube`, `analytics`): a token pre-flight before the digest; upload
+  retries cover TLS and protocol errors; descriptions and tags are cleaned for the API; a lost
+  post row is announced; removed-Shorts alerts finally send (and before marking), takedowns count.
+- **CI and security**: runners pinned to `ubuntu-24.04` (26.04 arrives 2026-10-19); scheduled
+  workflows kept enabled; alerts scrubbed of secrets; Chirp's key moved to a header; Pillow 12.3.0;
+  `gha-creds-*.json` ignored; `production.yml` uses webhook approval mode.
+- **Bot** (`telegram-bot`, needs a redeploy): escaped titles, taps that fail keep their buttons,
+  constant-time secret check, `link_preview_options`.
+
 ### Changed (2026-09-29, first day on the merged audit)
 - `make-short` is on demand only again (operator): the scheduled digests ran 6.5-7 hours late.
 - `/makeshort N` offers N ideas: `DIGEST_MIN_IDEAS` defaults to 1 (it was 3).

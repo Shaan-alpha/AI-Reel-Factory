@@ -6,10 +6,12 @@
 
 **Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
 **Version:** 0.18.0 (**PUBLIC**, tagged) + **untagged on `main`: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12) and the 2026-09-29 follow-ups** (**642 pass, 5 skipped**)
-**Last updated:** 2026-09-29 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
+**2026-10-09:** production was **down from 2026-10-01** (PyAV 19 broke captions). The fix and the rest of the 2026-10-09 audit are on `main` (**688 pass, 5 skipped**); the Vercel bot still needs a redeploy. See the log entry below.
+**Last updated:** 2026-10-09 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp · somber read for tragedies · whoosh removed
-**Models (Vertex):** text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` · fact-check `gemini-3.5-flash` · ideation `gemini-2.5-flash` until its 2026-10-20 retirement, then `3.5-flash-lite`
+  ↳ ⚠️ **both Developer-API TTS models shut down 2026-11-17** (replacements `gemini-3.8-flash-tts` / `-lite-tts`): operator ear test needed first
+**Models (Vertex):** text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` · fact-check `gemini-3.5-flash` · ideation `gemini-3.5-flash-lite,gemini-3.5-flash` (prose research, on the branch; `gemini-2.5-flash` retires 2026-10-20)
 **Trigger:** **on demand only** (`/makeshort` or the workflow button); the scheduled digests were removed 2026-09-29 (operator); nothing is produced without a tap
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
@@ -54,9 +56,20 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-- **After 2026-10-20** (optional tidy-up): once `gemini-2.5-flash` has retired, drop it from
-  `IDEATION_MODEL` in both pipeline workflows. The chain already moves past it on its own; this
-  only saves the one failed request per ideation call.
+- ⚠️ **Operator actions from the 2026-10-09 audit** (details in its log entry):
+  - run `verify-tts`, `verify-vertex` and one `/makeshort` to watch a reel through on the
+    pushed code (the first reel since 2026-09-28);
+  - **redeploy the Vercel bot** (`vercel deploy --prod` from `telegram-bot/`): its fixes do
+    nothing until then;
+  - **before 2026-11-17**: ear-test `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts`
+    (Zubenelgenubi) and pick the channel voice's successor; both current Developer-API TTS
+    models shut down that day and every reel would move to the billed Vertex path;
+  - decide: should model-written source URLs count toward `MIN_SOURCES` (invented TOI / The Hindu
+    links pass the liveness probe), and is one outlet twice enough for two sources?
+  - review the public Shorts the auditors flagged: `hYhYKlAWQv4` (idea 211, a claim the checker
+    called contradicted shipped as "minor"), `9Nkp1i1GQl8` (idea 301), `d3kJpc0QCWg` (the claim
+    the gate blocked on idea 314); 10 unlisted June test uploads are still on the channel;
+  - the 9 removed Shorts were never reported (the alert had no Telegram secrets); see the log.
 - ⚠️ **Operator actions left from the 2026-09-27/28 audit** (everything else is done):
   - unlist or delete the two public Shorts that never passed the gate, `xRUo6GxYwYo` and
     `NKPb-InUoJU` (the pipeline's YouTube token cannot edit videos);
@@ -114,6 +127,121 @@ you click. The scheduled cron path (`production.yml`) remains available but opti
 ---
 
 ## Log
+
+### 2026-10-09 — Production down since 10-01, a full audit, and the 10-20 / 11-17 deprecations
+
+Asked for "a full audit, deep checks, fixes, zero-cost upgrades, and model/API deprecations".
+Made on branch `fix/audit-2026-10-09`, then committed one change at a time and pushed to `main`
+(operator: "commit and push"). **The bot fixes need a Vercel redeploy** before they are live.
+Suite with live keys: **688 pass, 5 skipped** (was 645 + 5; every skip is an opt-in live test).
+
+**How it was audited.** 15 subsystem auditors and 3 live probes (models, dependencies, live
+state) ran as a multi-agent workflow. The account's session limit stopped it after 16 of 134
+agents: every auditor and two probes finished, but the research agents, the adversarial verifiers
+and the upgrade panel did not. So 147 findings arrived **unverified**. Each one fixed below was
+checked in the code first, most with a failing test or a live probe. Agent transcripts are under
+`~/.claude/projects/c--Users-shaan-Desktop-AI-Reel-Factory/<session>/subagents/workflows/wf_51e4270a-2c0/`.
+
+**Production has been down since 2026-10-01 (critical).**
+- CI's `pip install` resolved **PyAV 19.0.x** (unpinned; faster-whisper pulls it in, released
+  2026-09-29). faster-whisper 1.2.1 calls `av.open(..., metadata_errors="ignore")`, which PyAV 19
+  rejects, so every reel died at captions (idea 475). The last published reel (idea 397,
+  2026-09-28) ran on PyAV 18.1.0; the local `.venv` has 17.1.0, so nothing looked wrong locally.
+  No Short has shipped for 11 days.
+- The daily `tests` run stayed green from 09-30: the live caption test turned every exception
+  into a skip, so the break showed only as 10 skips instead of 9.
+- **Fixed twice over:** `av==18.1.0` is pinned, and `subtitles` now decodes the narration with
+  the FFmpeg binary and hands faster-whisper an array, so PyAV's `av.open` is no longer on our
+  path at all. Proven on Python 3.12: with PyAV 19.0.1 the old path fails with the production
+  error and the new one transcribes (start times within 0.044 s of the old path on average).
+  The whisper model now loads from the local cache before asking the Hugging Face Hub.
+
+**Fixed and verified (each with tests; live where marked):**
+- **Crashes and lost work.** A dropped Supabase connection (HTTP/2 GOAWAY) crashed run
+  36804231283 mid-wait. Supabase now uses its own HTTP client: HTTP/1.1 and a retrying transport
+  that resends reads, updates and deletes, and an insert only when nothing was sent (live DB round
+  trip passes through it). The approval wait survives a failed poll. A crash, a kill at the time
+  limit or a cancellation now reaches Telegram (the pipeline reports its own crash; a workflow
+  step covers kills and cancels, without a second message). The step is timed out inside the
+  job so the alert can run.
+- **A live Short is never reported as failed.** After the upload, a failed `produced` write used
+  to fail the reel and put its idea back in the digest (a second tap would upload it twice). It is
+  logged and announced instead; a release only moves ideas still at `approved`; a lost post row is
+  announced on Telegram with the URL.
+- **Gemini calls had no timeout** (the SDK default is none): 120 s now (`LLM_TIMEOUT_SECONDS`).
+  Connection errors are retried by exception class, and a status code no longer matches inside a
+  number such as "1,500".
+- **Fact-check gate (rule 6 as written):** a checker reply with a preamble object, a wrapped
+  verdict or "FAIL - fabricated" used to PASS with 0 claims checked; now it is re-asked and, under
+  strict, held. A "minor" finding the checker itself calls contradicted now blocks (idea 211
+  shipped one). The "could not confirm" waiver no longer reaches an invented quote, ruling, law or
+  blame; a statistic the checker merely could not confirm stays waived, as before. A sample
+  whose findings arrive unwrapped is no longer dropped when two samples are merged. The repair
+  prompt is told today's date.
+- **Tone.** Death and harm stories read as sarcastic when worded "kill", "killing", "deadliest",
+  a crash or an attack. The detector covers those (bank strikes and market crashes keep the channel
+  voice), also reads the finished script, and the hook punch-up is skipped for somber stories.
+- **Disclosure.** The AI line was skipped whenever "AI-generated" appeared anywhere in the
+  description; it now checks for the exact line and sits in its own paragraph.
+- **Ideation after 2026-10-20 (high).** Measured by the auditor with 10 live probes: on the 3.x
+  models a JSON ideation reply gets no citations, but a prose reply does. Stories are now
+  researched in prose (`_research_stories`) and the JSON is written from those notes, each idea
+  taking its own story's citations. `IDEATION_MODEL` defaults to
+  `gemini-3.5-flash-lite,gemini-3.5-flash`. ✓live: 2 ideas, each with its own publishers (CBS
+  News + The Guardian; SecurityWeek + 2 more), none borrowed from the other story.
+- **Google News:** one retry after 5 s on 5xx / 429 / a dropped connection (10-01 had 503 on every
+  feed). Curly apostrophes no longer split search words ("Russia s"); a search that finds nothing
+  is retried with the 5 most distinctive words; model-written URLs no longer stop the search early.
+- **Visuals:** the `flux-1-schnell` fallback sent a `seed` its schema rejects (HTTP 400 on every
+  call), so it never worked. Shots are generated 4 at a time (11 images took 198-238 s one by
+  one). The rupee is in the prompt only when money is in the shot.
+- **YouTube:** a token pre-flight before the digest (a refused token stops the run before taps
+  or a render; a network blip only logs). Upload retries cover TLS, httplib2 and http.client errors.
+  Descriptions lose `<` `>` and fit 5,000 bytes; tags lose `<` `>` `,`.
+- **Analytics:** the removed-Shorts alert had no Telegram secrets in `analytics.yml`, so it never
+  sent, and rows were marked before sending. It now sends first and marks after; takedowns
+  (`uploadStatus` rejected) count as removed. **Never reported, 9 removed Shorts:** `9iBRAKdrRtM`,
+  `G5aIs_tQMXE`, `LB1HXE4ASmA`, `Y36jpSV4U9I`, `_X-zuJHmS9w`, `floqwtYfhPw`, `j6Ds0GjERiA`,
+  `mpCx2fwc2Fc`, `z1JpC2YCEzo`. google-auth pin aligned (2.58.1).
+- **CI:** every workflow pinned to `ubuntu-24.04` (`ubuntu-latest` moves to 26.04 from 2026-10-19,
+  taking apt FFmpeg from 6.1.1 to 8.0.1). `pytest -rs`. Live tests skip only when a prerequisite
+  is missing and re-raise in CI (`CI=true`); the live render tests voice with Kokoro, so CI no
+  longer spends the channel voice's TTS quota. `analytics` re-enables both scheduled workflows
+  daily: GitHub disables them after 60 days without a commit (next ~2026-11-28), and analytics'
+  writes keep the free Supabase project awake. `production.yml` uses the webhook approval mode.
+- **Security:** alerts to Telegram are scrubbed of secret values and `?key=` params; the Chirp
+  key moved from the URL to a header (✓live: HTTP 200, the voice is listed); the bot compares
+  the webhook secret in constant time; `.gitignore` covers `gha-creds-*.json`; Pillow 12.2.0 ->
+  12.3.0 (13 CVEs; graphics tests pass on 3.12).
+- **Bot** (needs a redeploy): titles escaped in `/pending` and `/stats` (an `&` made Telegram
+  refuse the reply); a tap whose database write fails keeps its buttons and says "tap again";
+  `link_preview_options` replaces the removed `disable_web_page_preview`.
+
+**Deprecations and limits (probed 2026-10-09, official pages):**
+- Vertex retires `gemini-2.5-flash` (and 2.5-flash-lite, 2.5-pro) on **2026-10-20**: handled above.
+  `gemini-3.6-flash` retires 2026-11-19 (only `.env.example` named it; corrected).
+  `gemini-3.8-flash`, the text model, has "a shorter availability period" with no date yet.
+- **Developer API shuts down `gemini-3.1-flash-tts-preview` and `gemini-2.5-flash-preview-tts` on
+  2026-11-17** — the channel voice's first and third links. Replacements `gemini-3.8-flash-tts` and
+  `gemini-3.8-flash-lite-tts` are live (free tier; Vertex serves both too). Not switched: the voice
+  is the operator's choice by ear, and the auditor reports the 3.8 request schema may differ
+  (unverified). Until then the chain survives on billed Vertex 3.1, then Vertex 2.5 GA. The 3.8 TTS
+  paid price doubles on 2027-01-01.
+- Groq `openai/gpt-oss-120b` is active (no Llama chat model remains on Groq). Cloudflare lists
+  flux-2-klein-4b and flux-1-schnell with no deprecation. Chirp `en-IN-Chirp3-HD-Zubenelgenubi`
+  is listed. GitHub REST `2022-11-28` (the bot's dispatch) ends 2028-03-10.
+
+**Not done here (needs the operator, or verification first):**
+- the 2026-11-17 TTS migration (ear test); the bot redeploy;
+- counting only fetched sources toward `MIN_SOURCES`: tried, then reverted. It breaks the
+  2026-09-03 decision to keep model-written URLs, which the tests encode;
+- docs: CLAUDE.md still describes a Claude Routine as live ideation and Gemini as free (production
+  bills Vertex per token); docs/01-07 still name Chirp as the primary voice;
+- a hashed lock file for CI (the structural fix for K1-style drift: 48 packages differ between CI
+  and the local `.venv`), and a scheduled model-liveness canary (Vertex `count_tokens` is free;
+  `models.get` is NOT a liveness check: it answered OK for retired ids);
+- lower findings left for a later pass: repair rewrites only the narration (title, cards and
+  summary stay stale); `/stats` counts removed Shorts; 2 of 11 AI images never reach the screen.
 
 ### 2026-09-29 — Scheduled digests off; leftovers, dedup and a post-merge review
 
