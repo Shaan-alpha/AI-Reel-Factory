@@ -140,14 +140,29 @@ def _gemini_client(api_key: str | None = None):
     Keyed by credential in API-key mode so a dedicated key keeps its own allowance.
     """
     from google import genai
+    from google.genai import types
 
+    # The SDK's default timeout is NONE: a stalled connection in ideation, the writer or the gate
+    # would hold the job until GitHub killed it at 90 minutes. A timeout is an error the retry
+    # and failover paths (and the gate's strict hold) already handle.
+    http = types.HttpOptions(timeout=_llm_timeout_ms())
     if _use_vertex():
         return genai.Client(
             vertexai=True,
             project=config.require("GCP_PROJECT"),
             location=config.get("GCP_LOCATION", "global"),
+            http_options=http,
         )
-    return genai.Client(api_key=api_key or config.require("GEMINI_API_KEY"))
+    return genai.Client(api_key=api_key or config.require("GEMINI_API_KEY"), http_options=http)
+
+
+def _llm_timeout_ms() -> int:
+    """Per-request timeout for text and grounded calls (LLM_TIMEOUT_SECONDS, default 120).
+    Measured calls take 3-11 s; a grounded ideation reply up to about 40 s."""
+    try:
+        return max(10, int(float(config.get("LLM_TIMEOUT_SECONDS", "120")))) * 1000
+    except (TypeError, ValueError):
+        return 120_000
 
 
 @lru_cache(maxsize=1)
@@ -377,8 +392,9 @@ def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None
         except Exception as e:  # noqa: BLE001 — only a retired model moves down the chain
             if i == len(chain) - 1 or not _is_model_gone(e):
                 raise
-            log.error("llm: grounded model %s is no longer served (%s); moving to %s. Update "
-                      "GEMINI_GROUNDED_MODEL.", chosen, str(e)[:160], chain[i + 1])
+            log.error("llm: grounded model %s is no longer served (%s); moving to %s. Drop it "
+                      "from the setting that names it (IDEATION_MODEL, FACTCHECK_MODEL or "
+                      "GEMINI_GROUNDED_MODEL).", chosen, str(e)[:160], chain[i + 1])
             continue
         return resp.text or "", _grounded_sources(resp)
     raise RuntimeError("llm: empty grounded model chain")  # unreachable: chain is never empty
@@ -536,9 +552,14 @@ def parse_json_object(raw: str) -> dict:
 # A 400 is a verdict — retrying it just spends the clock twice for the same answer.
 # A dropped connection is retried too (added 2026-09-27): the grounded call has no second
 # provider, so under FACTCHECK_STRICT one network blip used to hold a reel back.
-_RETRYABLE_MARKERS = ("429", "resource_exhausted", "503", "unavailable", "500", "internal",
-                      "504", "deadline", "overloaded", "disconnected", "timed out",
-                      "connection reset", "connection aborted")
+_RETRYABLE_MARKERS = ("resource_exhausted", "unavailable", "internal", "deadline", "overloaded",
+                      "disconnected", "timed out", "connection reset", "connection aborted",
+                      # matched against the exception's class name too: an httpx ConnectError
+                      # says only "Temporary failure in name resolution"
+                      "connecterror", "connecttimeout", "readtimeout", "readerror",
+                      "remoteprotocolerror", "name resolution", "connection refused")
+# Status codes as whole numbers: a 400 whose body quotes "1,500" or "4290" is not a 500 or 429.
+_RETRYABLE_STATUS = re.compile(r"(?<![\w.,])(?:429|500|503|504)(?![\w.,])")
 # Google returns its own advice as `'retryDelay': '46s'`. Honour it rather than guessing.
 _RETRY_DELAY_RE = re.compile(r"retrydelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", re.I)
 _DEFAULT_RETRY_WAIT = 2.0
@@ -550,8 +571,8 @@ def _retry_wait(exc: Exception) -> float | None:
     None also covers "retryable, but the API wants longer than a reel is worth": a daily-cap 429
     can name an hour, and stalling a 60-minute job on it is worse than failing over.
     """
-    text = str(exc).lower()
-    if not any(m in text for m in _RETRYABLE_MARKERS):
+    text = f"{type(exc).__name__} {exc}".lower()
+    if not (any(m in text for m in _RETRYABLE_MARKERS) or _RETRYABLE_STATUS.search(text)):
         return None
     m = _RETRY_DELAY_RE.search(text)
     wait = float(m.group(1)) if m else _DEFAULT_RETRY_WAIT

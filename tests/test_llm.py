@@ -731,7 +731,7 @@ def test_gemini_client_is_cached_per_api_key(monkeypatch):
 
     class _FakeGenai:
         @staticmethod
-        def Client(api_key=None):
+        def Client(api_key=None, http_options=None):
             built.append(api_key)
             return f"client:{api_key}"
 
@@ -784,7 +784,10 @@ def test_vertex_client_needs_no_api_key(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "google", type("m", (), {"genai": _FakeGenai}))
 
     assert llm._gemini_client(None) == "vertex-client"
+    http = built.pop("http_options")
     assert built == {"vertexai": True, "project": "but-it-matters-tts", "location": "global"}
+    # The SDK default is no timeout: one stalled call used to be able to hold the whole job.
+    assert http.timeout == 120_000
 
 
 def test_vertex_ignores_a_per_caller_api_key(monkeypatch):
@@ -874,6 +877,21 @@ def test_a_dropped_connection_on_a_grounded_call_is_retried():
     """Under FACTCHECK_STRICT one network blip on the gate's call held a reel back."""
     assert llm._retry_wait(RuntimeError("Server disconnected without sending a response.")) == 2.0
     assert llm._retry_wait(RuntimeError("400 INVALID_ARGUMENT")) is None
+
+
+def test_a_connection_error_is_retried_by_its_class():
+    """httpx's ConnectError says only 'Temporary failure in name resolution'."""
+    import httpx
+
+    assert llm._retry_wait(httpx.ConnectError("[Errno -3] Temporary failure")) == 2.0
+    assert llm._retry_wait(httpx.ReadTimeout("")) == 2.0
+
+
+def test_a_number_in_a_400_body_is_not_a_status_code():
+    """A JSON 400 whose failed generation quoted '1,500' was retried as a 500."""
+    assert llm._retry_wait(RuntimeError("400 json_validate_failed: 'fees rose to 1,500'")) is None
+    assert llm._retry_wait(RuntimeError("503 Service Unavailable")) == 2.0
+    assert llm._retry_wait(RuntimeError("Error code: 429 - rate limited")) == 2.0
 
 
 @pytest.mark.parametrize("reply", [
