@@ -12,6 +12,7 @@ trends + the model's own knowledge. No secrets, free, machine-off friendly.
 from __future__ import annotations
 
 import logging
+import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 
@@ -32,13 +33,33 @@ _SEARCH_URL = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:e
 _TOPIC_URL = "https://news.google.com/rss/headlines/section/topic/{topic}?hl=en-IN&gl=IN&ceid=IN:en"
 _DEFAULT_TOPICS = "WORLD,BUSINESS,TECHNOLOGY,SCIENCE"  # HEALTH left out: journal items, medical claims
 _TIMEOUT = 20
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_RETRY_WAIT = 5.0
+
+
+def _fetch(url: str) -> str:
+    """GET a Google News feed. A 5xx, a 429 or a dropped connection gets ONE retry after a short
+    wait: on 2026-10-01 every feed and search answered 503 from the runner and nothing retried,
+    so the run went on with 0 headlines."""
+    for attempt in (0, 1):
+        try:
+            resp = requests.get(url, timeout=_TIMEOUT,
+                                headers={"User-Agent": "Mozilla/5.0 (AI-Reel-Factory news)"})
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt:
+                raise
+            time.sleep(_RETRY_WAIT)
+            continue
+        if resp.status_code in _RETRY_STATUS and not attempt:
+            time.sleep(_RETRY_WAIT)
+            continue
+        resp.raise_for_status()
+        return resp.text
+    raise AssertionError("unreachable")  # the second attempt always returns or raises
 
 
 def _get_stories(url: str) -> list[dict]:
-    resp = requests.get(url, timeout=_TIMEOUT,
-                        headers={"User-Agent": "Mozilla/5.0 (AI-Reel-Factory news)"})
-    resp.raise_for_status()
-    return _parse_stories(resp.text)
+    return _parse_stories(_fetch(url))
 
 
 def fetch_stories(limit: int = 12) -> list[dict]:
@@ -92,12 +113,7 @@ def search_stories(query: str, limit: int = 6) -> list[dict]:
     window = (config.get("NEWS_SEARCH_WINDOW", "3d") or "").strip()
     url = _SEARCH_URL.format(q=urllib.parse.quote(f"{query} when:{window}" if window else query))
     try:
-        resp = requests.get(
-            url, timeout=_TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0 (AI-Reel-Factory news)"},
-        )
-        resp.raise_for_status()
-        stories = _parse_stories(resp.text)
+        stories = _parse_stories(_fetch(url))
     except Exception as e:  # noqa: BLE001 — a search miss must never block ideation (rule 11)
         log.warning("news: search for %r failed (%s)", query, e)
         return []

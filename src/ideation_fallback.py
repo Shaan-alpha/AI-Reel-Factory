@@ -511,15 +511,60 @@ def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
     return ideas
 
 
-def _search_query(idea: dict) -> str:
+def _search_query(idea: dict, max_words: int = 10) -> str:
     """A news-search query from an idea's title, with figures left intact.
 
     Splitting on every non-alphanumeric turned "1,250 Dead" into "1 250 Dead" — two useless
     tokens in place of the single most distinctive term in the headline, which is why that
-    search came back with 2 results instead of dozens (live, 2026-09-03).
+    search came back with 2 results instead of dozens (live, 2026-09-03). Curly apostrophes
+    split words the same way ("Russia’s ... Don’t" searched as "Russia s ... Don t" and found
+    nothing, 2026-09-30), so they are straightened first. Unicode letters count as letters
+    ("Türkiye"), and the query is capped: a long headline matched nothing.
     """
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9',.]*", str(idea.get("title", "")))
-    return " ".join(w.strip(".,'") for w in words if w.strip(".,'"))
+    title = str(idea.get("title", "")).replace("’", "'").replace("‘", "'")
+    words = [w.strip(".,'-") for w in re.findall(r"[^\W_][\w',.&-]*", title)]
+    return " ".join([w for w in words if w][:max_words])
+
+
+_QUERY_FILLER = {"the", "a", "an", "of", "to", "in", "for", "and", "on", "with", "at", "by",
+                 "from", "as", "is", "are", "why", "how", "what", "just", "its", "it", "this",
+                 "that", "over", "after", "amid", "big", "new", "here", "you", "your", "vs"}
+
+
+def _short_search_query(idea: dict) -> str:
+    """The title's 5 most distinctive words: the retry when the full title found nothing."""
+    words = _search_query(idea, max_words=30).split()
+    keep = [w for w in words if w.lower() not in _QUERY_FILLER and (len(w) > 2 or w.isdigit())]
+    return " ".join(keep[:5])
+
+
+def _add_search_results(results: list[dict], out: list[str], idea_toks: set[str],
+                        need: int) -> int:
+    """Append up to `need` matching search results to `out`; return how many were added.
+
+    Two passes: one publisher at most on the first, so ">= MIN_SOURCES sources" means
+    INDEPENDENT outlets corroborating each other (docs/08 §1) rather than one outlet's story
+    counted twice. The second pass then fills from repeats rather than leave a true story
+    unsourced — for a domestic item only PTI ran, one outlet twice still beats dropping it."""
+    added = 0
+    for unique_publishers in (True, False):
+        seen_publishers: set[str] = set()
+        for story in results:
+            if added >= need:
+                return added
+            url = (story.get("url") or "").strip()
+            publisher = (story.get("source") or "").strip().lower()
+            if not url or url in out or _is_homepage(url):
+                continue
+            # The same story, not merely the same search: two distinctive shared words.
+            if len(idea_toks & _tokens(story.get("title", ""))) < _STORY_MATCH_MIN_TOKENS:
+                continue
+            if unique_publishers and publisher and publisher in seen_publishers:
+                continue
+            seen_publishers.add(publisher)
+            out.append(url)
+            added += 1
+    return added
 
 
 def _search_for_more(idea: dict, found: list[str], trusted: int | None = None) -> list[str]:
@@ -539,31 +584,18 @@ def _search_for_more(idea: dict, found: list[str], trusted: int | None = None) -
     have = len(found) if trusted is None else trusted
     if have >= min_src or not config.get_bool("ENABLE_SOURCE_SEARCH", True):
         return found
-    query = _search_query(idea)
-    results = news.search_stories(query, limit=max(min_src * 4, 8))
     out = list(found)
-    # Two passes: one publisher at most on the first, so ">= MIN_SOURCES sources" means
-    # INDEPENDENT outlets corroborating each other (docs/08 §1) rather than one outlet's story
-    # counted twice. The second pass then fills from repeats rather than leave a true story
-    # unsourced — for a domestic item only PTI ran, one outlet twice still beats dropping it.
     idea_toks = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
-    for unique_publishers in (True, False):
-        seen_publishers: set[str] = set()
-        for story in results:
-            url = (story.get("url") or "").strip()
-            publisher = (story.get("source") or "").strip().lower()
-            if not url or url in out or _is_homepage(url):
-                continue
-            # The same story, not merely the same search: two distinctive shared words.
-            if len(idea_toks & _tokens(story.get("title", ""))) < _STORY_MATCH_MIN_TOKENS:
-                continue
-            if unique_publishers and publisher and publisher in seen_publishers:
-                continue
-            seen_publishers.add(publisher)
-            out.append(url)
-            if len(out) >= min_src:
-                break
-        if len(out) >= min_src:
+    queries = [_search_query(idea)]
+    short = _short_search_query(idea)
+    if short and short != queries[0]:
+        queries.append(short)  # a long headline often matches nothing (8 of 19 on 10-01)
+    for query in queries:
+        results = news.search_stories(query, limit=max(min_src * 4, 8))
+        # Counted against the TRUSTED total: model-written URLs in `found` used to make one
+        # search result look like enough, and the probe then removed them.
+        have += _add_search_results(results, out, idea_toks, need=min_src - have)
+        if have >= min_src:
             break
     if len(out) > len(found):
         log.info("ideation: search found %d more source(s) for %r",

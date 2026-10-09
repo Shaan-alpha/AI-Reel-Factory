@@ -951,6 +951,45 @@ def test_two_ideas_on_one_story_are_caught_despite_different_wording():
 def test_tokens_fold_plurals_and_drop_filler():
     assert fb._tokens("India's UPI transactions could be over") == {"india", "upi", "transaction"}
     assert fb._tokens("press crisis") == {"press", "crisis"}  # not every final s is a plural
+
+
+def test_a_curly_apostrophe_does_not_split_a_search_word():
+    """'Russia’s ... Don’t' was searched as 'Russia s ... Don t' and found nothing (09-30)."""
+    q = fb._search_query({"title": "Russia’s Direct Threat to NATO: Don’t Touch Kaliningrad"})
+    assert q == "Russia's Direct Threat to NATO Don't Touch Kaliningrad"
+
+
+def test_a_search_that_finds_nothing_is_retried_shorter(monkeypatch):
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    asked = []
+
+    def _search(q, limit=8):
+        asked.append(q)
+        if len(asked) == 1:
+            return []
+        return [{"url": "https://a.com/starship-orbit-mars", "source": "A",
+                 "title": "Starship reaches orbit as Mars countdown begins"},
+                {"url": "https://b.com/starship-orbit", "source": "B",
+                 "title": "SpaceX Starship orbit Mars countdown"}]
+
+    monkeypatch.setattr(fb.news, "search_stories", _search)
+    out = fb._search_for_more({"title": "Starship Hits Orbit: The Mars Countdown Begins",
+                               "hook": ""}, [], trusted=0)
+    assert len(asked) == 2 and len(asked[1].split()) <= 5 and len(out) == 2
+
+
+def test_untrusted_urls_do_not_stop_the_search_early(monkeypatch):
+    """Two model-written URLs padded the count, so one search result looked like enough."""
+    monkeypatch.setenv("MIN_SOURCES", "2")
+    monkeypatch.setattr(fb.news, "search_stories", lambda q, limit=8: [
+        {"url": "https://a.com/x", "source": "A", "title": "Starship orbit Mars countdown"},
+        {"url": "https://b.com/y", "source": "B", "title": "Starship orbit Mars countdown"}])
+    out = fb._search_for_more({"title": "Starship Hits Orbit: The Mars Countdown Begins",
+                               "hook": ""}, ["https://model.example/1", "https://model.example/2"],
+                              trusted=0)
+    assert "https://a.com/x" in out and "https://b.com/y" in out
+
+
 def test_story_research_credits_each_citation_to_its_own_section(monkeypatch):
     """A JSON reply on 3.x carries no citations; prose sections do, one story each."""
     notes = ("### Story 1\nStarship reached orbit on Tuesday.\n"
