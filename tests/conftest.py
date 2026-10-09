@@ -35,6 +35,26 @@ def _no_live_database(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_telegram(request, monkeypatch):
+    """Unit tests never message the operator. On 2026-10-09 a publish test run with the local
+    .env sent a real "post row could not be saved" alert to the operator's chat: best-effort
+    alert paths call approval._api, and a test that does not stub it reaches Telegram. A test
+    that mocks requests.post still exercises the real _api; only a real network call is refused."""
+    if request.node.name.startswith("test_live") or request.node.get_closest_marker("live"):
+        return
+    from src import approval
+
+    real_api, real_post = approval._api, approval.requests.post
+
+    def _guarded(method, **params):
+        if approval.requests.post is real_post:
+            raise RuntimeError("a test tried to message Telegram; stub approval._api for it")
+        return real_api(method, **params)
+
+    monkeypatch.setattr(approval, "_api", _guarded)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_youtube_preflight(request, monkeypatch):
     """The entry points refresh the YouTube token before any work (publish_youtube.preflight);
     a unit test of make_on_demand must not reach Google for it. Tests of the pre-flight itself
