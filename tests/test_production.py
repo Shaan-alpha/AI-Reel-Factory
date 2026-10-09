@@ -88,6 +88,14 @@ def test_a_live_short_is_never_reported_as_failed(monkeypatch, tmp_path):
     assert notes and "Published" in notes[0] and "Don't approve it again" in notes[0]
 
 
+def test_a_crash_is_reported_once(monkeypatch, tmp_path):
+    marker = tmp_path / "crash-notified"
+    monkeypatch.setenv("CRASH_NOTE_FILE", str(marker))
+    notes = []
+    monkeypatch.setattr(production, "_notify", notes.append)
+    production._report_crash(RuntimeError("boom"))
+    assert "crashed" in notes[0] and "RuntimeError" in notes[0]
+    assert marker.exists()  # the workflow's own alert step stays quiet
 
 
 def test_produce_one_passes_key_points_to_captions(monkeypatch, tmp_path):

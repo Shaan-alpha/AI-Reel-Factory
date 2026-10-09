@@ -72,6 +72,8 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Make a Short (on demand)
+        # Inside the job's 90: a hang fails this step and leaves time for the alert below.
+        timeout-minutes: 85
         env:                     # secrets configured in repo Settings -> Secrets (rule 5)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}              # ungrounded text; own per-model free budget
@@ -191,4 +193,22 @@ jobs:
           # Keep equal to timeout-minutes above: the wait is shortened, and a reel is not
           # started, when the job would be killed before it finished.
           JOB_TIMEOUT_MINUTES: '90'
+          # The pipeline writes this after telling Telegram about a crash, so the step below
+          # stays quiet instead of sending a second message.
+          CRASH_NOTE_FILE: ${{ runner.temp }}/crash-notified
         run: python -m src.production make
+
+      # The operator watches Telegram, not the Actions tab. A kill at the time limit, a
+      # cancellation or a crash before Python could report it must still reach the phone,
+      # or taps on the dead run's digest wait for nothing (run 36804231283).
+      - name: Tell Telegram the run stopped
+        if: failure() || cancelled()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MARKER: ${{ runner.temp }}/crash-notified
+          TEXT: "💥 make-short stopped before finishing (${{ job.status }}). Approvals from its digest were not produced; the next /makeshort offers them again. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          [ -f "$MARKER" ] && exit 0
+          curl -sS -m 20 -o /dev/null "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${TEXT}" || true

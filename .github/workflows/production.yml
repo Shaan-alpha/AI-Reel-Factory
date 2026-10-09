@@ -61,6 +61,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run production pipeline
+        timeout-minutes: 55      # inside the job's 60, so the alert below still runs
         env:                     # secrets configured in repo Settings -> Secrets (rule 5)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}              # ungrounded text; own per-model free budget
@@ -178,4 +179,17 @@ jobs:
           # Keep equal to timeout-minutes above: a reel is not started when the job would be
           # killed before it finished.
           JOB_TIMEOUT_MINUTES: '60'
+          CRASH_NOTE_FILE: ${{ runner.temp }}/crash-notified   # see make-short.yml
         run: python -m src.production
+
+      - name: Tell Telegram the run stopped
+        if: failure() || cancelled()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MARKER: ${{ runner.temp }}/crash-notified
+          TEXT: "💥 production stopped before finishing (${{ job.status }}). ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          [ -f "$MARKER" ] && exit 0
+          curl -sS -m 20 -o /dev/null "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${TEXT}" || true

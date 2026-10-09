@@ -570,11 +570,32 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     return summary
 
 
+def _report_crash(error: Exception) -> None:
+    """Tell the operator a run died, and leave a marker so the workflow does not say it twice.
+
+    Telegram is the only place the operator looks. A crash used to end the job with a red X in
+    Actions and nothing on the phone, while the bot kept acknowledging taps on the dead run's
+    digest (run 36804231283)."""
+    _notify(f"💥 The run crashed: {type(error).__name__}: {str(error)[:300]}\n"
+            "Approvals from its digest were not produced; the next /makeshort offers them again.")
+    marker = config.get("CRASH_NOTE_FILE")
+    if marker:
+        try:
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(type(error).__name__)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) > 1 and sys.argv[1] == "make":
-        # config.get, not os.environ.get: a scheduled run passes IDEAS="" and int("") crashed.
-        make_on_demand(int(config.get("IDEAS", "3")), int(config.get("WAIT_MIN", "20")))
-    else:
-        run()
+    try:
+        if len(sys.argv) > 1 and sys.argv[1] == "make":
+            # config.get, not os.environ.get: a scheduled run passes IDEAS="" and int("") crashed.
+            make_on_demand(int(config.get("IDEAS", "3")), int(config.get("WAIT_MIN", "20")))
+        else:
+            run()
+    except Exception as e:  # noqa: BLE001 — reported, then re-raised: the run stays red
+        _report_crash(e)
+        raise
