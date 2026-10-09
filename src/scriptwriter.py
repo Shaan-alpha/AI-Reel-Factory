@@ -464,10 +464,13 @@ def _tighten(body: str, max_words: int) -> str | None:
     words = len(_visible_words(body))
     floor, target = max_words - 20, max_words - 8
     try:
+        # 4096, not 1024: both providers count reasoning against max_tokens. At 1024 idea 488
+        # (87 words) failed on Groq ("max completion tokens reached") and on Gemini (the JSON
+        # cut off mid-string), so its reel shipped at 42 s. Unused budget costs nothing.
         data = _parse_llm_json(llm.generate(
             _TIGHTEN_PROMPT.format(max_words=max_words, floor=floor, target=target,
                                    words=words, body=body),
-            json=True, max_tokens=1024, prefer_groq=True))
+            json=True, max_tokens=4096, prefer_groq=True))
     except Exception as e:  # noqa: BLE001 — the deterministic backstop still runs
         log.warning("scriptwriter: tighten pass failed (%s); truncating instead.", e)
         return None
@@ -660,7 +663,7 @@ def repair_script(body: str, findings: list[str], topic: str | None = None) -> s
             raw = llm.generate_grounded(prompt, max_tokens=2048)
         except Exception as e:  # noqa: BLE001
             log.warning("scriptwriter: grounded repair unavailable (%s); ungrounded", e)
-            raw = llm.generate(prompt, json=True, max_tokens=1024)
+            raw = llm.generate(prompt, json=True, max_tokens=4096)  # room for reasoning, as _tighten
         data = _parse_llm_json(raw)
     except Exception as e:  # noqa: BLE001 — the block stands
         log.warning("scriptwriter: repair pass failed (%s)", e)

@@ -522,6 +522,20 @@ def test_tighten_pass_is_used_when_the_draft_runs_long(monkeypatch):
     assert scriptwriter._enforce_length(long, 1) == tight
 
 
+def test_tighten_pass_leaves_room_for_reasoning(monkeypatch):
+    """At 1024 tokens idea 488's tighten failed on both providers (reasoning used the budget
+    before the JSON was finished), and its reel shipped at 42 s."""
+    seen = {}
+
+    def _gen(prompt, **kw):
+        seen.update(kw)
+        return '{"script_body": "x"}'
+
+    monkeypatch.setattr(scriptwriter.llm, "generate", _gen)
+    scriptwriter._tighten(" ".join(["Word"] * 90) + ". Here's why it matters: it does.", 80)
+    assert seen["max_tokens"] >= 4096
+
+
 def test_tighten_pass_that_drops_the_payoff_is_refused(monkeypatch):
     long = " ".join(["Word"] * 90) + ". Here's why it matters: it does."
     monkeypatch.setattr(scriptwriter.llm, "generate",
