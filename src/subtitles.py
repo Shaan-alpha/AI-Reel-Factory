@@ -48,10 +48,36 @@ _NON_RENDERABLE = re.compile(
 
 @lru_cache(maxsize=2)
 def _load_model(size: str):
-    """Load (once) a CPU int8 faster-whisper model. Imported lazily; downloads on first use."""
+    """Load (once) a CPU int8 faster-whisper model. Imported lazily; downloads on first use.
+
+    The local cache is tried first: a plain load asks the Hugging Face Hub for the file list
+    every time, so a Hub outage or rate limit failed the caption step with the model cached."""
     from faster_whisper import WhisperModel
 
-    return WhisperModel(size, device="cpu", compute_type="int8")
+    try:
+        return WhisperModel(size, device="cpu", compute_type="int8", local_files_only=True)
+    except Exception:  # noqa: BLE001 — not cached yet: fetch it
+        return WhisperModel(size, device="cpu", compute_type="int8")
+
+
+_WHISPER_RATE = 16000
+
+
+def _decode_for_whisper(audio_path: str):
+    """The narration as 16 kHz mono float32, decoded by the FFmpeg binary the pipeline needs
+    anyway. Given a file path, faster-whisper decodes through PyAV, and PyAV 19 rejected the call
+    it makes: every reel from 2026-10-01 died here. Given an array it never touches PyAV."""
+    import numpy as np
+
+    proc = subprocess.run(
+        [_ffmpeg(), "-v", "error", "-nostdin", "-i", audio_path, "-f", "f32le", "-ac", "1",
+         "-ar", str(_WHISPER_RATE), "-"],
+        capture_output=True, timeout=120,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        raise RuntimeError(f"ffmpeg could not decode {audio_path}: "
+                           f"{proc.stderr.decode('utf-8', 'replace')[-300:]}")
+    return np.frombuffer(proc.stdout, dtype=np.float32)
 
 
 # A whisper token that CONTINUES the previous number rather than starting a new word: a comma or
@@ -86,8 +112,13 @@ def _merge_number_tokens(
 def _transcribe_words(audio_path: str) -> list[tuple[float, float, str]]:
     """Return [(start_s, end_s, word)] for the narration. Isolated for testability."""
     model = _load_model(config.get("WHISPER_MODEL", "base"))
+    try:
+        audio = _decode_for_whisper(audio_path)
+    except Exception as e:  # noqa: BLE001 — faster-whisper's own decoder is still a fallback
+        log.warning("subtitles: FFmpeg decode failed (%s); letting faster-whisper decode", e)
+        audio = audio_path
     segments, _info = model.transcribe(
-        audio_path, word_timestamps=True, beam_size=5, language="en", vad_filter=True,
+        audio, word_timestamps=True, beam_size=5, language="en", vad_filter=True,
     )
     words: list[tuple[float, float, str]] = []
     for seg in segments:

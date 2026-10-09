@@ -20,6 +20,11 @@ edge-tts==7.2.8               # narration fallback (free, no key)
 # NOTE: assembly/visuals call the FFmpeg *binary* directly via subprocess (no Python wrapper) —
 # install FFmpeg as a system dep (winget Gyan.FFmpeg / apt). On CI, install it onto PATH.
 faster-whisper==1.2.1         # word-level timestamps for karaoke captions
+av==18.1.0                    # PyAV, faster-whisper's audio decoder. PINNED although it is only a
+                              # transitive dep: faster-whisper 1.2.1 calls av.open(...,
+                              # metadata_errors=...), which av 19 rejects with a TypeError, so
+                              # from 2026-10-01 every reel died at the caption step. 18.1.0 is the
+                              # version CI last captioned and published with (2026-09-28, idea 397).
 numpy==2.4.6                  # Kokoro PCM handling (also a transitive dep)
 pillow==12.2.0                # graphics.py stat-card PNGs (ENABLE_GRAPHIC_CARDS overlay path)
 

@@ -7,6 +7,7 @@ test runs real faster-whisper (tiny) + a real burn and skips if anything is unav
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -310,9 +311,38 @@ def test_burn_uses_plain_vf_when_no_cards(monkeypatch, tmp_path):
 
 # --- live: real whisper + real burn ----------------------------------------------------
 
+def test_live_whisper_decodes_a_real_file(monkeypatch, tmp_path):
+    """faster-whisper must open a real audio file: the PyAV contract, pinned on its own.
+
+    PyAV 19 rejects faster-whisper 1.2.1's av.open(..., metadata_errors=...), so from
+    2026-10-01 every reel died at this call while CI stayed green: the live burn test below
+    turned every exception into a skip. A tone is enough, since the TypeError fires while the
+    file is decoded, before any recognition."""
+    monkeypatch.setenv("WHISPER_MODEL", "tiny")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("needs the FFmpeg binary")
+    wav = tmp_path / "tone.wav"
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                    "-ar", "24000", str(wav)], check=True)
+    try:
+        subtitles._load_model("tiny")
+    except Exception as e:  # noqa: BLE001 - the first load downloads the model
+        if os.environ.get("CI"):
+            raise
+        pytest.skip(f"whisper model unavailable (offline?): {e}")
+    assert isinstance(subtitles._transcribe_words(str(wav)), list)
+
+
 def test_live_caption_burn(monkeypatch, tmp_path):
-    """Real faster-whisper (tiny) + FFmpeg burn on a real reel. Skips if unavailable."""
+    """Real faster-whisper (tiny) + FFmpeg burn on a real reel.
+
+    Skips only when a PREREQUISITE is missing, and never in CI, where all of them are
+    installed: FFmpeg, the voice, B-roll, the model download. Our own render, transcription and
+    burn run outside the try, so a break in them fails the test instead of becoming one more
+    skip. Kokoro voices it, so CI spends none of the channel voice's TTS quota."""
     monkeypatch.setenv("WHISPER_MODEL", "tiny")  # smaller/faster for CI
+    monkeypatch.setenv("VOICE_ENGINE", "kokoro")
     from src import assembly, visuals, voice
 
     try:
@@ -323,13 +353,17 @@ def test_live_caption_burn(monkeypatch, tmp_path):
         )
         clips = visuals.fetch_broll(["rocket", "city skyline"], target_seconds=dur,
                                     out_dir=str(tmp_path))
-        reel = assembly.assemble(audio, clips, str(tmp_path / "reel.mp4"))
-        # pass a hook so libass really renders the frame-1 Hook style + Layer-1 dialogue
-        out = subtitles.burn_captions(reel, audio, str(tmp_path / "captioned.mp4"),
-                                      hook_text="Reusable Rocket SHOCK",
-                                      key_points=["First in Asia", "Cheaper Launches"])
+        subtitles._load_model("tiny")
     except Exception as e:  # noqa: BLE001
-        pytest.skip(f"live caption render unavailable (offline / no FFmpeg / model): {e}")
+        if os.environ.get("CI"):
+            raise
+        pytest.skip(f"live caption render unavailable (offline / no FFmpeg / provider): {e}")
+
+    reel = assembly.assemble(audio, clips, str(tmp_path / "reel.mp4"))
+    # pass a hook so libass really renders the frame-1 Hook style + Layer-1 dialogue
+    out = subtitles.burn_captions(reel, audio, str(tmp_path / "captioned.mp4"),
+                                  hook_text="Reusable Rocket SHOCK",
+                                  key_points=["First in Asia", "Cheaper Launches"])
 
     assert os.path.exists(out) and os.path.getsize(out) > 50_000
     probe = subprocess.run(
