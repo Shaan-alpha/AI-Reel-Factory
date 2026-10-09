@@ -12,12 +12,17 @@ here — only rows/metadata (rule 15).
 """
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from supabase import Client, create_client
+import httpx
+from supabase import Client, ClientOptions, create_client
 
 from src import config
+
+log = logging.getLogger(__name__)
 
 # Allowed idea lifecycle states. 'produced' marks an approved idea whose reel has shipped,
 # so a cron retry skips it (rule 12: idempotent reruns). 'passed' is a soft skip from the
@@ -27,10 +32,62 @@ from src import config
 IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked")
 
 
+class _RetryTransport(httpx.BaseTransport):
+    """Resend a Supabase request whose CONNECTION failed, so one network blip can't end a run.
+
+    postgrest retries only a 503/520 *response*; a dropped connection raises straight through.
+    On 2026-10-01 a server GOAWAY on the HTTP/2 connection
+    (`httpx.RemoteProtocolError: ConnectionTerminated`) hit the 5-second approval poll and
+    killed run 36804231283 with the operator's tap still waiting.
+
+    Reads, updates and deletes are resent on any transport error: every update here writes an
+    absolute value, so a second delivery changes nothing. An INSERT (POST) is resent only when
+    the connection never opened. Once the request may have reached the server, a resend
+    could create a duplicate row (a second post for one video).
+    """
+
+    _RESENDABLE = frozenset({"GET", "HEAD", "OPTIONS", "PATCH", "PUT", "DELETE"})
+    _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+    def __init__(self, inner: httpx.BaseTransport, delays: tuple[float, ...] = (1.0, 3.0)):
+        self._inner = inner
+        self._delays = delays
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        for attempt in range(len(self._delays) + 1):
+            try:
+                return self._inner.handle_request(request)
+            except httpx.TransportError as e:
+                resendable = (request.method in self._RESENDABLE
+                              or isinstance(e, self._NOT_SENT))
+                if attempt == len(self._delays) or not resendable:
+                    raise
+                log.warning("db: %s %s failed (%s: %s); retrying in %.0fs",
+                            request.method, request.url.path, type(e).__name__, e,
+                            self._delays[attempt])
+                time.sleep(self._delays[attempt])
+        raise AssertionError("unreachable")  # the loop always returns or raises
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+def _http_client() -> httpx.Client:
+    """The HTTP client Supabase uses: HTTP/1.1 (no HTTP/2 GOAWAY mid-poll), a bounded timeout,
+    and `_RetryTransport` for dropped connections. postgrest sends absolute URLs and its own
+    auth headers on every request, so the client needs no base URL."""
+    return httpx.Client(
+        transport=_RetryTransport(httpx.HTTPTransport(http2=False)),
+        timeout=httpx.Timeout(60.0, connect=15.0),
+        follow_redirects=True,
+    )
+
+
 @lru_cache(maxsize=1)
 def get_client() -> Client:
     """Create (once) and return the Supabase client. Fails loud if creds missing (rule 14)."""
-    return create_client(config.require("SUPABASE_URL"), config.require("SUPABASE_KEY"))
+    return create_client(config.require("SUPABASE_URL"), config.require("SUPABASE_KEY"),
+                         options=ClientOptions(httpx_client=_http_client()))
 
 
 # --- ideas ----------------------------------------------------------------------------

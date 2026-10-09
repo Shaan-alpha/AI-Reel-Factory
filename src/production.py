@@ -451,19 +451,25 @@ def _wait_for_webhook_decisions(max_seconds: int, poll_seconds: int = 5,
     wanted = {int(i) for i in offered} if offered is not None else None
     cap = int(config.get("APPROVAL_CAP", config.get("DAILY_REEL_CAP", "3")))
     while True:
-        pending = [i for i in db.get_pending_ideas()
-                   if wanted is None or int(i["id"]) in wanted]
-        if not pending:
+        # One failed poll is not a verdict: keep waiting for the tap (rule 14). An unguarded
+        # poll ended run 36804231283 on a dropped connection with the operator's tap pending.
+        try:
+            pending = [i for i in db.get_pending_ideas()
+                       if wanted is None or int(i["id"]) in wanted]
+            approved_now = ([i for i in db.get_approved_ideas()
+                             if wanted is None or int(i["id"]) in wanted] if pending else [])
+        except Exception as e:  # noqa: BLE001
+            log.warning("approval: poll failed (%s); still waiting.", e)
+            pending, approved_now = None, []
+        if pending == []:
             log.info("approval: all ideas decided via webhook.")
             break
-        approved_now = [i for i in db.get_approved_ideas()
-                        if wanted is None or int(i["id"]) in wanted]
         if len(approved_now) >= cap:
             log.info("approval: approval cap (%d) reached; not waiting for the rest.", cap)
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            log.info("approval: webhook wait expired with %d pending idea(s).", len(pending))
+            log.info("approval: webhook wait expired with %d pending idea(s).", len(pending or []))
             break
         time.sleep(min(poll_seconds, remaining))
     approved = len(db.get_approved_ideas())

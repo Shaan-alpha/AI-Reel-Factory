@@ -619,6 +619,26 @@ def test_the_approval_wait_ignores_other_runs_pending_ideas(monkeypatch):
     production._wait_for_webhook_decisions(600, offered=[1, 2])
 
 
+def test_a_failed_poll_keeps_the_approval_wait_alive(monkeypatch):
+    """Run 36804231283 died on one dropped connection while the operator's tap was pending."""
+    import httpx
+
+    polls = iter([httpx.RemoteProtocolError("ConnectionTerminated"), [{"id": 1}], []])
+
+    def _pending():
+        nxt = next(polls)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+    slept = []
+    monkeypatch.setattr(production.db, "get_pending_ideas", _pending)
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [])
+    monkeypatch.setattr(production.time, "sleep", slept.append)
+    production._wait_for_webhook_decisions(600, offered=[1])
+    assert len(slept) == 2  # waited through the failed poll and the pending one, then finished
+
+
 def _verdicts(monkeypatch, *results):
     it = iter(results)
     monkeypatch.setattr(production.factcheck, "verify", lambda *a, **k: next(it))
