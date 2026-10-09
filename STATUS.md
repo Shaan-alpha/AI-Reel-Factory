@@ -4,14 +4,14 @@
 > (rule #1 in [CLAUDE.md](CLAUDE.md)). Keep it short, current, and honest.
 > Newest entry at the top of the log.
 
-**Phase:** 1 — MVP (4–5 captioned YouTube Shorts/day)
-**Version:** 0.18.0 (**PUBLIC**, tagged) + **untagged on `main`: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12) and the 2026-09-29 follow-ups** (**642 pass, 5 skipped**)
-**2026-10-09:** production was **down from 2026-10-01** (PyAV 19 broke captions). The fix and the rest of the 2026-10-09 audit are on `main` (**688 pass, 5 skipped**); the Vercel bot still needs a redeploy. See the log entry below.
-**Last updated:** 2026-10-09 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` (Vertex)
+**Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
+**Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups and the 2026-10-09 audit (CHANGELOG `[Unreleased]`) · CI **689 pass, 5 skipped** (run 37886269322; the 5 are opt-in live tests)
+**2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
+**Last updated:** 2026-10-09 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
-  ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp · somber read for tragedies · whoosh removed
+  ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
   ↳ ⚠️ **both Developer-API TTS models shut down 2026-11-17** (replacements `gemini-3.8-flash-tts` / `-lite-tts`): operator ear test needed first
-**Models (Vertex):** text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` · fact-check `gemini-3.5-flash` · ideation `gemini-3.5-flash-lite,gemini-3.5-flash` (prose research, on the branch; `gemini-2.5-flash` retires 2026-10-20)
+**Models:** Vertex: text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` → `3.5-flash` · fact-check `gemini-3.5-flash` → `3.5-flash-lite` · ideation research `gemini-3.5-flash-lite` → `3.5-flash` (prose). Groq `openai/gpt-oss-120b` picks stories and is the text failover. Nothing on Vertex uses `gemini-2.5-flash`, which Vertex retires 2026-10-20
 **Trigger:** **on demand only** (`/makeshort` or the workflow button); the scheduled digests were removed 2026-09-29 (operator); nothing is produced without a tap
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
@@ -22,101 +22,99 @@
 
 | Area | State |
 |------|-------|
-| Design / docs | ✅ Complete — 8 docs in [docs/](docs/) |
-| Project rules | ✅ Written — [CLAUDE.md](CLAUDE.md) |
-| Repo scaffolding (src/, routines/, templates/, tests/, workflows) | ✅ Done — stubs + contracts |
-| `config.py` | ✅ Functional + tested (4/4 pass) |
-| Script templates (N, D, A, C) | ✅ Written |
-| Routine prompt (`routines/ideation.md`) | ✅ First draft |
-| Accounts & API keys | ✅ **ALL collected + verified** — Gemini · Groq · Supabase(secret) · Telegram · Pexels · Claude token · YouTube |
-| Supabase database | ✅ 5 tables + RLS + secret-key writes confirmed |
-| YouTube OAuth | ✅ Verified (upload+readonly); token bound to the correct **@butitmatters** channel |
-| YouTube handle `@butitmatters` | ✅ Secured (IG/TikTok not checked — Phase 3) |
-| YouTube channel *title* | ✅ Renamed to **But It Matters** (matches handle + CHANNEL_NAME) |
-| Pipeline logic (modules) | ✅ **All modules implemented + tested** — see the table below (this row said "still stubs" until 2026-09-03, contradicting it) |
-| Local `.venv` | ✅ pytest + supabase + google-genai + groq + edge-tts (suite green) |
-| FFmpeg (system dep) | ✅ Installed locally — winget `Gyan.FFmpeg` 8.1.1 (assembly module) |
+| Production | ✅ Live, **on demand only**: about 81 public Shorts on **@butitmatters**, about 0.7 a day against the 4–5 goal. Down 2026-10-01 → 10-09 (PyAV 19), back since |
+| Pipeline code ([src/](src/)) | ✅ Every module implemented and tested (table below); CI **689 pass, 5 skipped** |
+| Design / docs | ✅ 8 docs in [docs/](docs/) · rules in [CLAUDE.md](CLAUDE.md) |
+| GitHub Actions | `make-short` (the pipeline), `production` (manual-only), `tests` (push, PR, daily), `analytics` (daily), `verify-tts` / `verify-vertex` (manual); all on `ubuntu-24.04`, Python 3.12. 14 secrets, Pixabay included (`CLAUDE_CODE_OAUTH_TOKEN` deliberately absent, rule 4). Repo variables: `FACTCHECK_STRICT=true`, `VISUAL_SOURCE=ai`, `YOUTUBE_PRIVACY=public`, `GOOGLE_TTS_VOICE` |
+| Telegram bot ([telegram-bot/](telegram-bot/)) | ✅ Vercel project `telegram-bot`, team `shaan-alphas-projects`, account **shaan-alpha** (the operator has two Vercel accounts; deploy from this one). CLI-deployed, not git-connected: every bot change needs `vercel deploy --prod` from `telegram-bot/`. Last deploy 2026-10-09 |
+| Google Cloud `but-it-matters-tts` (billed) | Vertex AI (keyless: Workload Identity Federation in CI, ADC locally) + Cloud Text-to-Speech (Chirp). ₹450/month budget with 50/90/100% alerts (alerts only, not a hard stop) |
+| Supabase (free) | ✅ `ideas` · `scripts` · `posts` · `analytics` (+ `hook_performance`, unused); RLS on; server-side `sb_secret_` key |
+| YouTube | ✅ **@butitmatters**, titled **But It Matters**. Token scopes `youtube.upload` + `youtube.readonly`; `yt-analytics.readonly` needs a re-auth |
+| Script templates | Template N is the only one wired (embedded in `scriptwriter.py`); D, A, C are written but unused |
+| Claude Routine ([routines/ideation.md](routines/ideation.md)) | Optional and **dormant**: it has never run in production, and `data/daily-ideas.json` is empty |
+| Local dev | Windows 11; `.venv` on Python 3.13 (CI uses 3.12); FFmpeg 8.1.1 (winget `Gyan.FFmpeg`) |
 
 ## Module progress (Phase 1)
 
+Numbers are the modules' own (docs/01 §5 and the module docstrings); rows follow the pipeline order.
+
 | # | Module | Status |
 |---|--------|--------|
-| 1 | Ideation (Claude Routine + fallback) | ✅ Routine prompt drafted; **`ideation_fallback.py` done** — Gemini→Groq, sourced+validated; 9 tests (incl. live) |
-| 2 | Approval (Telegram) | ✅ Done — digest + Approve/Reject/**Pass** buttons + cap; 12 tests (live gated) |
-| 3 | Scriptwriter (Gemini/Groq) | ✅ Done — Template N; honest framing + why-it-matters + **key-point cards**; compliance enforced; **25-30s length enforced** (punch-up no longer lengthens + hard word cap); 20 tests |
-| 4 | Voice | ✅ Done — **Google Chirp 3 HD → edge-tts (en-IN) → Kokoro** chain + **opt-in Gemini TTS** head (promptable, free Flash model) and **per-engine delivery tags** (`[pause]`→Chirp markup, `[sarcastic]`→Gemini); 47 tests (incl. gated live) |
-| 5 | Visuals (Pexels/Pixabay) | ✅ Done — LLM keywords + licence-clean portrait B-roll (Pexels/Pixabay licences, not CC0); 11 tests (incl. live) · *Phase B: story-specific* |
-| 6 | Assembly (FFmpeg) | ✅ Done — 1080×1920 H.264 reel + **premium polish** (crossfade transitions, cinematic grade, vignette/grain) + **retention v2** (music ducking, brand-logo bug, loop-friendly endings), all toggle-gated + fail-soft; 29 tests (incl. live full render) |
-| 7 | Subtitles (faster-whisper) | ✅ Done — **karaoke + frame-1 hook + key-point cards** (Montserrat) + **source lower-third**; 22 tests (incl. live burn) |
-| 9 | Publish (YouTube) | ✅ Done — videos.insert + `containsSyntheticMedia` flag; 8 tests (live gated) |
-| 10 | Orchestrator (`production.py`) | ✅ Done — wires the full chain, idempotent + fail-soft; 8 tests |
-| — | `config.py` / `db.py` / `llm.py` | config ✅ · **db ✅** · **llm ✅ (Gemini→Groq failover, 5 unit tests)** |
+| 1 | Ideation (`ideation_fallback.py`, `news.py`, `trends.py`) | ✅ The live engine (the file name predates it): Google News RSS (India front page + World, Business, Technology, Science; 24 stories) and Google Trends (IN) → Groq picks N distinct stories → Gemini researches them in prose with grounded search on Vertex (`IDEATION_MODEL`), each idea keeping its own story's citations → JSON ideas on `gemini-3.8-flash` (Groq failover). ≥ 2 live source links per idea (`MIN_SOURCES`), Google News search top-up, 10-day story dedup. A Claude Routine file would be read first; it is empty |
+| 2 | Approval (`approval.py` + the Vercel bot) | ✅ Digest with ✅ Approve / ⏭️ Pass / ❌ Reject; the bot writes each tap to Supabase (webhook mode); at most 3 approvals a run (`APPROVAL_CAP`); deaths and serious harm flagged "Sensitive" |
+| 3 | Scriptwriter (`scriptwriter.py`) | ✅ Template N on `gemini-3.8-flash` (Groq failover), grounded write on `gemini-3.5-flash-lite` → `3.5-flash`; a why-it-matters take; ≤ 80 words (LLM tighten pass, then a whole-sentence cut); hook punch-up except on somber stories; titles ≤ 70 chars; key-point cards; somber tone for deaths and serious harm |
+| 11 | Fact-check gate (`factcheck.py`) | ✅ Every script, before voicing: `gemini-3.5-flash` → `3.5-flash-lite` on Vertex, grounded; 2 samples (either can block); blocks fabrication, waives imprecision (`FACTCHECK_SEVERITY=critical`); one repair pass; strict mode holds the reel if the checker cannot run. A blocked idea gets status `blocked` |
+| 4 | Voice (`voice.py`) | ✅ Gemini TTS `gemini-3.1-flash-tts-preview`, voice Zubenelgenubi, labelled style prompt. Same voice: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA; then Chirp 3 HD `en-IN-Chirp3-HD-Zubenelgenubi` → edge-tts `en-IN-PrabhatNeural` → Kokoro `am_michael` (one male narrator throughout). Telegram alert when a reel leaves the channel voice; `posts.voice` records the engine |
+| 5 | Visuals (`visuals.py`) | ✅ `VISUAL_SOURCE=ai`: Cloudflare FLUX.2 klein (768×1344, per-shot seeds, 4 shots at a time) → FLUX.1 schnell → a Pexels photo, each with Ken Burns motion; stock video (Pexels → Pixabay) if the image path fails. Stock is under the Pexels/Pixabay licences, not CC0 |
+| 6 | Assembly (`assembly.py`, `audio_sfx.py`, `graphics.py`) | ✅ FFmpeg 1080×1920 H.264: crossfades, grade, vignette (grain off), one of four AI-generated music beds (Google Lyria 2, disclosed) with ducking, a click every 2nd cut, -14 LUFS, logo bug, seamless loop, CRF 20 / 8 Mbps cap, BT.709 |
+| 7 | Captions (`subtitles.py`) | ✅ faster-whisper `base` times the words (audio decoded by FFmpeg; PyAV pinned to 18.1.0 and off this path); the text comes from the approved script; karaoke in 3-word groups, frame-1 hook, key-point cards, "Source: <publisher>" lower-third, Montserrat |
+| 9 | Publish (`publish_youtube.py`) | ✅ `videos.insert` with `containsSyntheticMedia=true` + the disclosure line; public; token pre-flight before the digest; resumable upload with retries; idempotent (checks `posts`) |
+| 10 | Analytics (`analytics.py`) | ✅ Daily `analytics.yml`: view snapshots; removed or taken-down Shorts reported on Telegram, then marked `removed`; winners and low performers feed ideation; keeps the scheduled workflows enabled |
+| — | Orchestrator (`production.py`) | ✅ `python -m src.production make` (make-short): token pre-flight → leftover approvals released, stale pending ideas aged out → ideation → digest → wait for taps → each approved idea through the chain → "✅ Published <link>". Idempotent, fail-soft; a crash, timeout or cancellation reaches Telegram |
+| — | `config.py` / `db.py` / `llm.py` | ✅ config fails loud on a missing secret; db: Supabase over HTTP/1.1 with a retrying transport; llm: Gemini (Vertex in CI) ↔ Groq failover, 120 s timeout |
 
 Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
-- ⚠️ **Operator actions from the 2026-10-09 audit** (details in its log entry):
-  - **redeploy the Vercel bot** (`vercel deploy --prod` from `telegram-bot/`): its fixes do
-    nothing until then;
+- ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
   - **before 2026-11-17**: ear-test `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts`
     (Zubenelgenubi) and pick the channel voice's successor; both current Developer-API TTS
-    models shut down that day and every reel would move to the billed Vertex path;
-  - decide: should model-written source URLs count toward `MIN_SOURCES` (invented TOI / The Hindu
-    links pass the liveness probe), and is one outlet twice enough for two sources?
-  - review the public Shorts the auditors flagged: `hYhYKlAWQv4` (idea 211, a claim the checker
-    called contradicted shipped as "minor"), `9Nkp1i1GQl8` (idea 301), `d3kJpc0QCWg` (the claim
-    the gate blocked on idea 314); 10 unlisted June test uploads are still on the channel;
-  - the 9 removed Shorts were never reported (the alert had no Telegram secrets); see the log.
-- ⚠️ **Operator actions left from the 2026-09-27/28 audit** (everything else is done):
+    models shut down that day and every reel would move to the billed Vertex path. The code
+    switch follows the pick;
+  - settle the two source questions under Open decisions;
   - unlist or delete the two public Shorts that never passed the gate, `xRUo6GxYwYo` and
     `NKPb-InUoJU` (the pipeline's YouTube token cannot edit videos);
-  - re-run `tools/get_youtube_token.py` when convenient: it now asks for `yt-analytics.readonly`,
-    which unlocks retention data;
+  - review the other public Shorts the auditors flagged: `hYhYKlAWQv4` (idea 211, a claim the
+    checker called contradicted shipped as "minor"), `9Nkp1i1GQl8` (idea 301), `d3kJpc0QCWg`
+    (the claim the gate blocked on idea 314), and `bMc2Kq_7-wg` (2026-09-12, Houthi: its
+    description cites unrelated stories and the screen says "Source: voanews.com");
+  - in Studio: delete the 10 unlisted test uploads from 2026-06-09, and first confirm on
+    `mT4k_iuAZ5s` or any recent Short that "Altered content" shows "Yes" (we send
+    `containsSyntheticMedia=true`, but our scopes cannot read it back; open since 2026-06-09);
+  - note the 9 Shorts found gone from YouTube on 2026-09-28: they were never reported (the
+    alert had no Telegram secrets until 2026-10-09), and their IDs are in the 2026-10-09 log;
+  - re-run `tools/get_youtube_token.py` when convenient: it asks for `yt-analytics.readonly`,
+    which a future retention pull needs (nothing reads it yet).
+- **Code, when there is time** (the 2026-10-09 log's "Not done here"): the 3.8 TTS migration
+  after the pick; a hashed lock file for CI; a scheduled model-liveness canary; the lower
+  findings listed there.
 
-- ✅ **All credentials collected + verified.** ✅ **All pipeline code built + tested** (**486 pass, 5 skipped** — 2026-09-13).
-- ⚠️ **Operator action (2026-09-13):** Short `NKPb-InUoJU` (idea 291, Modi-Xi) is public with a
-  claim the gate blocks every time. Both 2026-09-12 Shorts (`NKPb-InUoJU`, `bMc2Kq_7-wg`) list
-  unrelated stories as sources, and the Houthi one burns "Source: voanews.com" on screen. The
-  2026-09-13 fixes are **pushed** (`a24bddf`, CI green) and the **Vercel bot is redeployed**.
-  Vercel is CLI-deployed, not git-connected, so **every bot change needs `vercel deploy --prod`
-  from `telegram-bot/`**. The previous deploy was 94 days old and had missed the 2026-09-03 bot
-  fixes too.
+### Operating model: on demand only (since 2026-09-29)
+Start a run with `/makeshort [N]` in the Telegram bot (N ideas, 1–8, default 5; it waits 30 min)
+or the `make-short` workflow's **Run workflow** button (`ideas` default 3, `wait_min` default 20).
+The run (`python -m src.production make` on GitHub Actions, `ubuntu-24.04`, a 90-minute job, one
+run at a time) checks the YouTube token, releases leftover approvals, ages out pending ideas older
+than 24 h, tops the queue up to N ideas and sends the digest. Taps (✅ Approve / ⏭️ Pass /
+❌ Reject, at most 3 approvals) reach Supabase through the Vercel bot. Each approved idea then
+runs script → fact-check → voice → visuals → assembly → captions → YouTube, and Telegram gets
+"✅ Published <link>". A crash, timeout or cancellation sends a Telegram alert. The PC can be
+off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitHub started them
+6.5–7 h late); `production.yml`, the old cron path, is manual-only.
 
-### Operating model: ON-DEMAND (chosen 2026-06-09)
-Instead of (or before) scheduled crons, the primary trigger is the **`make-short` workflow**
-(`.github/workflows/make-short.yml`, `workflow_dispatch`). Click **Run workflow** (GitHub web/
-mobile) → it generates `ideas` fresh ideas → Telegram digest with Make-it/Pass/Reject → waits
-`wait_min` for your taps → produces the approved → replies with the YouTube link. PC can be off.
-Entry: `python -m src.production make` (`make_on_demand`). You control frequency by how often
-you click. The scheduled cron path (`production.yml`) remains available but optional.
-
-### Go-live checklist (Phase-1 DoD — these are deploy steps, no new modules)
-1. ✅ **End-to-end dry run done (2026-06-09):** seeded one approved idea → `run_production`
-   produced + uploaded a real **unlisted** Short → https://www.youtube.com/shorts/mT4k_iuAZ5s
-   (41s, captioned; description carries the analysis, both source links, the AI-disclosure
-   line, `#Shorts`; DB `posts` recorded; idea→`produced`; local files cleaned). **The full
-   real chain incl. `videos.insert` now works.**
-   ⚠️ **Verify in YouTube Studio:** the "Altered content" disclosure on that video. We send
-   `status.containsSyntheticMedia=true` on insert, but the readonly API returns it as `None`
-   and our token lacks the `youtube` (write) scope to re-confirm — so confirm it shows "Yes"
-   in Studio. (The description disclosure line is present regardless.) Test artifacts to clean:
-   delete that unlisted video in Studio; DB has test idea 13 / post 12.
-2. ✅ **GitHub Actions secrets set (2026-06-09):** 10 secrets mirrored to
-   `Shaan-alpha/AI-Reel-Factory` via `gh secret set` (values piped via stdin, never printed).
-   `CLAUDE_CODE_OAUTH_TOKEN` deliberately excluded (rule 4). `PIXABAY_API_KEY` not set (optional
-   backup, empty locally) — workflow reference resolves to empty, Pixabay fallback just no-ops.
-3. **Create the ideation runner:** an **Anthropic Routine** from `routines/ideation.md`
-   (recommended) so ideas land in `ideas` each morning; the `ideation_fallback` covers misses.
-4. **Enable the crons:** uncomment `schedule:` in `.github/workflows/production.yml` (UTC,
-   staggered). CI already installs FFmpeg; faster-whisper pulls its model on first run.
-5. **First unattended day:** approve 4-5 via the Telegram digest → confirm 4-5 captioned Shorts
-   go live with the AI-disclosure label. → then tag **v0.1.0** (Phase-1 MVP done).
+### Go-live checklist (Phase-1 DoD) — closed
+1. ✅ **End-to-end dry run (2026-06-09):** a real unlisted Short, `mT4k_iuAZ5s`; its test rows
+   were removed from Supabase the same day. The Studio checks left are under Next actions.
+2. ✅ **GitHub Actions secrets:** 14 set, Pixabay included; `CLAUDE_CODE_OAUTH_TOKEN`
+   deliberately excluded (rule 4). Vertex AI needs none (keyless Workload Identity Federation).
+3. ⏭️ **Claude Routine for ideation:** superseded. Ideation runs inside the pipeline (Gemini on
+   Vertex + Groq); the Routine is optional and has never run.
+4. ⏭️ **Enable the crons:** superseded by the on-demand decision of 2026-09-29;
+   `production.yml`'s schedule stays commented out on purpose.
+5. ✅ **v0.1.0** tagged 2026-06-09 (first cloud Shorts published). A 4–5-Short day has not
+   happened yet: about 0.7 a day, at most 3 approvals a run (see Open decisions).
 6. (Phase 3) Check `@butitmatters` on Instagram + TikTok before cross-posting.
 
 ## Open decisions
 
-- **Ideation runner:** Anthropic Routines vs Oracle VM cron (lean Routines).
+- **Cadence vs the goal:** about 0.7 Shorts a day against 4–5, with at most 3 approvals a run.
+  Run more often, or restate the goal and the Phase-1 exit criteria for on-demand runs?
+- **Sources:** should model-written source URLs count toward `MIN_SOURCES` (invented TOI / The
+  Hindu links pass the liveness probe)? Does one outlet twice, or the subject's own site (idea
+  475 cited three imf.org pages), count as two independent sources?
+- **Ideation runner:** superseded. Ideation runs inside the pipeline (Gemini on Vertex + Groq)
+  on every on-demand run. The Claude Routine stays optional and dormant; re-enabling it would
+  first need `routines/ideation.md` brought up to the truth-first policy.
 
 ## Blockers
 
