@@ -5,6 +5,7 @@
 *.key
 client_secret*.json
 *credentials*.json
+gha-creds-*.json     # written into the workspace by google-github-actions/auth
 
 # Python
 venv/

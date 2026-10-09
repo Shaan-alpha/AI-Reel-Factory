@@ -273,9 +273,11 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
         audio_cfg["speakingRate"] = rate
 
     def _post(payload_input: dict):
+        # The key rides in a header, not '?key=': a connection error quotes the request URL,
+        # and that text reaches logs and, when every engine fails, the Telegram alert.
         return requests.post(
             _GOOGLE_TTS_URL,
-            params={"key": api_key},
+            headers={"X-Goog-Api-Key": api_key},
             json={"input": payload_input,
                   "voice": {"languageCode": lang, "name": voice_name},
                   "audioConfig": audio_cfg},

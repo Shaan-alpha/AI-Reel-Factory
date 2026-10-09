@@ -296,10 +296,25 @@ def _notify_failure(idea: dict, error: Exception) -> None:
     """Best-effort Telegram alert on a hard per-reel failure (rule 13). Never raises."""
     try:
         approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
-                      text=f"⚠️ Reel failed for idea {idea.get('id')} "
-                           f"({idea.get('title')!r}): {type(error).__name__}: {error}")
+                      text=_redact(f"⚠️ Reel failed for idea {idea.get('id')} "
+                                   f"({idea.get('title')!r}): {type(error).__name__}: {error}"))
     except Exception:  # noqa: BLE001 — alerting must never break the batch
         log.warning("production: failure alert could not be sent.")
+
+
+_SECRET_NAME = re.compile(r"(TOKEN|KEY|SECRET|PAT|PASSWORD)$")
+_SECRET_QUERY = re.compile(r"([?&](?:key|api_key|access_token|token)=)[^&\s'\"]+", re.I)
+
+
+def _redact(text: str) -> str:
+    """Strip credentials from text bound for Telegram.
+
+    GitHub masks secrets in its own logs, not in a chat message, and error text quotes URLs:
+    Telegram's carries the bot token in its path, and Chirp's carried the TTS key as '?key='."""
+    for name, value in os.environ.items():
+        if value and len(value) >= 8 and _SECRET_NAME.search(name):
+            text = text.replace(value, "***")
+    return _SECRET_QUERY.sub(r"\1***", text)
 
 
 def _release_failed_idea(idea_id: int, error: Exception) -> None:
@@ -427,7 +442,8 @@ def ensure_ideas_and_digest() -> int:
 def _notify(text: str) -> None:
     """Best-effort Telegram message (links, status). Never raises."""
     try:
-        approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"), text=text)
+        approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
+                      text=_redact(text))
     except Exception:  # noqa: BLE001
         log.warning("production: notify failed: %s", text)
 

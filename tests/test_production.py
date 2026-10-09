@@ -88,6 +88,13 @@ def test_a_live_short_is_never_reported_as_failed(monkeypatch, tmp_path):
     assert notes and "Published" in notes[0] and "Don't approve it again" in notes[0]
 
 
+def test_alerts_carry_no_credentials(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:ABCdefGHIjkl")
+    msg = production._redact("400 for url: https://api.telegram.org/bot123456:ABCdefGHIjkl/send"
+                             " and https://texttospeech.googleapis.com/v1/text:synthesize?key=AIzaXYZ")
+    assert "ABCdefGHIjkl" not in msg and "AIzaXYZ" not in msg and "key=***" in msg
+
+
 def test_a_crash_is_reported_once(monkeypatch, tmp_path):
     marker = tmp_path / "crash-notified"
     monkeypatch.setenv("CRASH_NOTE_FILE", str(marker))

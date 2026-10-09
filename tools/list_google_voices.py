@@ -21,7 +21,7 @@ if not KEY:
 
 r = requests.get(
     "https://texttospeech.googleapis.com/v1/voices",
-    params={"key": KEY, "languageCode": "en-IN"}, timeout=30,
+    params={"languageCode": "en-IN"}, headers={"X-Goog-Api-Key": KEY}, timeout=30,
 )
 if r.status_code != 200:
     print(f"FAIL: HTTP {r.status_code} - {r.text[:400]}")

@@ -57,7 +57,7 @@ def test_synthesize_google_writes_wav_and_measures_duration(tmp_path, monkeypatc
     assert sent["voice"]["name"] == "en-IN-Chirp3-HD-Achernar"
     assert sent["voice"]["languageCode"] == "en-IN"
     assert sent["audioConfig"]["audioEncoding"] == "LINEAR16"
-    assert post.call_args.kwargs["params"] == {"key": "test-key"}   # key in params, stripped
+    assert post.call_args.kwargs["headers"] == {"X-Goog-Api-Key": "test-key"}  # never in the URL
 
 
 def test_synthesize_google_missing_key_raises(tmp_path, monkeypatch):
@@ -329,7 +329,7 @@ def _google_ok(monkeypatch, captured, seconds: float = 0.5):
     resp.status_code = 200
     resp.json = mock.Mock(return_value={"audioContent": _fake_wav_b64(seconds)})
 
-    def _post(url, params=None, json=None, timeout=None):
+    def _post(url, params=None, json=None, timeout=None, headers=None):
         captured["body"] = json
         return resp
 
@@ -426,7 +426,7 @@ def test_markup_rejection_retries_as_plain_text(monkeypatch, tmp_path):
     bad.status_code = 400
     bad.text = "markup not supported for this voice"
 
-    def _post(url, params=None, json=None, timeout=None):
+    def _post(url, params=None, json=None, timeout=None, headers=None):
         calls.append(json["input"])
         return bad if "markup" in json["input"] else good
 
@@ -446,7 +446,7 @@ def test_plain_text_failure_does_not_double_post(monkeypatch, tmp_path):
     bad.status_code = 403
     bad.text = "blocked"
 
-    def _post(url, params=None, json=None, timeout=None):
+    def _post(url, params=None, json=None, timeout=None, headers=None):
         calls.append(json["input"])
         return bad
 
