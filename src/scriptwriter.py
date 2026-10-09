@@ -129,11 +129,25 @@ put any quoted word in SINGLE quotes ('like this'): a raw double quote ends the 
 # Stories where the channel's sarcasm would read as mocking victims (docs/08 excludes graphic
 # tragedy exploitation). The audit found the fixed sarcastic voice applied to war strikes and a
 # child-abuse story. Matched on the idea's own words, so the tone is decided before writing.
+# Widened 2026-10-09: 'Russian missiles kill 3', an air crash and a terror attack all read as
+# 'sarcastic' because the base and -ing forms were missing (ideas 178, 180, 211). Words that
+# also name everyday news (strike, crash, attack, collapse, missing, shot) count only in their
+# tragedy phrasing, so a bank strike or a market crash keeps the channel voice. Over-matching
+# costs only a calm read; under-matching is the docs/08 exclusion.
 _SOMBER_RE = re.compile(
-    r"(?i)\b(?:killed|kills|dead|deaths?|died|dies|massacre|mass shootings?|shooting|stabbing|"
-    r"bombing|blast|suicide|genocide|war crimes?|hostages?|famine|casualties|child abuse|"
-    r"sexual (?:abuse|assault)|rape|trafficking|earthquake|landslides?|floods? (?:kill|death|toll)|"
-    r"death toll|funeral|mourning)\b")
+    r"(?i)\b(?:kill(?:s|ed|ing)?|dead|deadl(?:y|ier|iest)|deaths?|died|dies|"
+    r"fatal(?:ly|ities)?|massacre|"
+    r"mass shootings?|shootings?|(?:was|were|been|being) shot|shot dead|gunned down|gunfire|"
+    r"stabb(?:ed|ing)|murder(?:ed|s)?|lynch(?:ed|ing)?|bombing|blasts?|explosions?|suicide|"
+    r"genocide|war crimes?|hostages?|famine|casualties|victims?|injur(?:ed|ies)|wounded|"
+    r"(?:air|missile|drone) ?strikes?|(?:terror(?:ist)?|suicide|drone|missile|militant|bomb|"
+    r"knife|acid|mob|grenade) attacks?|(?:plane|air|train|bus|car|road|helicopter|jet|flight) "
+    r"crash(?:es|ed)?|derail(?:ed|ment)|stampedes?|(?:building|bridge|wall|roof|mine|tunnel|dam) "
+    r"collaps\w*|drown(?:s|ed|ing)?|capsiz(?:ed|es)?|cyclones?|hurricanes?|tsunamis?|"
+    r"wildfires?|riots?|child abuse|sexual (?:abuse|assault)|rape|trafficking|earthquakes?|"
+    r"landslides?|floods? (?:kill|death|toll)|death toll|funeral|mourning|"
+    r"lost (?:their|his|her) lives?|bod(?:y|ies) (?:found|recovered)|"
+    r"(?:went|gone|go|remain|remains|still|are|is) missing)\b")
 
 _SOMBER_NOTE = """
 
@@ -143,12 +157,15 @@ only [serious] or [pause] as delivery tags. The "why it matters" turn is still r
 open it plainly with "Here's why it matters" (live 2026-09-27, a somber draft dropped it)."""
 
 
-def tone_for(idea: dict) -> str:
+def tone_for(idea: dict, body: str = "") -> str:
     """'somber' for stories about deaths or serious harm, else 'sarcastic' (the channel voice).
-    Off with ENABLE_SOMBER_TONE=false."""
+    Off with ENABLE_SOMBER_TONE=false.
+
+    `body` (the finished narration) catches what the idea's own words did not: idea 211's
+    pitch read as sarcastic while its script said 'killed a woman'."""
     if not config.get_bool("ENABLE_SOMBER_TONE", True):
         return "sarcastic"
-    text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+    text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle")) + " " + body
     return "somber" if _SOMBER_RE.search(text) else "sarcastic"
 
 
@@ -699,7 +716,9 @@ def write_script(idea: dict, template: str = "N") -> dict:
     body = _enforce_length(body, idea_id)
 
     # Scroll-stop judge: punch up a weak hook+title before we spend a render (fail-soft, no new facts).
-    if config.get_bool("ENABLE_HOOK_JUDGE", True):
+    # Never on a somber story: a calm opening scores low, and the rewrite is shock copy, which
+    # becomes the YouTube title and the frame-1 banner of a story about deaths.
+    if config.get_bool("ENABLE_HOOK_JUDGE", True) and tone_for(idea, body) != "somber":
         title, body = _punch_up_hook(title, body)
         title = _fit_title(title)  # the punch-up writes its own title, and nothing capped it
 
@@ -749,4 +768,4 @@ def write_script(idea: dict, template: str = "N") -> dict:
     script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None)
     return {"script_id": script_id, "script_body": body, "caption": caption,
             "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points,
-            "tone": tone_for(idea)}
+            "tone": tone_for(idea, body)}

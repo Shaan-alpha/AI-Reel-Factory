@@ -609,6 +609,41 @@ def test_a_story_about_deaths_drops_the_sarcasm():
         == "sarcastic"
 
 
+def test_the_base_and_ing_forms_of_harm_are_somber():
+    """'kill', 'killing', 'deadly', a crash or an attack read as sarcastic until 2026-10-09."""
+    for title in ("Russian missiles kill 3 in Kyiv", "Mob killing in Jharkhand",
+                  "Deadly heatwave grips Delhi", "Air India plane crash in Ahmedabad",
+                  "Terror attack in Pahalgam", "Drone strikes hit Kharkiv",
+                  "Boat capsized off Kerala coast", "Stampede at temple fair"):
+        assert scriptwriter.tone_for({"title": title}) == "somber", title
+
+
+def test_everyday_strikes_and_crashes_keep_the_channel_voice():
+    for title in ("Bank employees strike today", "Stock market crash wipes out Rs 10 lakh crore",
+                  "Attack on press freedom", "Rupee collapses to a record low",
+                  "India missing its climate targets"):
+        assert scriptwriter.tone_for({"title": title}) == "sarcastic", title
+
+
+def test_the_finished_script_can_make_a_story_somber():
+    """Idea 211's pitch read as sarcastic while its script said 'killed a woman'."""
+    idea = {"title": "India's Aston Martin Crash Covered Up?"}
+    assert scriptwriter.tone_for(idea, "An MP's son reportedly killed a woman.") == "somber"
+
+
+def test_a_somber_story_skips_the_hook_punch_up(monkeypatch):
+    monkeypatch.setattr(scriptwriter, "_punch_up_hook",
+                        lambda t, b: pytest.fail("no shock copy on a story about deaths"))
+    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a, **k: 5)
+    body = ("Twelve people died when a bridge collapsed in Gujarat on Tuesday. "
+            "Here's why it matters: the bridge failed its last two inspections.")
+    monkeypatch.setattr(scriptwriter, "_generate_script_json",
+                        lambda p: {"title": "Bridge collapse kills 12", "script_body": body,
+                                   "caption": "c", "hashtags": [], "tags": [], "key_points": []})
+    out = scriptwriter.write_script({"id": 9, "title": "Gujarat bridge collapse", "sources": []})
+    assert out["tone"] == "somber"
+
+
 def test_somber_tone_can_be_switched_off(monkeypatch):
     monkeypatch.setenv("ENABLE_SOMBER_TONE", "false")
     assert scriptwriter.tone_for({"title": "27 killed", "hook": "", "angle": ""}) == "sarcastic"
