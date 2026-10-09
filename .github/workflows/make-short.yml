@@ -28,7 +28,9 @@ concurrency:
 
 jobs:
   make:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: that label moves to 26.04 from 2026-10-19, and with it apt's
+    # FFmpeg (6.1.1 -> 8.0.1), which renders every reel. Move deliberately, after a green run.
+    runs-on: ubuntu-24.04
     # 90: a 45-minute wait plus three reels could hit 60, and a kill mid-chain stranded the
     # idea at 'approved'.
     timeout-minutes: 90

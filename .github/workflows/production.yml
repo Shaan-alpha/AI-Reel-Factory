@@ -1,5 +1,6 @@
 # Production pipeline — render + publish approved ideas.
-# SKELETON: manual-trigger only for now. Uncomment the schedule once modules work (rule 7).
+# Manual-only ON PURPOSE: the operator runs on demand (make-short / /makeshort, 2026-09-29).
+# Scheduled digests started 6.5-7 h late, so a schedule should come from somewhere punctual.
 # Cron is UTC (rule 15): stagger 4–5 posts through the day. 08:00 IST ~= 02:30 UTC.
 name: production
 
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   produce:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Bounded like make-short. Without this the job inherits GitHub's 6-hour default,
     # so a wedged render or a hung upload burns Actions minutes until someone notices.
     timeout-minutes: 60
@@ -81,7 +82,8 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_APPROVAL_MODE: ${{ vars.TELEGRAM_APPROVAL_MODE }}
+          # The live bot is a webhook, and Telegram refuses getUpdates while one is set (409).
+          TELEGRAM_APPROVAL_MODE: ${{ vars.TELEGRAM_APPROVAL_MODE || 'webhook' }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}

@@ -1,16 +1,19 @@
 # Analytics — pull public stats for published Shorts so ideation learns what works.
-# Run manually, or enable the daily schedule below.
+# Runs daily, and its writes are also what keeps the free Supabase project from pausing.
 name: analytics
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC daily — auto-collect stats into the learning loop
+    - cron: "0 6 * * *"   # 06:00 UTC daily (GitHub starts it 5-8 h late; the time doesn't matter)
 
 jobs:
   analytics:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write     # the keep-alive step below re-enables the scheduled workflows
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -31,3 +34,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m src.analytics
+
+      # GitHub disables a public repo's scheduled workflows after 60 days without a commit
+      # (the next would be about 2026-11-28). The pipeline runs on demand, so the repo can go
+      # quiet while this job and the daily tests are still needed. Re-enabling resets the timer.
+      - name: Keep the scheduled workflows enabled
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in analytics.yml tests.yml; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable" || true
+          done
