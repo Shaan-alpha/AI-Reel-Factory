@@ -850,12 +850,12 @@ def test_an_unrelated_story_is_not_mistaken_for_a_repeat():
     assert fb._repeats_recent_story(other, recent) is False
 
 
-def test_ideation_keeps_the_only_citation_bearing_model_until_it_retires(monkeypatch):
-    """Measured 2026-09-27: on the real prompt 2.5-flash returned 15-18 citations and every 3.x
-    model returned zero, so ideation walks its own chain onto 3.5-flash-lite only on a 404."""
+def test_ideation_is_off_the_retiring_model(monkeypatch):
+    """gemini-2.5-flash retires on Vertex 2026-10-20. 3.x keeps citations for a PROSE reply
+    (measured 2026-10-09), which is what the story research asks for."""
     monkeypatch.delenv("IDEATION_MODEL", raising=False)
     monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
-    assert fb._ideation_model() == "gemini-2.5-flash,gemini-3.5-flash-lite"
+    assert fb._ideation_model() == "gemini-3.5-flash-lite,gemini-3.5-flash"
     monkeypatch.delenv("GEMINI_USE_VERTEX")
     assert fb._ideation_model() is None
     monkeypatch.setenv("IDEATION_MODEL", "gemini-3.5-flash")
@@ -951,3 +951,47 @@ def test_two_ideas_on_one_story_are_caught_despite_different_wording():
 def test_tokens_fold_plurals_and_drop_filler():
     assert fb._tokens("India's UPI transactions could be over") == {"india", "upi", "transaction"}
     assert fb._tokens("press crisis") == {"press", "crisis"}  # not every final s is a plural
+def test_story_research_credits_each_citation_to_its_own_section(monkeypatch):
+    """A JSON reply on 3.x carries no citations; prose sections do, one story each."""
+    notes = ("### Story 1\nStarship reached orbit on Tuesday.\n"
+             "### Story 2\nThe RBI cut the repo rate.")
+    s2 = notes.index("### Story 2")
+    grounded = [{"uri": "https://a.com/starship", "spans": [(12, 40)]},
+                {"uri": "https://b.com/rbi", "spans": [(s2 + 12, s2 + 30)]},
+                {"uri": "https://c.com/none", "spans": []}]
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources", lambda *a, **k: (notes, grounded))
+    got_notes, by_story = fb._research_stories([{"story": "Starship"}, {"story": "RBI"}])
+    assert got_notes == notes
+    assert [g["uri"] for g in by_story[1]] == ["https://a.com/starship"]
+    assert [g["uri"] for g in by_story[2]] == ["https://b.com/rbi"]  # the spanless one is dropped
+
+
+def test_research_without_sections_falls_back_to_the_json_pass(monkeypatch):
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: ('{"ideas": []}', []))
+    assert fb._research_stories([{"story": "x"}]) == ("", {})
+
+
+def test_ideas_written_from_research_take_their_own_storys_sources(monkeypatch):
+    monkeypatch.setenv("MIN_SOURCES", "1")
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda n: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda n: [])
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda n: [])
+    monkeypatch.setattr(fb.db, "low_performing_titles", lambda n: [])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a: [
+        {"story": "SpaceX Starship reaches orbit", "category": ""},
+        {"story": "RBI cuts the repo rate", "category": ""}])
+    monkeypatch.setattr(fb, "_research_stories", lambda stories: ("### Story 1\nx\n### Story 2\ny", {
+        1: [{"uri": "https://a.com/starship-reaches-orbit", "spans": [(0, 5)]}],
+        2: [{"uri": "https://b.com/rbi-cuts-repo-rate", "spans": [(12, 14)]}]}))
+    monkeypatch.setattr(fb, "_resolve_redirect", lambda u: u)
+    monkeypatch.setattr(fb, "_url_is_dead", lambda u: False)
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: pytest.fail("the research path made the JSON pass unnecessary"))
+    reply = {"ideas": [
+        {"story": 2, "title": "RBI Cuts Repo Rate Again", "hook": "h", "angle": "a", "sources": []},
+        {"story": 1, "title": "Starship Reaches Orbit", "hook": "h", "angle": "a", "sources": []}]}
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps(reply))
+    ideas = {i["title"]: i["sources"] for i in fb._produce_ideas(2)}
+    assert ideas["RBI Cuts Repo Rate Again"] == ["https://b.com/rbi-cuts-repo-rate"]
+    assert ideas["Starship Reaches Orbit"] == ["https://a.com/starship-reaches-orbit"]

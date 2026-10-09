@@ -143,13 +143,31 @@ Return ONLY JSON:
 
 
 # Ideation is the one grounded caller that needs the search's CITATIONS, not just grounded
-# text: they become each idea's sources. Measured 2026-09-27 on Vertex with the real ideation
-# prompt, two runs per model: gemini-2.5-flash returned 15 and 18 citations, while
-# gemini-3.5-flash-lite, gemini-3.5-flash and gemini-3.8-flash all SEARCHED (3 queries each) but
-# returned ZERO citation chunks. So ideation stays on 2.5 until Vertex retires it (2026-10-20),
-# then the 404 moves it to 3.5-flash-lite, where sources come from the news feed and the Google
-# News search top-up (which gave every idea two real sources in the same live run).
-_VERTEX_IDEATION_CHAIN = "gemini-2.5-flash,gemini-3.5-flash-lite"
+# text: they become each idea's sources. Citations depend on the OUTPUT FORMAT, not only the
+# model. Measured on Vertex (2026-09-27 and ten probes on 2026-10-09): a JSON ideation reply gets
+# none on any 3.x model (gemini-3.5-flash-lite often does not even search), while a plain-prose
+# research reply on 3.5-flash-lite or 3.5-flash returns per-story citations: 8-12 supports for
+# 4 stories, 2+ publishers for 20 of 22 stories. So the stories are researched in prose
+# (`_research_stories`) and the JSON is written from those notes, which works the same before
+# and after Vertex retires gemini-2.5-flash on 2026-10-20.
+_VERTEX_IDEATION_CHAIN = "gemini-3.5-flash-lite,gemini-3.5-flash"
+
+_RESEARCH_PROMPT = """Use Google Search to check each story below against current reporting. \
+For EACH story, write a heading line "### Story N" (N as numbered below) and then 2-3 plain \
+factual sentences: what happened, when, who, and the key figure. Plain prose only: no JSON, no \
+links, no bullet lists. If a story cannot be confirmed, say so in one sentence.
+
+{stories}
+"""
+_STORY_HEADING = re.compile(r"(?m)^\s*#{1,4}\s*Story\s+(\d+)")
+
+_NOTES_SUFFIX = """
+
+RESEARCH NOTES: live Google Search results for the selected stories, one section each. Base \
+every fact on these notes; drop a story the notes could not confirm. Add "story": N to each \
+idea, where N is the number of the selected story it covers.
+{notes}
+"""
 
 
 def _ideation_model() -> str | None:
@@ -402,19 +420,71 @@ def _citations_by_idea(ideas: list[dict], raw: str, grounded: list[dict]) -> lis
     return owned
 
 
+def _research_stories(stories: list[dict]) -> tuple[str, dict[int, list[dict]]]:
+    """Grounded PROSE notes on the selected stories, and each story's own citations.
+
+    Returns (notes, {story number: [grounded citation]}), or ("", {}) on any failure, in which
+    case the caller keeps the older grounded-JSON path. A citation belongs to the '### Story N'
+    section its supported text ends in; one with no span is dropped unless there is a single
+    story, as in `_citations_by_idea` (a citation for the wrong story is worse than none)."""
+    block = "\n".join(f"Story {i}: {s['story']}" for i, s in enumerate(stories, 1))
+    try:
+        notes, grounded = llm.generate_grounded_with_sources(
+            llm.today_line() + _RESEARCH_PROMPT.format(stories=block), max_tokens=4096,
+            model=_ideation_model())
+    except Exception as e:  # noqa: BLE001 — the grounded-JSON path is still there
+        log.warning("ideation: story research failed (%s); using the grounded JSON pass", e)
+        return "", {}
+    heads = [(m.start(), int(m.group(1))) for m in _STORY_HEADING.finditer(notes or "")]
+    if not heads:
+        log.warning("ideation: story research came back without story sections; ignoring it")
+        return "", {}
+    by_story: dict[int, list[dict]] = {}
+    for g in grounded:
+        owners = set()
+        for _s, e in g.get("spans", []):
+            inside = [n for start, n in heads if start <= max(0, e - 1)]
+            if inside:
+                owners.add(inside[-1])
+        if not g.get("spans") and len(stories) == 1:
+            owners.add(1)
+        for n in owners:
+            by_story.setdefault(n, []).append(g)
+    log.info("ideation: researched %d stories; citations for %d of them", len(stories),
+             len(by_story))
+    return notes, by_story
+
+
+def _story_of(idea: dict, stories: list[dict]) -> int | None:
+    """The selected story (1-based) an idea was written from: its own "story" field, else the
+    story it shares the most distinctive words with (2 at least)."""
+    try:
+        n = int(idea.get("story"))
+        if 1 <= n <= len(stories):
+            return n
+    except (TypeError, ValueError):
+        pass
+    toks = _tokens(f"{idea.get('title', '')} {idea.get('hook', '')}")
+    scored = [(len(toks & _tokens(s["story"])), i) for i, s in enumerate(stories, 1)]
+    best = max(scored, default=(0, None))
+    return best[1] if best[0] >= _STORY_MATCH_MIN_TOKENS else None
+
+
 def _attach_real_sources(ideas: list[dict], raw: str, grounded: list[dict],
-                         stories: list[dict]) -> list[dict]:
+                         stories: list[dict], owned: list[list[dict]] | None = None) -> list[dict]:
     """Replace each idea's sources with REAL ones, best first. Mutates and returns `ideas`.
 
     Order is the operator's choice (2026-09-03): a resolved publisher URL from the grounded
     search first, then the news feed's own article link for the story the idea came from, then
     whatever the model wrote — kept last, and only because `_validate_and_clean` still probes it,
     so a genuine URL the model happened to know is not thrown away while an invented one is.
-    Which grounded citation belongs to which idea is `_citations_by_idea`'s call.
+    Which grounded citation belongs to which idea is `_citations_by_idea`'s call, unless the
+    caller already knows (`owned`, one list per idea, from the story research).
     """
     resolved: dict[str, str] = {}
 
-    for idea, mine in zip(ideas, _citations_by_idea(ideas, raw, grounded)):
+    for idea, mine in zip(ideas, owned if owned is not None
+                          else _citations_by_idea(ideas, raw, grounded)):
         publisher = []
         for g in mine:
             uri = g.get("uri", "")
@@ -658,8 +728,8 @@ def _produce_ideas(target: int) -> list[dict]:
     stories = _select_stories(target, headlines, topics, winners)
     if stories:
         selected_block = "\n".join(
-            f"- {s['story']}" + (f" [{s['category']}]" if s["category"] else "")
-            for s in stories
+            f"- Story {i}: {s['story']}" + (f" [{s['category']}]" if s["category"] else "")
+            for i, s in enumerate(stories, 1)
         )
     else:
         selected_block = ("- (no pre-selected stories — choose DISTINCT, current, "
@@ -668,18 +738,37 @@ def _produce_ideas(target: int) -> list[dict]:
     prompt = llm.today_line() + _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
                             selected=selected_block, trending=trending_block,
                             headlines=headlines_block, winners=winners_block)
-    # Stage 2: web-grounded first, INCLUDING the parse — grounded JSON is sometimes
-    # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
     clean: list[dict] = []
-    try:
-        raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192,
-                                                           model=_ideation_model())
-        parsed = _parse_ideas(raw)
-        clean = _validate_and_clean(_attach_real_sources(parsed, raw, grounded, feed_stories))
-        if not clean:
-            raise ValueError("grounded response yielded no valid ideas")
-    except Exception as e:  # noqa: BLE001 — grounding is best-effort; never block ideation
-        log.warning("ideation: grounded research unusable (%s); using ungrounded JSON mode", e)
+
+    # Stage 2a: research the selected stories in PROSE (where the search keeps its citations),
+    # then write the JSON from the notes. Each idea takes its own story's citations.
+    notes, by_story = _research_stories(stories) if stories else ("", {})
+    if notes:
+        try:
+            raw = llm.generate(prompt + _NOTES_SUFFIX.format(notes=notes), json=True,
+                               max_tokens=4096)
+            parsed = _parse_ideas(raw)
+            owned = [by_story.get(_story_of(i, stories), []) for i in parsed]
+            clean = _validate_and_clean(_attach_real_sources(parsed, raw, [], feed_stories,
+                                                             owned=owned))
+        except Exception as e:  # noqa: BLE001 — the grounded JSON pass below still runs
+            log.warning("ideation: writing from the research notes failed (%s)", e)
+
+    # Stage 2b: web-grounded JSON, INCLUDING the parse — grounded JSON is sometimes
+    # malformed/truncated, so any failure falls back to the reliable ungrounded JSON-mode call.
+    # Runs only when the research path gave nothing (no stories selected, or it failed).
+    if not clean:
+        try:
+            raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192,
+                                                               model=_ideation_model())
+            parsed = _parse_ideas(raw)
+            clean = _validate_and_clean(_attach_real_sources(parsed, raw, grounded,
+                                                             feed_stories))
+            if not clean:
+                raise ValueError("grounded response yielded no valid ideas")
+        except Exception as e:  # noqa: BLE001 — grounding is best-effort; never block ideation
+            log.warning("ideation: grounded research unusable (%s); using ungrounded JSON "
+                        "mode", e)
 
     # Top up on a THIN result, not only an empty one. Accepting whatever the grounded pass
     # happened to yield is how a request for 3 ideas shipped a digest of 1 (STATUS 2026-09-01):
