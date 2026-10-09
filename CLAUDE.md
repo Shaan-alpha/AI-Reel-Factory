@@ -5,11 +5,11 @@
 
 ## What this project is
 
-A near-zero-cost **autonomous content system** that publishes **4–5 captioned
-YouTube Shorts per day**, requiring exactly **one human action daily**: approving
-4–5 ideas via a Telegram "Morning Digest."
+A near-zero-cost **autonomous content system** built to publish **4–5 captioned YouTube
+Shorts per day**. The human part: start a run (`/makeshort` in Telegram, or the `make-short`
+workflow button) and approve the ideas worth making from the Telegram digest, up to 3 a run.
 
-- **Channel:** *But It Matters* — daily impact news/info explainers (India + world), soft/positive lean.
+- **Channel:** *But It Matters* — daily impact news/info explainers (India + world), truth-first: verdicts allowed when the facts carry them (rule 6).
 - **Primary goal:** Reliably ship 4–5 captioned Shorts/day. **Consistency beats sophistication.**
 - **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2).
 
@@ -41,11 +41,15 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
    disagree, fix the docs.
 2. **Free-first within a ≤ $5/month cap.** Default to free tools and the existing **Claude Pro**
    / **Google Gemini Pro** subscriptions. A small metered budget — **≤ $5/month total** (raised
-   from $0 on 2026-06-15) — **may** be spent only where it meaningfully lifts quality. The one
-   sanctioned billed service is **Google Cloud Text-to-Speech** (Chirp 3 HD voice; free at our
-   volume — set a hard budget cap so it can never overrun). Any **new** billed service, or any
-   spend that could exceed $5/month, is **stop-and-flag** — never sign up silently. (Rule 4's
-   Claude-ToS boundary still holds absolutely.)
+   from $0 on 2026-06-15) — **may** be spent only where it meaningfully lifts quality. The
+   sanctioned billed services, both on Google Cloud project `but-it-matters-tts`, are **Vertex
+   AI** (Gemini text, grounded search, the fact-check gate and the same-voice TTS fallback;
+   billed per token, with Gemini 3 grounding free up to 5,000 queries/month; the Lyria 2 music
+   beds were a one-off $0.66) and **Cloud Text-to-Speech** (Chirp 3 HD, a later voice
+   fallback). A ₹450/month budget with 50/90/100% alerts watches the billing account; it
+   alerts, it does not stop spending. Any **new** billed service, or any spend that could
+   exceed $5/month, is **stop-and-flag** — never sign up silently. (Rule 4's Claude-ToS
+   boundary still holds absolutely.)
 3. **Never self-attribute.** No `Co-Authored-By`, no "Generated with Claude Code," no AI
    credit anywhere — commits, PRs, code comments, or docs. *(This overrides default git
    behavior. Applies to this repo.)*
@@ -54,10 +58,12 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 
 4. **ToS boundary.** Claude ideation runs **only** via official Claude Code / Anthropic
    Routines. **Never** pipe `CLAUDE_CODE_OAUTH_TOKEN` into custom Python or the Agent SDK —
-   that is a Terms-of-Service violation. The free fallback uses the Gemini/Groq *developer*
-   APIs, never Claude.
+   that is a Terms-of-Service violation. The pipeline's own ideation (the live path) uses
+   Gemini on Vertex AI and Groq, never Claude.
 5. **Secrets hygiene.** Never commit real keys. Only `.env.example` (blank values) is
-   committed. Real values live in a local `.env` (gitignored) and GitHub Actions secrets.
+   committed. Real values live in a local `.env` (gitignored), GitHub Actions secrets, and the
+   bot's Vercel environment variables. Vertex AI uses no stored key (Workload Identity
+   Federation in CI, ADC locally).
 6. **News-niche compliance is the monetization gate** (see [docs/08](docs/08-news-niche-playbook.md)):
    - **Originality** — every reel adds analysis ("why it matters"), never a bare summary.
    - **AI disclosure** — set YouTube's synthetic-content flag + a description disclosure line.
@@ -76,7 +82,9 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
      different figure, a date off by a day, wording, and "couldn't confirm but nothing contradicts
      it" are logged and waived. **Contradiction blocks; non-confirmation does not** — one search
      pass missing a real story is routine, and two sources disagreeing is not proof the script is
-     wrong (both can be wrong, both can be right, or they measure different things).
+     wrong (both can be wrong, both can be right, or they measure different things). One
+     exception, in code since 2026-10-09: the waiver never reaches a quote, ruling, law or blame
+     that the checker flags and no source records; that blocks as invented.
      `FACTCHECK_SEVERITY=any` restores block-on-every-discrepancy.
    - **Sensitivity filter still applies** — communal/religious incitement, anything that could
      inflame violence, rumour-as-fact, deepfakes, graphic tragedy exploitation, and medical or
@@ -95,23 +103,33 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 10. **Reproducible environment.** Pin dependency versions in `requirements.txt`. Document
     system deps (e.g. FFmpeg). A cold agent should be able to set up from the docs alone.
 
-### D. Runtime reliability (this is a headless, free-tier, cron-driven system)
+### D. Runtime reliability (this is a headless, on-demand system on free tiers and a capped budget)
 
 11. **Fallbacks are mandatory — the digest never dies.** Every external dependency has a
-    fallback chain: ideation **Claude → Gemini → Groq**, voice **Gemini TTS (same voice on
-    Vertex) → Chirp 3 HD → edge-tts → Kokoro**, visuals
-    **Pexels → Pixabay**. A single upstream failure must never kill the daily run.
-12. **Idempotent, safe reruns.** Cron can and will retry. Check Supabase state before acting —
-    never double-publish, double-insert, or re-spend quota. Every step is safe to run twice.
-13. **Quota & cost awareness.** Respect free-tier ceilings (YouTube ~100 uploads/day, Gemini
-    ~1,500 req/day, Groq per-model limits, Supabase 500 MB DB). Log usage; alert via Telegram
-    on a hard failure.
+    fallback chain: ideation **Gemini on Vertex (grounded) → Groq**, with the free Google News
+    RSS search topping up sources (a Claude Routine may feed ideas first, but it is optional and
+    dormant); scripts **Gemini → Groq**; voice **Gemini TTS (one voice: Developer API → Vertex)
+    → Chirp 3 HD → edge-tts → Kokoro**; visuals **FLUX.2 klein → FLUX.1 schnell (Cloudflare
+    Workers AI) → Pexels photos → Pexels/Pixabay video**. A single upstream failure must never
+    kill a run.
+12. **Idempotent, safe reruns.** Runs can and will repeat (a re-run, a second `/makeshort`).
+    Check Supabase state before acting — never double-publish, double-insert, or re-spend
+    quota. Every step is safe to run twice.
+13. **Quota & cost awareness.** Respect the ceilings: YouTube ~100 uploads/day; the Gemini
+    Developer API's small free per-model daily quota (in production it serves only the
+    Developer-API TTS links, and a 429 there moves the reel to Vertex); on Vertex every token
+    is billed and Gemini 3 grounding is free up to 5,000 queries/month; Groq per-model limits;
+    Cloudflare Workers AI 10,000 neurons/day; Supabase 500 MB DB. Log usage; alert via
+    Telegram on a hard failure.
 14. **Fail loud on misconfig, soft on runtime.** A missing required secret/env var = hard stop
-    with a clear message (`config.py` fails loudly). One reel failing inside the daily batch =
+    with a clear message (`config.py` fails loudly). One reel failing inside a run's batch =
     log it, skip it, keep the rest going.
 15. **Environment reality.** Dev machine is **Windows 11 / PowerShell**. The pipeline runs on
-    **GitHub Actions in UTC** — convert local times accordingly. **Asset policy:** render
-    locally → upload → **delete the local file**. Never store video in Supabase.
+    **GitHub Actions in UTC** — convert local times accordingly — on runners pinned to
+    **`ubuntu-24.04`** with Python 3.12 (`ubuntu-latest` moves to 26.04 from 2026-10-19, taking
+    apt's FFmpeg with it; move deliberately, after a green run). The local `.venv` is Python
+    3.13, so CI is the proof, not a local pass. **Asset policy:** render locally → upload →
+    **delete the local file**. Never store video in Supabase.
 
 ### E. Product principles (from the design spec)
 
@@ -133,7 +151,8 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
       `fix`, `docs`, `chore`, `refactor`, `test`, `ci`.
     - **Logically-grouped commits** — one coherent change each; no giant catch-all dumps.
     - **`CHANGELOG.md`** is kept current ([Keep a Changelog] style).
-    - **Tag phase milestones:** `v0.1.0` = Phase-1 MVP done, `v0.2.0` = Phase 2, etc.
+    - **Tag releases:** `v0.1.0` = Phase-1 MVP done (2026-06-09); every minor version since is
+      a feature release within Phase 1 (latest `v0.18.0`; later work sits under `[Unreleased]`).
     - Keep [STATUS.md](STATUS.md) and the version in sync.
     - **Never force-push** shared history. Commit/push only when asked.
     - **No self-attribution in any commit or PR** (see rule 3).
@@ -144,11 +163,21 @@ YouTube Shorts per day**, requiring exactly **one human action daily**: approvin
 
 ## Current status
 
-- **Phase:** 1 (MVP) — **built and live.** The full chain (ideation → Telegram approval →
-  script → fact-check → voice → visuals → assembly → captions → YouTube) runs unattended; 76
-  Shorts published as of 2026-09-03. Every module in [src/](src/) is implemented and tested.
-- **Primary trigger is ON-DEMAND**, not cron: run the `make-short` workflow (or send
-  `/makeshort` to the Telegram bot) and approve from the digest. The two scheduled digests tried
-  on 2026-09-28 were removed at the operator's request on 2026-09-29 (GitHub ran them hours
-  late). `production.yml`'s schedule stays commented out on purpose.
+- **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
+  Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
+  runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day against the 4–5
+  goal. Every module in [src/](src/) is implemented and tested (CI: 689 pass, 5 skipped).
+- **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
+  workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
+  removed at the operator's request on 2026-09-29 (GitHub ran them hours late).
+  `production.yml`'s schedule stays commented out on purpose.
+- **The bot** ([telegram-bot/](telegram-bot/)) is CLI-deployed to Vercel, not git-connected:
+  after any bot change, run `vercel deploy --prod` from `telegram-bot/` as the `shaan-alpha`
+  account (team `shaan-alphas-projects`; the operator has two Vercel accounts). Last deploy:
+  2026-10-09.
+- **Deadlines.** 2026-10-20: Vertex retires `gemini-2.5-flash` (and `-lite`, `-pro`); the
+  pipeline no longer uses them. 2026-11-17: the Gemini Developer API shuts down
+  `gemini-3.1-flash-tts-preview` and `gemini-2.5-flash-preview-tts`, the voice chain's first
+  and third links. The operator picks a `gemini-3.8-flash-tts` / `-lite-tts` successor by ear
+  first; if nothing changes by then, every reel falls to billed Vertex in the same voice.
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.
