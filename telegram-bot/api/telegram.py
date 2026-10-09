@@ -325,7 +325,7 @@ def dispatch(cmd: str, arg: str) -> str:
         n = max(1, min(8, int(arg))) if arg.isdigit() else 5
         ok = gh_dispatch_make_short(n)
         return (f"🎬 Starting a batch of <b>{n}</b> ideas — the approval digest lands in ~1–2 min. "
-                "Tap ✅ Make it on the ones you want."
+                "Tap ✅ Approve on the ones you want."
                 if ok else "⚠️ Couldn't start the Action — check <code>GH_PAT</code>/<code>GH_REPO</code>.")
 
     if cmd == "today":

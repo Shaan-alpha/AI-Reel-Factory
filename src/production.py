@@ -320,7 +320,7 @@ def _redact(text: str) -> str:
 def _release_failed_idea(idea_id: int, error: Exception) -> None:
     """Move a transiently-failed idea OUT of the approved queue, back to the digest.
 
-    'approved' means "a human tapped Make it for this run". A reel that dies mid-chain has spent
+    'approved' means "a human tapped Approve for this run". A reel that dies mid-chain has spent
     that approval, so leaving the row at 'approved' is what let the next /makeshort produce it
     with no tap at all (STATUS 2026-09-01, idea 223). It also leaked into APPROVAL_CAP, which
     counts approved rows — three stuck ideas answered "capped" to every future tap.
@@ -561,7 +561,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
             log.warning("make_on_demand: waiting %d min, not %d, so a reel still fits before "
                         "the job's time limit.", room, wait_minutes)
             wait_minutes = room
-    _notify(f"🎬 {n} idea(s) ready — tap ✅ Make it on what you want "
+    _notify(f"🎬 {n} idea(s) ready — tap ✅ Approve on what you want "
             f"(waiting up to {wait_minutes} min).")
     # The ideas THIS run is putting in front of the operator. Captured before the digest so
     # production can be scoped to exactly them: anything else still at 'approved' is a leftover
