@@ -69,11 +69,10 @@ jobs:
           GEMINI_GROUNDED_MODEL: ${{ vars.GEMINI_GROUNDED_MODEL || 'gemini-3.5-flash-lite,gemini-3.5-flash' }} # off gemini-2.5-flash (retires 2026-10-20); a 404 moves down the chain
           FACTCHECK_MODEL: ${{ vars.FACTCHECK_MODEL || 'gemini-3.5-flash,gemini-3.5-flash-lite' }} # the gate's own, stronger chain
           IDEATION_MODEL: ${{ vars.IDEATION_MODEL || 'gemini-3.5-flash-lite,gemini-3.5-flash' }} # researched in prose, where 3.x keeps citations (2.5-flash retires 2026-10-20)
-          # Serve Gemini through Vertex AI rather than the Developer API. The free
-          # Developer tier is 20 grounded requests/DAY shared by ideation, the scriptwriter and
-          # the fact-check gate (~21/day of demand, so it runs dry and the GATE is what breaks).
-          # Vertex serves the same models with 1,500 grounded requests/DAY free, and still serves
-          # gemini-2.5-flash, which the Developer API now 404s for new projects.
+          # Serve Gemini through Vertex AI rather than the Developer API. The free Developer
+          # tier allowed 20 grounded requests/DAY, shared by ideation, the scriptwriter and the
+          # fact-check gate, so it ran dry and the GATE was what broke (2026-09-03). On Vertex,
+          # Gemini 3 grounding is free up to 5,000 queries/MONTH, then billed; tokens are billed.
           GEMINI_USE_VERTEX: ${{ vars.GEMINI_USE_VERTEX || 'true' }}
           GCP_PROJECT: ${{ vars.GCP_PROJECT || 'but-it-matters-tts' }}
           GCP_LOCATION: ${{ vars.GCP_LOCATION || 'global' }}
@@ -168,9 +167,9 @@ jobs:
           # quota) instead of dropping it. This is what keeps the digest full on a day the
           # grounded search is out of free calls.
           ENABLE_SOURCE_SEARCH: ${{ vars.ENABLE_SOURCE_SEARCH || 'true' }}
-          # The fact-check gate's OWN grounded quota. Ideation + scriptwriter + the gate
-          # share one 20/day budget on gemini-2.5-flash; a 3-reel run spends 7, so a busy
-          # day exhausts it and the gate fails OPEN. A second free key isolates it.
+          # Optional: a separate Developer-API key for the gate. It mattered on the Developer
+          # tier's 20 grounded requests/day; on Vertex (the default here) quota is per project
+          # and this key is not used.
           FACTCHECK_API_KEY: ${{ secrets.FACTCHECK_API_KEY }}
           # Set false to skip the scriptwriter's grounded write and hand that request back
           # to the gate — the gate is worth more, it re-verifies the finished script.

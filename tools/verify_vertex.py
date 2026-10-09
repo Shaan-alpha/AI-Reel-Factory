@@ -73,7 +73,7 @@ def main() -> int:
         print("       engaged for this prompt; the credential path is fine.")
         return 0
     print(f"\n[PASS] Keyless Vertex grounding works end to end on {llm._grounded_chain(None)[0]}.")
-    print("       Vertex grounding is free up to 1,500/day on 2.5 and 5,000/month on Gemini 3.")
+    print("       Vertex grounding on Gemini 3 is free up to 5,000 queries/month, then billed.")
     return 0
 
 

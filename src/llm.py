@@ -130,9 +130,9 @@ def _gemini_client(api_key: str | None = None):
         and that one bucket is shared by ideation, the scriptwriter and `factcheck.verify`. At
         ~21/day of demand it runs dry, and the fact-check gate is what stops working. A second
         free key does not help: grounded search is closed to new projects entirely.
-      · Vertex AI (ADC) — the same models with **1,500 grounded requests/day free** on 2.5, and
-        gemini-2.5-flash is still served here even though the Developer API 404s it for new
-        projects. Auth is Application Default Credentials, so no API key exists to leak — which
+      · Vertex AI (ADC) — no daily grounded cap: Gemini 3 grounding is free up to 5,000
+        queries/month, then billed, and tokens are billed on every call. Auth is Application
+        Default Credentials, so no API key exists to leak — which
         is also the only thing this Google Cloud org allows: its policy blocks BOTH API keys and
         service-account keys, leaving ADC locally and Workload Identity Federation in CI.
 

@@ -361,8 +361,8 @@ def _check_once(prompt: str) -> tuple[dict, str]:
     except ValueError as e:  # JSONDecodeError included
         # A reply we cannot read is not an outage: the checker RAN and reached a verdict we
         # failed to parse. Falling open on it shipped idea 291 unverified (2026-09-12) with a
-        # claim the gate blocks 6 times out of 6. One more ask is cheap — Vertex allows 1,500
-        # grounded requests a day — and far cheaper than a public false claim.
+        # claim the gate blocks 6 times out of 6. One more ask is cheap (one grounded call,
+        # inside Vertex's free Gemini 3 allowance) and far cheaper than a public false claim.
         log.warning("factcheck: could not parse the checker's reply (%s); asking once more. "
                     "Raw reply: %s", e, raw.strip()[:1500])
         raw = _ask_checker(prompt)

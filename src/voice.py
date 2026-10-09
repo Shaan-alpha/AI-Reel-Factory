@@ -306,8 +306,10 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
     return out_path, duration
 
 
-# Models Vertex serves with the channel voice (measured 2026-09-27). Vertex 404s the 3.8 TTS
-# models, so they can only ever be a Developer-API attempt.
+# Models this chain voices on Vertex in the channel voice (measured 2026-09-27). The 3.8 TTS
+# models answered 404 on Vertex then; Vertex serves them now (probed 2026-10-09), but they stay
+# out of the chain until the operator picks a 3.8 voice (3.1 shuts down on the Developer API on
+# 2026-11-17).
 _GEMINI_TTS_VERTEX_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-tts")
 # The GA model on Vertex: the last same-voice attempt before the chain leaves Gemini.
 _GEMINI_TTS_VERTEX_STABLE = "gemini-2.5-flash-tts"
