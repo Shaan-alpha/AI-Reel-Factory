@@ -26,7 +26,7 @@ av==18.1.0                    # PyAV, faster-whisper's audio decoder. PINNED alt
                               # from 2026-10-01 every reel died at the caption step. 18.1.0 is the
                               # version CI last captioned and published with (2026-09-28, idea 397).
 numpy==2.4.6                  # Kokoro PCM handling (also a transitive dep)
-pillow==12.2.0                # graphics.py stat-card PNGs (ENABLE_GRAPHIC_CARDS overlay path)
+pillow==12.3.0                # graphics.py stat-card PNGs (ENABLE_GRAPHIC_CARDS overlay path); 12.2.0 had 13 CVEs
 
 # Publishing (Module 9) + analytics (Module 10)
 google-api-python-client==2.197.0  # YouTube Data API v3
