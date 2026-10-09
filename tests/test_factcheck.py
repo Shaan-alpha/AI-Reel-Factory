@@ -9,6 +9,8 @@ and most ideas died over differences that changed nothing.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src import factcheck
@@ -513,8 +515,60 @@ def test_two_samples_are_the_default(monkeypatch):
 
 def test_a_could_not_confirm_finding_does_not_block():
     assert factcheck._only_unconfirmed("Could not independently confirm the 40% figure.")
+    assert factcheck._only_unconfirmed("Could not confirm the exact date of the meeting.")
     assert not factcheck._only_unconfirmed("Could not confirm; in fact the bill was signed.")
     assert not factcheck._only_unconfirmed("The quote is invented: no such speech exists.")
+
+
+def test_the_waiver_never_reaches_an_invented_quote_ruling_or_blame():
+    """Non-confirmation is how a checker words a quote nobody said. Rule 6 blocks those."""
+    for finding in (
+        "Could not find any record of the minister saying 'we will ban UPI'.",
+        "No evidence was found to substantiate the claim that Adani caused the Mumbai blackout.",
+        "Could not confirm that the Supreme Court issued this ruling.",
+    ):
+        assert not factcheck._only_unconfirmed(finding), finding
+
+
+def test_a_minor_finding_the_checker_calls_contradicted_blocks(monkeypatch):
+    """Idea 211 shipped a claim the checker itself said was contradicted, filed as minor."""
+    _mock_grounded(monkeypatch, json.dumps({
+        "checked": 4, "blocking": [], "verdict": "pass",
+        "minor": ["early reports didn't mention a driver (All sources name the driver. This claim "
+                  "is contradicted by the available evidence.)",
+                  "The figure is rounded: 1,270 rather than 1,300."]}))
+    result = factcheck.verify("A script.", [])
+    assert result["ok"] is False and "contradicted" in result["unsupported"][0]
+    assert result["minor"] == ["The figure is rounded: 1,270 rather than 1,300."]  # still waived
+
+
+def test_nothing_contradicts_is_not_a_contradiction():
+    assert not factcheck._contradicted("Unconfirmed, but nothing contradicts it.")
+
+
+def test_a_preamble_object_is_not_read_as_a_pass(monkeypatch):
+    _mock_grounded(monkeypatch, 'Checking: {"claim": "the bill was signed", "status": "checking"}\n'
+                       '{"checked": 3, "blocking": ["the bill was never signed - false"], '
+                       '"minor": [], "verdict": "fail"}')
+    assert factcheck.verify("A script.", [])["ok"] is False
+
+
+def test_a_wrapped_verdict_is_unwrapped(monkeypatch):
+    _mock_grounded(monkeypatch, '{"result": {"checked": 3, "blocking": ["X is false"], "minor": [], '
+                       '"verdict": "fail"}}')
+    assert factcheck.verify("A script.", [])["ok"] is False
+
+
+def test_a_fail_verdict_with_a_suffix_still_fails(monkeypatch):
+    _mock_grounded(monkeypatch, '{"checked": 3, "blocking_issues": ["X is false"], '
+                       '"verdict": "FAIL - fabricated"}')
+    assert factcheck.verify("A script.", [])["ok"] is False
+
+
+def test_a_sample_with_an_unwrapped_finding_still_counts():
+    merged = factcheck._merge_samples({"verdict": "pass", "blocking": []},
+                                      {"verdict": "fail", "blocking": "the vote never happened"})
+    assert merged["blocking"] == ["the vote never happened"] and merged["verdict"] == "fail"
 
 
 def test_the_checker_gets_publisher_links_first_and_no_redirects():

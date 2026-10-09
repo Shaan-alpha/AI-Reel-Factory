@@ -127,18 +127,38 @@ string ends the string and breaks the JSON.
 _escape_stray_quotes = llm.escape_stray_quotes
 
 
+_VERDICT_KEYS = ("verdict", "blocking", "critical", "unsupported", "minor", "waived", "checked")
+
+
+def _is_verdict(data) -> bool:
+    return isinstance(data, dict) and any(k in data for k in _VERDICT_KEYS)
+
+
 def _parse(raw: str) -> dict:
-    """Pull the JSON object out of the model's reply. Tolerates fences, stray prose, and raw
-    double quotes inside a finding (see `_escape_stray_quotes`). Raises ValueError if unusable."""
+    """Pull the VERDICT object out of the model's reply. Tolerates fences, stray prose, raw
+    double quotes inside a finding (see `_escape_stray_quotes`), a preamble object before the
+    verdict, and a verdict wrapped one level deep. Raises ValueError if there is no verdict.
+
+    Any dict used to do: a preamble like {"claim": ..., "status": "checking"} or a wrapper like
+    {"result": {...}} parsed fine, carried no findings, and PASSED the reel (0 claims checked).
+    Raising sends it down the re-ask and FACTCHECK_STRICT path instead."""
     if "{" not in (raw or ""):
         raise ValueError("fact check: no JSON object in response")
-    try:
-        data = llm.parse_json(raw[raw.find("{"):])
-    except ValueError as e:
-        raise ValueError(f"fact check: {e}") from e
-    if not isinstance(data, dict):
-        raise ValueError("fact check: reply is not a JSON object")
-    return data
+    last_error = None
+    for start in [i for i, ch in enumerate(raw) if ch == "{"][:20]:
+        try:
+            data = llm.parse_json(raw[start:])
+        except ValueError as e:
+            last_error = last_error or e
+            continue
+        if _is_verdict(data):
+            return data
+        nested = [v for v in data.values() if _is_verdict(v)] if isinstance(data, dict) else []
+        if len(nested) == 1:
+            return nested[0]
+    if last_error:
+        raise ValueError(f"fact check: {last_error}") from last_error
+    raise ValueError("fact check: reply has no verdict object")
 
 
 # The gate's own chain on Vertex (operator, 2026-09-27). gemini-3.5-flash is the stronger
@@ -288,8 +308,37 @@ _CONTRADICTION = re.compile(
     r"misrepresent|debunk)")
 
 
+# The waiver must not reach the starkest fabrications rule 6 names. "Could not find any record
+# of the minister saying 'we will ban UPI'" is how a checker reports an INVENTED quote, and the
+# same goes for a ruling or law, and for blame or a cause pinned on someone. A statistic the
+# checker merely could not confirm stays waived (the operator's line, 2026-08-07), and 'report'
+# is not on the list: "no report was found" is how plain non-confirmation is worded.
+_FABRICATION_SUBJECT = re.compile(
+    r"(?i)\bquot(?:e|es|ed|ation)\b|\bsaid\b|\bsaying\b|\bstatements?\b|\bruling\b|\bcourt\b|"
+    r"\blaws?\b|\bblam\w*|\bcaus(?:e|es|ed|ing)\b|\bresponsib\w*|\battribut\w*|"
+    r"\bno record\b|\bappears nowhere\b")
+
+
 def _only_unconfirmed(finding: str) -> bool:
-    return bool(_NON_CONFIRMATION.search(finding)) and not _CONTRADICTION.search(finding)
+    return (bool(_NON_CONFIRMATION.search(finding)) and not _CONTRADICTION.search(finding)
+            and not _FABRICATION_SUBJECT.search(finding))
+
+
+# The reverse mistake: the checker files a claim it found FALSE under "minor" with verdict
+# "pass". Idea 211 shipped "early reports didn't even mention a driver" with the checker's own
+# note "This claim is contradicted by the available evidence." in the waived list. Only explicit
+# contradiction is promoted; "incorrect"/"wrong" are left alone because the checker also uses
+# them for a rounded figure or a date a day off, which the severity policy waives.
+_EXPLICIT_CONTRADICTION = re.compile(
+    r"(?i)\bcontradicted by\b|\bis contradicted\b|\b(?:claim|statement) is (?:false|untrue)\b|"
+    r"\bis not true\b|\bdid(?: not|n't) happen\b|\bnever happened\b|\bno such\b|\bfabricat\w*|"
+    r"\bdoes not exist\b")
+_NOT_CONTRADICTED = re.compile(
+    r"(?i)\bnothing contradicts\b|\bnot contradicted\b|\bno (?:evidence|source)s? contradicts?\b")
+
+
+def _contradicted(finding: str) -> bool:
+    return bool(_EXPLICIT_CONTRADICTION.search(finding)) and not _NOT_CONTRADICTED.search(finding)
 
 
 def _checker_sources(sources: list[str] | None) -> list[str]:
@@ -389,6 +438,12 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
                  "contradicts them (the prompt's own rule).", len(unconfirmed))
         blocking = [b for b in blocking if b not in unconfirmed]
         minor = unconfirmed + minor
+    contradicted = [m for m in minor if _contradicted(m)]
+    if contradicted:
+        log.warning("factcheck: %d 'minor' finding(s) say the claim is contradicted; they block "
+                    "(contradiction blocks, rule 6).", len(contradicted))
+        blocking = blocking + contradicted
+        minor = [m for m in minor if m not in contradicted]
     if severity_gate() == "any":  # escape hatch: restore block-on-every-discrepancy
         blocking, minor = blocking + minor, []
 
@@ -403,7 +458,8 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
     # in both directions: "pass" with a blocking finding blocks (a model marking its own homework
     # is what this gate exists to catch), and "fail" with only nitpicks ships (that over-blocking
     # is what the 2026-08-07 grading exists to stop).
-    unnamed_fail = verdict == "fail" and not blocking and not minor
+    # startswith: "FAIL - fabricated" is a fail too; exact matching read it as a pass.
+    unnamed_fail = verdict.startswith("fail") and not blocking and not minor
     ok = not blocking and not unnamed_fail
 
     if not ok:
@@ -431,6 +487,8 @@ def _merge_samples(a: dict, b: dict) -> dict:
     """Two verdicts as one: a finding from either counts, and a 'fail' from either stands."""
     def _list(d: dict, key: str) -> list:
         v = d.get(key)
+        if isinstance(v, (str, dict)):  # a lone finding sent unwrapped, as _findings accepts
+            return [v]
         return list(v) if isinstance(v, list) else []
 
     merged = dict(a)
@@ -442,7 +500,7 @@ def _merge_samples(a: dict, b: dict) -> dict:
         merged["checked"] = max(int(a.get("checked") or 0), int(b.get("checked") or 0))
     except (TypeError, ValueError):
         pass
-    if "fail" in (str(a.get("verdict", "")).lower(), str(b.get("verdict", "")).lower()):
+    if any(str(d.get("verdict", "")).strip().lower().startswith("fail") for d in (a, b)):
         merged["verdict"] = "fail"
     return merged
 

@@ -628,7 +628,9 @@ def repair_script(body: str, findings: list[str], topic: str | None = None) -> s
     if not findings:
         return None
     max_words = _max_words()
-    prompt = _REPAIR_PROMPT.format(topic=topic or "the news story",
+    # Today's date, like the writer and the gate: a grounded rewrite without it dated September
+    # news to June (STATUS 2026-09-28).
+    prompt = llm.today_line() + _REPAIR_PROMPT.format(topic=topic or "the news story",
                                    findings="\n".join(f"- {f}" for f in findings[:6]),
                                    body=body, max_words=max_words)
     try:
