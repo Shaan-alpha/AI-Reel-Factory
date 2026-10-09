@@ -1,5 +1,7 @@
 # Expressive narration: sarcasm the viewer can actually hear
 
+> Historical record: this spec was implemented in July 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 **Date:** 2026-07-26
 **Status:** Approved (design) — ready for implementation plan
 **Scope:** `src/voice.py`, `src/scriptwriter.py`, `tools/compare_voices.py` (new), their tests,

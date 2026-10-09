@@ -1,5 +1,7 @@
 # Premium Edit Polish Layer Implementation Plan
 
+> Historical record: this plan was implemented in June 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make rendered Shorts look professionally edited by adding a free, FFmpeg-only "polish" layer — crossfade transitions, a cinematic color grade that unifies AI-generated shots, vignette + grain, and Ken Burns motion variety.

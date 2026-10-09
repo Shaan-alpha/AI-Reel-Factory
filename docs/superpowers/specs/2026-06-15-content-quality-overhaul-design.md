@@ -1,5 +1,7 @@
 # Design Spec — Content-Quality Overhaul ("make the Shorts actually good")
 
+> Historical record: this spec was implemented in June 2026 (see CHANGELOG.md), except phase C (§3.5 metadata trims, §3.6 hot-take lever), which was never built. Current behaviour: STATUS.md and the code.
+
 **Date:** 2026-06-15
 **Status:** Draft for operator review
 **Owner decisions captured:** voice → Google Cloud **Chirp 3 HD**; budget → **≤ $5/month** total

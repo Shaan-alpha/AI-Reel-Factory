@@ -1,5 +1,7 @@
 # Premium Edit Polish Layer — Design
 
+> Historical record: this spec was implemented in June 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 **Date:** 2026-06-17 · **Phase:** 1 (MVP quality) · **Cost:** $0 (FFmpeg-only, CPU, runs on GitHub Actions)
 
 ## Problem

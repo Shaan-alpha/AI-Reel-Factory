@@ -6,16 +6,18 @@ deterministically per reel so reruns are stable but different reels vary.
 - **Empty dir → no music** (assembly skips it gracefully — so it's safe to leave this empty).
   Disable entirely with `ENABLE_MUSIC=false`.
 - Level: each reel measures its bed and sets it `MUSIC_LU_BELOW_VOICE` (default 11 LU) under the
-  narration, whatever the track's own loudness. `MUSIC_VOLUME` (default `0.10`) is used only if
-  that measurement fails. Each reel starts its bed at a different point (`ENABLE_MUSIC_OFFSET`).
+  narration, whatever the track's own loudness, and ducks it under speech (`ENABLE_DUCKING`).
+  `MUSIC_VOLUME` (default `0.10`) is used only if that measurement fails. Each reel starts its bed
+  at a different point (`ENABLE_MUSIC_OFFSET`).
 
 ## The current beds (2026-09-29): generated for this channel
 
 `calm-lofi-piano`, `calm-marimba`, `calm-pads`, `calm-guitar` — calm, neutral instrumentals made
 with **Google Lyria 2** (`lyria-002`) on the channel's Vertex project by
 [`tools/generate_music_beds.py`](../../tools/generate_music_beds.py), which records each prompt
-and seed. They replaced four YouTube Audio Library tracks tagged Dark/Dramatic, which fought the
-channel's soft/positive lean.
+and seed. They replaced four YouTube Audio Library tracks tagged Dark/Dramatic: the prompts ask
+for background music under a spoken explainer, and the negative prompt rules out vocals and dark,
+dramatic or tense styles.
 
 - **Why generated:** Content ID flags audio by who *registered* it, not by its licence (the earlier
   Pixabay beds were claimed and deleted). A bed generated for this channel is original, so nobody
@@ -32,11 +34,13 @@ channel's soft/positive lean.
 
 ## Adding or replacing a bed
 
-- Generate more: `python tools/generate_music_beds.py OUT_DIR` prints the plan and cost; `--yes`
-  spends it. Listen under a voice before committing anything.
+- Generate: the tool's `BEDS` table holds one prompt and seed per bed; edit it for new beds.
+  `python tools/generate_music_beds.py OUT_DIR` prints the plan and cost (about $0.066 a clip,
+  billed on Vertex); `--yes` spends it. Listen under a voice before committing anything.
 - Or download from the **YouTube Audio Library** ([studio.youtube.com](https://studio.youtube.com)
   → Audio Library → Music, "No attribution required"), which is guaranteed claim-safe on your own
-  channel.
+  channel. The description's disclosure line (`src/scriptwriter.py`) calls the music
+  AI-generated on every reel, so reword it if any bed is not.
 - ⚠️ "Royalty-free" sites (Pixabay, Tunetank, Chosic, ...) are a gamble for Content ID, and
   Bensound / Uppbeat / NCS need a credit line in every description.
 

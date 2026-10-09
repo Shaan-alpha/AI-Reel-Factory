@@ -1,5 +1,7 @@
 # Expressive Narration Implementation Plan
 
+> Historical record: this plan was implemented in July 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the narration actually *sound* dry-sarcastic by giving each TTS engine the control signals it natively understands, instead of sending plain text to all of them.

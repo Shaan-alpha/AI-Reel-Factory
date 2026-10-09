@@ -1,5 +1,7 @@
 # Ideation quality: news-anchored, diverse & viral topics
 
+> Historical record: this spec was implemented in June 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 **Date:** 2026-06-29
 **Status:** Approved (design) — ready for implementation plan
 **Scope:** `src/trends.py`, `src/ideation_fallback.py`, their tests. No DB schema, no workflow changes.

@@ -1,5 +1,7 @@
 # Phase A — Content-Quality Quick Wins Implementation Plan
 
+> Historical record: this plan was implemented in June 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace robotic American TTS with near-human Google Chirp 3 HD (free at our volume, graceful fallback), de-hype the script/ideation prompts toward honest-curiosity + a human "why it matters" beat, and upgrade captions to active-word karaoke in a real font — all behind config toggles with fallbacks.

@@ -1,5 +1,7 @@
 # Ideation Diversity & Virality Implementation Plan
 
+> Historical record: this plan was implemented in June 2026 (see CHANGELOG.md). Current behaviour: STATUS.md and the code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make ideation produce diverse, fresh, share-worthy topics instead of similar/stale ones, by anchoring on the real news feed and selecting distinct stories before expanding them.

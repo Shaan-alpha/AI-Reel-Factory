@@ -1,5 +1,7 @@
 # Phase C — Metadata SEO trims + operator "angle" lever Implementation Plan
 
+> Historical record: this plan was written in June 2026 and never implemented (`MAX_TAGS` and `EPISODE_ANGLE` never reached the code). Current behaviour: STATUS.md and the code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Tighten YouTube metadata for discoverability (8–12 tags, main keyword first) and add a light, optional operator "angle/hot-take" that the scriptwriter weaves into the why-it-matters beat — the final pieces of the 2026 content-quality overhaul (spec: `docs/superpowers/specs/2026-06-15-content-quality-overhaul-design.md`, sections 3.5 + 3.6).
