@@ -364,3 +364,34 @@ def test_stock_queries_keep_identifiable_faces_out(monkeypatch):
     p = seen["p"]
     assert "people doing things" not in p
     assert "silhouettes" in p and "identifiable" in p
+
+
+def test_the_rupee_appears_only_where_money_is_in_the_shot():
+    """Every India prompt asked for rupees, rocket launches and courtrooms included."""
+    p = visuals._img_prompt("rocket launch", 0, "India")
+    assert "set in India" in p and "rupee" not in p
+
+
+def test_the_schnell_fallback_sends_only_what_its_schema_accepts(monkeypatch, tmp_path):
+    """Workers AI rejected every seeded schnell request (400, 5006): the fallback was dead."""
+    sent = {}
+
+    class _R:
+        status_code = 200
+        headers = {"content-type": "image/jpeg"}
+        content = b"x" * 2000
+        text = ""
+
+        def raise_for_status(self):
+            pass
+
+    def _post(url, headers=None, json=None, files=None, timeout=None):
+        sent["json"] = json
+        return _R()
+
+    monkeypatch.setattr(visuals.requests, "post", _post)
+    assert visuals._cloudflare_run(visuals._SCHNELL, "a prompt", str(tmp_path / "i.jpg"),
+                                   "tok", "acct", seed=123)
+    assert set(sent["json"]) <= {"prompt", "steps"}
+
+

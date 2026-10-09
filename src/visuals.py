@@ -245,6 +245,11 @@ _COMPOSITIONS = ("wide establishing shot", "close-up detail", "medium shot", "lo
                  "overhead view", "silhouette against the light")
 
 
+_MONEY_RE = re.compile(r"(?i)\b(?:cash|currency|money|bank\w*|atm|rupees?|coins?|notes?|"
+                       r"price\w*|salar\w*|loans?|tax\w*|budget|market|stocks?|wallet|"
+                       r"payments?|upi|fees?|wages?|fuel|petrol)\b")
+
+
 def _img_prompt(keyword: str, index: int = 0, setting: str | None = None) -> str:
     """Build the AI-image prompt. Style is tunable via IMAGE_STYLE for the channel's look.
 
@@ -252,7 +257,10 @@ def _img_prompt(keyword: str, index: int = 0, setting: str | None = None) -> str
     coins because the narration never said "India" (local render, 2026-09-28)."""
     style = config.get("IMAGE_STYLE", _DEFAULT_IMAGE_STYLE)
     framing = _COMPOSITIONS[index % len(_COMPOSITIONS)]
-    place = f", set in {setting}" + (", Indian rupee currency" if setting == "India" else "") \
+    # The rupee only where money is in the shot: it used to go on every India prompt, rocket
+    # launches and courtrooms included.
+    money = setting == "India" and _MONEY_RE.search(keyword)
+    place = f", set in {setting}" + (", Indian rupee currency" if money else "") \
         if setting else ""
     return f"{keyword}{place}, {framing}, {style}, vertical 9:16 composition"
 
@@ -315,9 +323,9 @@ def _cloudflare_run(model: str, prompt: str, dest: str, token: str, acct: str,
             r = requests.post(url, headers={"Authorization": f"Bearer {token}"},
                               files={k: (None, v) for k, v in fields.items()}, timeout=90)
         else:
-            body = {"prompt": prompt[:2000]}
-            if seed is not None:
-                body["seed"] = seed
+            # No seed: flux-1-schnell's schema has none, and Workers AI answered every seeded
+            # request with HTTP 400 (5006), so the fallback never produced an image.
+            body = {"prompt": prompt[:2048], "steps": 4}
             r = requests.post(url, headers={"Authorization": f"Bearer {token}"},
                               json=body, timeout=90)
         if r.status_code >= 400:
