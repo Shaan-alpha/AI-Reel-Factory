@@ -558,11 +558,14 @@ def _disclosure_line() -> str:
 
 
 def _ensure_disclosure(caption: str) -> str:
-    """Guarantee the AI-disclosure line is present (docs/08 §2 — required)."""
-    if "ai-generated" in caption.lower():
-        return caption
+    """Guarantee the AI-disclosure line is present (docs/08 §2 — required), as its own paragraph.
+
+    It used to be skipped whenever 'ai-generated' appeared ANYWHERE (a hook about AI-generated
+    art, a source URL), and otherwise sat glued under the last source link."""
     line = _disclosure_line()
-    return f"{caption.rstrip()}\n{line}" if caption.strip() else line
+    if line.lower() in caption.lower():
+        return caption
+    return f"{caption.rstrip()}\n\n{line}" if caption.strip() else line
 
 
 # The retention bridge the prompt asks for ("Here's why it actually matters…"). Matching it is

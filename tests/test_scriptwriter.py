@@ -644,6 +644,14 @@ def test_a_somber_story_skips_the_hook_punch_up(monkeypatch):
     assert out["tone"] == "somber"
 
 
+def test_the_disclosure_is_not_skipped_by_a_mention_of_ai(monkeypatch):
+    """'AI-generated' anywhere used to count as the disclosure line."""
+    monkeypatch.setenv("VISUAL_SOURCE", "ai")
+    out = scriptwriter._ensure_disclosure("Why AI-generated art is everywhere\n\nSources:\nx")
+    assert out.endswith("\n\n" + scriptwriter.DISCLOSURE_LINE_AI)
+    assert scriptwriter._ensure_disclosure(out) == out  # and never added twice
+
+
 def test_somber_tone_can_be_switched_off(monkeypatch):
     monkeypatch.setenv("ENABLE_SOMBER_TONE", "false")
     assert scriptwriter.tone_for({"title": "27 killed", "hook": "", "angle": ""}) == "sarcastic"
