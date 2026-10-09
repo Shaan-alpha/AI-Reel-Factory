@@ -57,7 +57,7 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     monkeypatch.setattr(production.publish_youtube, "publish",
                         lambda v, m, sid: ("VID1", "https://www.youtube.com/shorts/VID1"))
     produced = []
-    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: produced.append((i, s)))
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: produced.append((i, s)))
     monkeypatch.setattr(production.db, "set_script_factcheck", lambda *a, **k: None)
     # The repair pass is a grounded rewrite: left real, a blocked reel made live model calls.
     monkeypatch.setattr(production.scriptwriter, "repair_script", lambda *a, **k: None)
@@ -70,6 +70,24 @@ def test_produce_one_full_chain(monkeypatch, tmp_path):
     vid, url = production.produce_one(IDEA, str(tmp_path))
     assert vid == "VID1" and url.endswith("VID1")
     assert (7, "produced") in produced  # idea marked produced
+
+
+def test_a_live_short_is_never_reported_as_failed(monkeypatch, tmp_path):
+    """After the upload, a failed 'produced' write used to fail the reel and send its idea back
+    to the digest, where a second tap would upload the same story again (rule 12)."""
+    _wire_happy(monkeypatch)
+
+    def _db_down(*a, **k):
+        raise RuntimeError("supabase unreachable")
+
+    monkeypatch.setattr(production.db, "set_idea_status", _db_down)
+    notes = []
+    monkeypatch.setattr(production, "_notify", notes.append)
+    vid, url = production.produce_one(IDEA, str(tmp_path))
+    assert vid == "VID1"
+    assert notes and "Published" in notes[0] and "Don't approve it again" in notes[0]
+
+
 
 
 def test_produce_one_passes_key_points_to_captions(monkeypatch, tmp_path):
@@ -127,7 +145,7 @@ def test_run_production_is_fail_soft(monkeypatch):
     ideas = [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}, {"id": 3, "title": "c"}]
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
     monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
-    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: None)  # no live Supabase
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: None)  # no live Supabase
 
     def fake_produce(idea, root):
         if idea["id"] == 2:
@@ -365,7 +383,7 @@ def test_an_unchecked_reel_goes_back_to_the_digest(monkeypatch):
     monkeypatch.setattr(production, "produce_one", lambda idea, root: (_ for _ in ()).throw(
         production.FactCheckUnavailable("idea 8 held back: the fact-check could not run")))
     statuses = []
-    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: statuses.append((i, s)))
 
     production.run_production()
     assert (8, "pending") in statuses
@@ -456,7 +474,7 @@ def test_a_failed_reel_is_released_from_the_approved_queue(monkeypatch):
     monkeypatch.setattr(production, "produce_one",
                         lambda idea, root: (_ for _ in ()).throw(RuntimeError("voice died")))
     statuses = []
-    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: statuses.append((i, s)))
 
     production.run_production()
     assert (5, "pending") in statuses, (
@@ -470,7 +488,7 @@ def test_a_factcheck_failure_stays_rejected_and_is_not_re_offered(monkeypatch):
     monkeypatch.setattr(production, "produce_one", lambda idea, root: (_ for _ in ()).throw(
         production.FactCheckFailed("idea 6 failed fact check: invented statistic")))
     statuses = []
-    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s: statuses.append((i, s)))
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: statuses.append((i, s)))
 
     production.run_production()
     assert (6, "pending") not in statuses

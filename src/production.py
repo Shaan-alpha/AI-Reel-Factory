@@ -260,10 +260,25 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         metadata = _build_metadata(idea, script)
         metadata["voice"] = spoke.get("voice")
         video_id, url = publish_youtube.publish(final, metadata, script["script_id"])
-        db.set_idea_status(idea_id, "produced")
+        _mark_produced(idea_id, url)
         return video_id, url
     finally:
         shutil.rmtree(work, ignore_errors=True)  # render artifacts are disposable (rule 15)
+
+
+def _mark_produced(idea_id: int, url: str) -> None:
+    """Record a live Short's idea as produced. Never raises: the upload cannot be undone.
+
+    This write used to propagate. One failed request after a successful upload reported the live
+    Short as a failed reel and sent its idea back to the digest, where a second tap would upload
+    the same story again (rule 12)."""
+    try:
+        db.set_idea_status(idea_id, "produced")
+    except Exception as e:  # noqa: BLE001
+        log.error("produce: idea %s is live at %s but could not be marked produced (%s)",
+                  idea_id, url, e)
+        _notify(f"✅ Published {url}, but idea {idea_id} could not be marked 'produced' "
+                f"({type(e).__name__}). Don't approve it again if it comes back.")
 
 
 def _record_verdict(script: dict, check: dict, repaired: bool) -> None:
@@ -305,7 +320,8 @@ def _release_failed_idea(idea_id: int, error: Exception) -> None:
     if isinstance(error, FactCheckFailed):
         return
     try:
-        db.set_idea_status(idea_id, "pending")
+        # Only from 'approved': a release must never bring a produced or blocked idea back.
+        db.set_idea_status(idea_id, "pending", from_status="approved")
     except Exception:  # noqa: BLE001 — the reel already failed; don't compound it
         log.warning("production: could not release idea %s back to pending.", idea_id)
 
