@@ -94,6 +94,39 @@ def test_a_short_gone_from_youtube_is_marked_and_reported_once(monkeypatch):
     assert sent and "BBB" in sent[0]
 
 
+def test_an_unsent_removal_alert_is_retried_next_run(monkeypatch):
+    """Marking first meant a failed send was never repeated: 9 removals were never reported."""
+    from src import approval
+
+    def _down(*a, **k):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(approval, "_api", _down)
+    marked = []
+    monkeypatch.setattr(analytics.db, "set_post_status", lambda pid, s: marked.append(pid))
+    analytics._flag_removed({"AAA": {"id": 1}}, {})
+    assert marked == []  # still a target, so tomorrow's run reports it
+
+
+def test_a_taken_down_short_counts_as_removed():
+    class _YT:
+        def videos(self):
+            return self
+
+        def list(self, **k):
+            assert "status" in k["part"]
+            return self
+
+        def execute(self):
+            return {"items": [
+                {"id": "UP", "statistics": {"viewCount": "9"}, "status": {"uploadStatus": "processed"}},
+                {"id": "GONE", "statistics": {}, "status": {"uploadStatus": "rejected"}},
+            ]}
+
+    stats = analytics._fetch_stats(_YT(), ["UP", "GONE"])
+    assert "UP" in stats and "GONE" not in stats
+
+
 def test_nothing_is_reported_when_every_short_is_still_up(monkeypatch):
     monkeypatch.setattr(analytics.db, "set_post_status", lambda *a: pytest.fail("nothing gone"))
     assert analytics._flag_removed({"AAA": {"id": 1}}, {"AAA": {"views": 5}}) == []

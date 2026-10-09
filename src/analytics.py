@@ -38,14 +38,22 @@ def _youtube_client():
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
+# videos.list still returns a taken-down video, with this uploadStatus and no real stats.
+_TAKEN_DOWN = {"rejected", "deleted", "failed"}
+
+
 def _fetch_stats(youtube, video_ids: list[str]) -> dict[str, dict]:
     """Return {video_id: {views, likes, comments}} via videos.list (batched 50/call)."""
     out: dict[str, dict] = {}
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i : i + 50]
-        # snippet costs nothing extra (one unit per call either way) and carries the real title.
-        resp = youtube.videos().list(part="snippet,statistics", id=",".join(batch)).execute()
+        # snippet and status cost nothing extra (one unit per call either way): snippet carries
+        # the real title, status a takedown, which leaves the video listed with no stats.
+        resp = youtube.videos().list(part="snippet,statistics,status",
+                                     id=",".join(batch)).execute()
         for item in resp.get("items", []):
+            if (item.get("status") or {}).get("uploadStatus") in _TAKEN_DOWN:
+                continue  # reported by _flag_removed like a deleted video
             s = item.get("statistics", {})
             out[item["id"]] = {
                 "views": int(s.get("viewCount", 0)),
@@ -57,27 +65,31 @@ def _fetch_stats(youtube, video_ids: list[str]) -> dict[str, dict]:
 
 
 def _flag_removed(by_vid: dict[str, dict], stats: dict[str, dict]) -> list[str]:
-    """Mark posts YouTube no longer returns as 'removed', and say so once on Telegram.
+    """Say on Telegram which Shorts are gone from YouTube, then mark them 'removed'.
 
-    The owner's token sees private and unlisted videos too, so an id missing from videos.list is
-    gone (deleted, or taken down). 9 of 87 'published' Shorts were, and nothing noticed. Marked
-    rows leave get_published_posts, so each one is reported a single time."""
+    The owner's token sees private and unlisted videos too, so an id missing from the stats is
+    gone: deleted, or taken down (_fetch_stats leaves those out). Marked rows leave
+    get_published_posts, so each one is reported once. The alert goes FIRST: the old order marked
+    the rows, then failed to send (analytics.yml passed no Telegram secrets), so 9 removals were
+    never reported and could never be again. Unsent now means unmarked, so the next run retries."""
     gone = [vid for vid in by_vid if vid not in stats]
+    if not gone:
+        return gone
+    log.warning("analytics: %d Short(s) no longer on YouTube: %s", len(gone), gone)
+    try:
+        from src import approval
+
+        approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
+                      text=f"🗑️ {len(gone)} Short(s) are no longer on YouTube (deleted or "
+                           f"taken down): " + ", ".join(gone))
+    except Exception as e:  # noqa: BLE001 — alerting must never cost the snapshots
+        log.error("analytics: removal alert not sent (%s); the next run tries again", e)
+        return gone
     for vid in gone:
         try:
             db.set_post_status(by_vid[vid]["id"], "removed")
         except Exception as e:  # noqa: BLE001 — bookkeeping only (rule 14)
             log.warning("analytics: could not mark %s removed (%s)", vid, e)
-    if gone:
-        log.warning("analytics: %d Short(s) no longer on YouTube: %s", len(gone), gone)
-        try:
-            from src import approval
-
-            approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
-                          text=f"🗑️ {len(gone)} Short(s) are no longer on YouTube (deleted or "
-                               f"taken down): " + ", ".join(gone))
-        except Exception as e:  # noqa: BLE001 — alerting must never cost the snapshots
-            log.warning("analytics: removal alert not sent (%s)", e)
     return gone
 
 
