@@ -46,8 +46,21 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Cached .debs; see make-short.yml for why (a crawling mirror, 2026-10-22).
+      - name: Cache apt packages (FFmpeg + espeak-ng)
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-archives
+          key: apt-ubuntu-24.04-ffmpeg-espeak-ng-v1
+
       - name: Install FFmpeg + espeak-ng (Kokoro TTS phonemizer)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
+        run: |
+          sudo apt-get update
+          mkdir -p ~/apt-archives
+          sudo cp ~/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          sudo apt-get install -y --download-only ffmpeg espeak-ng
+          cp /var/cache/apt/archives/*.deb ~/apt-archives/ 2>/dev/null || true
+          sudo apt-get install -y ffmpeg espeak-ng
 
       - name: Cache TTS/ASR models (Kokoro + faster-whisper)
         uses: actions/cache@v6
