@@ -125,6 +125,37 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
+### 2026-10-22 — A crawling Ubuntu mirror held `/makeshort 1` in apt for 16 minutes
+
+Operator: `/makeshort 1` had run 12 minutes with nothing on Telegram. Run 39785910849.
+
+**Found**
+- The run never reached Python. `apt-get update` was fine (5.8 MB in 1 s), but the 104 packages
+  for `ffmpeg espeak-ng` (99.2 MB) came from `azure.archive.ubuntu.com` at ~60 KB/s: 63 of 104
+  after 16 minutes (`libflite1`, 13.6 MB, took 3.5 min). The step normally takes 20–35 s. GitHub
+  reported no incident. Cancelled at 16 min, before any Supabase write or digest; the
+  workflow's own "run stopped" message went to Telegram.
+- **A latent kill risk behind it.** `production._seconds_left()` assumed 5 minutes of setup
+  (`JOB_SETUP_MINUTES`) and started its clock at import. Had apt finished at ~30 min, the
+  guard would have believed it had ~25 minutes more than it did and could start a reel that the
+  90-minute kill cuts mid-chain: the idea stranded at `approved`, or a kill between upload and
+  `insert_post` that a rerun publishes twice.
+
+**Done** (local suite **741 pass, 5 skipped**; CI not yet run on it)
+- The job's first step writes `JOB_STARTED_AT` (epoch seconds) to `$GITHUB_ENV` in
+  `make-short.yml` and `production.yml`; `_seconds_left()` counts from it, and falls back to
+  `JOB_SETUP_MINUTES` without it. Test watched failing first (85 min claimed, 60 real).
+- The .debs are cached (`~/apt-archives`, key `apt-ubuntu-24.04-ffmpeg-espeak-ng-v1`) in
+  `make-short`, `production` and `tests`: update the index, copy the cached .debs into apt's
+  archive, `--download-only` (fetches only what changed), copy back, install. The order also
+  survives an image that deletes .debs after `update` or after `dpkg`. `tests` runs daily on
+  `main`, which keeps the shared cache from its 7-day expiry.
+
+**Next / limits**
+- Prove it on a runner: a cold run should save the cache and a warm one should download ~0 B.
+  The first run after merging is cold, so a crawling mirror still hurts that one run.
+- Bump the key's `-v1` if the runner image moves off 24.04 or the package set changes.
+
 ### 2026-10-22 — Claude writes every script (Anthropic API, $4/month cap)
 
 Operator: remove the Claude OAuth token, use an Anthropic API key, and have Claude work on every
