@@ -5,7 +5,7 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
-**Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups and the 2026-10-09 audit (CHANGELOG `[Unreleased]`) · CI **689 pass, 5 skipped** (run 37886269322; the 5 are opt-in live tests)
+**Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit and the 2026-10-22 Claude scriptwriter (PR #13) (CHANGELOG `[Unreleased]`) · CI **740 pass, 5 skipped** (run 39756475459; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
 **Last updated:** 2026-10-22 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
@@ -23,7 +23,7 @@
 | Area | State |
 |------|-------|
 | Production | ✅ Live, **on demand only**: about 81 public Shorts on **@butitmatters**, about 0.7 a day against the 4–5 goal. Down 2026-10-01 → 10-09 (PyAV 19), back since |
-| Pipeline code ([src/](src/)) | ✅ Every module implemented and tested (table below); CI **689 pass, 5 skipped** |
+| Pipeline code ([src/](src/)) | ✅ Every module implemented and tested (table below); CI **740 pass, 5 skipped** |
 | Design / docs | ✅ 8 docs in [docs/](docs/) · rules in [CLAUDE.md](CLAUDE.md) |
 | GitHub Actions | `make-short` (the pipeline), `production` (manual-only), `tests` (push, PR, daily), `analytics` (daily), `verify-tts` / `verify-vertex` (manual); all on `ubuntu-24.04`, Python 3.12. 15 secrets, Pixabay and `ANTHROPIC_API_KEY` (2026-10-22) included (`CLAUDE_CODE_OAUTH_TOKEN` deliberately absent, rule 4). Repo variables: `FACTCHECK_STRICT=true`, `VISUAL_SOURCE=ai`, `YOUTUBE_PRIVACY=public`, `GOOGLE_TTS_VOICE` |
 | Telegram bot ([telegram-bot/](telegram-bot/)) | ✅ Vercel project `telegram-bot`, team `shaan-alphas-projects`, account **shaan-alpha** (the operator has two Vercel accounts; deploy from this one). CLI-deployed, not git-connected: every bot change needs `vercel deploy --prod` from `telegram-bot/`. Last deploy 2026-10-09 |
@@ -168,7 +168,7 @@ reel with at most $4 a month of Anthropic spend.
   cancelled at the job's 25-minute limit, the log going silent after the 82% mark, where
   `test_live_edge_tts` sits. No `make-short` run since 2026-10-13, so production never hit it.
 - **Tests:** locally **739 pass, 5 skipped** (the 5 opt-in live tests) in 102 s; 50 new across
-  `tests/test_claude.py`, `test_production.py` and `test_voice.py`. CI has not run this code.
+  `tests/test_claude.py`, `test_production.py` and `test_voice.py`. CI: 740 pass, 5 skipped.
 - **Measured** on the real Template N prompt (~2,870 input tokens): Opus 5.5 at low effort
   $0.037 (14 s), at medium $0.066 (25 s); Sonnet 5.5 at low $0.011 (5 s, but 91 words, over the
   80-word cap). Default: `claude-opus-5-5`, effort `low`, so $4 is about 108 scripts a month
@@ -182,8 +182,8 @@ reel with at most $4 a month of Anthropic spend.
 - Docs: CLAUDE.md rules 2, 4, 11, 13; docs/03 §1 and §4; docs/04; `.env.example`.
 
 **Not done / open**
-- CI had not run this code when it was merged (operator: commit, push and merge). The first
-  `tests` run after the merge is the proof; it should end the 25-minute timeouts.
+- Merged as PR #13 (operator: commit, push and merge). CI on the PR: **740 pass, 5 skipped**,
+  a 6 min 22 s job (run 39756475459), where the daily runs had been dying at 25 minutes.
 - Cost caps, decided by the operator the same day: **separate**. Google keeps ≤ $5/month and
   Claude has its own ≤ $4/month, so metered spend can reach about $9 (CLAUDE.md rule 2).
 - No Console spend limit is set on the Anthropic workspace; docs/03 §1 recommends one as a

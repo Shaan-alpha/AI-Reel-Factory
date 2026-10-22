@@ -172,7 +172,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 - **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
   Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
   runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day against the 4–5
-  goal. Every module in [src/](src/) is implemented and tested (CI: 689 pass, 5 skipped).
+  goal. Every module in [src/](src/) is implemented and tested (CI: 740 pass, 5 skipped). Since 2026-10-22 Claude
+  (Anthropic API, $4/month cap of its own) writes each script from Gemini's grounded draft.
 - **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
   workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
   removed at the operator's request on 2026-09-29 (GitHub ran them hours late).

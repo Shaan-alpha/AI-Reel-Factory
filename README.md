@@ -63,7 +63,7 @@ free tiers.
 See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.md](CHANGELOG.md).
 
 - [x] Full pipeline **built, tested, and publishing** captioned Shorts to **@butitmatters** (about 81 public as of 2026-10-09)
-- [x] Every module done + tested in isolation; CI **689 pass, 5 skipped** on 2026-10-09 (the skips are opt-in live tests): config · db · llm · news · trends · ideation · approval · scriptwriter · factcheck · voice · visuals · assembly · subtitles · publish · analytics · orchestrator · bot
+- [x] Every module done + tested in isolation; CI **740 pass, 5 skipped** on 2026-10-22 (the skips are opt-in live tests): config · db · llm · news · trends · ideation · approval · scriptwriter · factcheck · voice · visuals · assembly · subtitles · publish · analytics · orchestrator · bot
 - [x] All credentials collected & verified (Gemini API key · Vertex AI, keyless · Groq · Supabase · Telegram + Vercel bot · Pexels · Pixabay · Cloudflare · Google TTS · YouTube OAuth)
 - [x] **Near-human voice** — Gemini TTS (Zubenelgenubi), the same voice on Vertex as its first fallback, then Chirp 3 HD
 - [x] **Story-specific AI B-roll** — Cloudflare FLUX.2 klein images + Ken Burns motion
