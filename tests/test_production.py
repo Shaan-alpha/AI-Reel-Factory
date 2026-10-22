@@ -88,6 +88,33 @@ def test_a_live_short_is_never_reported_as_failed(monkeypatch, tmp_path):
     assert notes and "Published" in notes[0] and "Don't approve it again" in notes[0]
 
 
+def test_a_claude_problem_is_reported_once_per_run(monkeypatch, tmp_path):
+    """A revoked key or a spent budget repeats on every reel, and the grounded draft quietly
+    ships each time: the operator hears it once, not three times, and not never."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production, "_claude_reported", set())
+    issue = {"kind": "misconfigured", "reason": "AuthenticationError: invalid x-api-key"}
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
+        **SCRIPT, "writer": "gemini-grounded", "claude_issue": issue})
+    notes = []
+    monkeypatch.setattr(production, "_notify", notes.append)
+    production.produce_one(IDEA, str(tmp_path))
+    production.produce_one({**IDEA, "id": 8}, str(tmp_path))
+    claude_notes = [n for n in notes if "Claude" in n]
+    assert len(claude_notes) == 1 and "invalid x-api-key" in claude_notes[0]
+
+
+def test_a_script_claude_wrote_sends_no_claude_note(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production, "_claude_reported", set())
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "writer": "claude", "claude_issue": None})
+    notes = []
+    monkeypatch.setattr(production, "_notify", notes.append)
+    production.produce_one(IDEA, str(tmp_path))
+    assert not [n for n in notes if "Claude" in n]
+
+
 def test_alerts_carry_no_credentials(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:ABCdefGHIjkl")
     msg = production._redact("400 for url: https://api.telegram.org/bot123456:ABCdefGHIjkl/send"

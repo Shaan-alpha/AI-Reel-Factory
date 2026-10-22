@@ -178,6 +178,7 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
         return existing["external_id"], existing.get("url") or ""
 
     script = scriptwriter.write_script(idea)
+    _report_claude(idea, script)
 
     # Independent fact-check BEFORE any render work: this is the cheapest possible place to
     # abort, and since the channel moved to truth-first commentary (it may now reach a verdict
@@ -290,6 +291,22 @@ def _record_verdict(script: dict, check: dict, repaired: bool) -> None:
         db.set_script_factcheck(script["script_id"], verdict)
     except Exception as e:  # noqa: BLE001 — rule 14
         log.warning("produce: could not store the fact-check verdict (%s)", e)
+
+
+# Claude problems already reported in this run, by kind. A revoked key, a bad setting, a missing
+# ledger or a spent budget repeats on every reel while the grounded draft quietly ships, so the
+# operator hears each once a run (rule 13) instead of once a reel, or never.
+_claude_reported: set[str] = set()
+
+
+def _report_claude(idea: dict, script: dict) -> None:
+    issue = script.get("claude_issue")
+    if not issue or issue.get("kind") in _claude_reported:
+        return
+    _claude_reported.add(issue.get("kind"))
+    _notify(f"✍️ Claude did not write the script for idea {idea.get('id')} "
+            f"({idea.get('title')!r}): {issue.get('reason')}. Gemini's grounded draft was used, "
+            f"and will be for this run's other reels until it is fixed.")
 
 
 def _notify_failure(idea: dict, error: Exception) -> None:

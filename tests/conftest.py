@@ -80,3 +80,5 @@ def _no_live_models(request, monkeypatch):
     _blocked.__wrapped__ = getattr(real, "__wrapped__", real)  # test_llm reaches the uncached one
     monkeypatch.setattr(llm, "_gemini_client", _blocked)
     monkeypatch.setattr(llm, "_groq_client", _blocked)
+    # Claude is billed per call: with the operator's key in .env, one unstubbed test is real money.
+    monkeypatch.setattr(llm, "_anthropic_client", _blocked)

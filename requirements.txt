@@ -4,6 +4,8 @@
 # LLM (scriptwriter + ideation, grounded + fallback)
 google-genai==2.25.0             # Gemini — current SDK (`from google import genai`)
 groq==1.7.0                     # Groq failover
+anthropic==1.12.1               # Claude writes the script (paid API, $4/month cap). 1.x on
+                                # purpose: 2.0.0 shipped 2026-10-21, a day before this pin
 
 # Database / state
 supabase==2.31.0               # Supabase Postgres client
