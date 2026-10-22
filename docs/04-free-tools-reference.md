@@ -1,11 +1,12 @@
 # Free Tools Reference (2026)
 
 Every tool the system uses, what it does today, and its free tier and limits. Most are free.
-**Two are billed**, both on Google Cloud project `but-it-matters-tts` and inside the ≤ $5/month
+**Three are billed.** Two are on Google Cloud project `but-it-matters-tts`, inside the ≤ $5/month
 cap (CLAUDE.md rule 2): **Vertex AI** (Gemini text, grounding, the fact-check gate, the
 same-voice TTS fallback, and once the music beds) and **Cloud Text-to-Speech** (Chirp 3 HD). A ₹450/month budget on the
-billing account alerts at 50/90/100%; it is an alert, not a hard stop. Limits are the providers'
-published terms in 2026; numbers measured on this account say so.
+billing account alerts at 50/90/100%; it is an alert, not a hard stop. The third is the
+**Anthropic API** (Claude writes the script), with its own $4/month cap that the code enforces.
+Limits are the providers' published terms in 2026; numbers measured on this account say so.
 
 ---
 
@@ -22,8 +23,9 @@ optional and dormant: it has never run in production.
 | **Gemini on Vertex AI** ★ (billed) | Stage 2: researches the chosen stories in prose with Google Search grounding (`IDEATION_MODEL`, default `gemini-3.5-flash-lite,gemini-3.5-flash`), then writes the JSON ideas from those notes (`gemini-3.8-flash`). Prose is used because Gemini 3.x returns no citations for a JSON reply. | Tokens billed on every call. Grounding: 5,000 search queries/month free across Gemini 3 models, then $14 per 1,000. Keyless auth (ADC locally, Workload Identity Federation in CI). | https://cloud.google.com/vertex-ai/generative-ai/pricing |
 | Claude Code / Anthropic Routines (optional, dormant) | Would write `data/daily-ideas.json` (see `routines/ideation.md`, which needs updating before any re-enable). Not part of the running system. | Within the Pro sub | https://code.claude.com/docs |
 
-> ToS (rule 4): Claude ideation may run **only** via official Claude Code / Routines. The Python
-> pipeline uses the Gemini and Groq developer APIs, never Claude.
+> ToS (rule 4): the Claude subscription may run **only** via official Claude Code / Routines.
+> Ideation uses Gemini and Groq; the only Claude in the Python pipeline is the scriptwriter, on a
+> paid Anthropic API key.
 
 Vertex retires `gemini-2.5-flash`, `-2.5-flash-lite` and `-2.5-pro` on **2026-10-20**; nothing in
 CI uses them any more.
@@ -34,7 +36,8 @@ CI uses them any more.
 
 | Tool | Role today | Free tier / cost | Link |
 |------|-----------|------------------|------|
-| **Gemini on Vertex AI** ★ (billed) | Writes the script (Template N): a grounded write on `GEMINI_GROUNDED_MODEL` (`gemini-3.5-flash-lite,gemini-3.5-flash`), ungrounded calls on `gemini-3.8-flash`. | Billed per token (pricing link above) | `src/scriptwriter.py` |
+| **Gemini on Vertex AI** ★ (billed) | Researches the script (Template N): a grounded draft on `GEMINI_GROUNDED_MODEL` (`gemini-3.5-flash-lite,gemini-3.5-flash`) that is Claude's fact base, and ships itself when Claude does not run; ungrounded calls on `gemini-3.8-flash`. | Billed per token (pricing link above) | `src/scriptwriter.py` |
+| **Claude** via the Anthropic API ★ (billed, since 2026-10-22) | Writes the final script from the grounded draft (`ANTHROPIC_MODEL`, default `claude-opus-5-5` at `ANTHROPIC_EFFORT=low`). No web access of its own; a script with a number or name the draft lacks is dropped for the draft. Not called without a grounded draft. | $4/month cap held in code by the `claude_spend` ledger. Measured: $0.037 a script (Opus 5.5, low), $0.066 (medium), $0.011 (Sonnet 5.5, low) | https://console.anthropic.com/ |
 | **Fact-check gate** on Vertex (billed) | Re-checks every finished script against live search before voicing (`FACTCHECK_MODEL` `gemini-3.5-flash,gemini-3.5-flash-lite`, 2 samples, one repair pass). | About $0.003-0.004 a check. With the grounded write, a reel spends about 7 grounding queries, about 14 with a repair. | `src/factcheck.py` |
 | Groq | First choice for the hook punch-up and the tighten pass; failover for the ungrounded calls | Free (limits above) | https://console.groq.com/ |
 | **Gemini Developer API** (AI Studio key) | The code's default backend when `GEMINI_USE_VERTEX` is off (a fresh clone, local runs); the workflows turn Vertex on. Its key is required either way (config check, first TTS link). | Free tier, metered **per model**. Daily caps are small (measured: 20 grounded requests/day on `gemini-2.5-flash`). Free grounded search is closed to new projects (2026-09-04). | https://aistudio.google.com/ |

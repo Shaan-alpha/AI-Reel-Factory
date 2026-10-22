@@ -17,6 +17,7 @@ keep the two in sync.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -240,10 +241,141 @@ def _parse_llm_json(raw: str) -> dict:
         raise ValueError(f"scriptwriter: no JSON object in LLM reply ({e})") from e
 
 
+# Claude has no web access here, so it writes from what Gemini found. The grounded draft is its
+# fact base; everything that is craft rather than fact is Claude's to redo.
+_CLAUDE_DRAFT_NOTE = """
+
+RESEARCH DRAFT — written by a model that searched the live web for this story while writing it, \
+so its facts were checked against current reporting. You have no web access, so ignore the \
+instruction above to use web search: this draft and the SOURCES are your fact base. Every name, \
+number, date, quote and claim you state must already be in one of them, unchanged, and you add \
+none. Everything else is yours to rewrite: the hook, the wording, the rhythm, the jokes, the \
+title, the caption and the tags. Write the best script you can, in the JSON format above.
+{draft}"""
+
+# --- Claude adds no facts: checked in code, not only asked for ---------------------------------
+# The fact-check gate waives a claim it cannot confirm when nothing contradicts it, and Claude
+# cannot search. So a number or a name Claude brings from memory would reach the gate as
+# "couldn't confirm" and ship. Every number and every proper name in Claude's script must
+# therefore already be in the grounded draft or the idea, or the draft ships instead.
+# "one" is left out of the spelled numbers: it is a pronoun far more often than a count.
+_SPELLED_NUMBERS = {
+    "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+    "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+    "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50",
+    "sixty": "60", "seventy": "70", "eighty": "80", "ninety": "90", "hundred": "100",
+    "thousand": "1000", "lakh": "100000", "million": "1000000", "crore": "10000000",
+    "billion": "1000000000", "trillion": "1000000000000",
+}
+_NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+_CAPITALISED_RE = re.compile(r"(?<![\w'’])[A-Z][\w'’\-]*")  # not the 'P' of 'iPhone'
+# A capitalised word after one of these is mid-sentence, so it is a name, not a sentence start.
+# Dashes count: "the man responsible — Somanath" is a name after a dash.
+_MID_SENTENCE_BEFORE = ",;'’—–-"
+
+
+def _numbers(text: str) -> set[str]:
+    found = {n.replace(",", "").rstrip(".") for n in _NUMBER_RE.findall(text)}
+    found |= {_SPELLED_NUMBERS[w] for w in re.findall(r"[a-z]+", text.lower())
+              if w in _SPELLED_NUMBERS}
+    return found
+
+
+def _bare(word: str) -> str:
+    """'ISRO's' -> 'isro'."""
+    return re.sub(r"['’]s$", "", word).strip("'’-").lower()
+
+
+def _new_names(body: str, known: set[str]) -> list[str]:
+    """Proper names in `body` that `known` (lower-cased source words) does not account for.
+
+    A capitalised word counts as a name mid-sentence, or anywhere when it is an acronym. A
+    sentence start is not checked, since "Here's" and "Turns" are capitalised there too. A word
+    matches a known one sharing its first four letters, so "Indian" is accounted for by
+    "India" and "Pakistani" by "Pakistan"."""
+    names = []
+    for m in _CAPITALISED_RE.finditer(body):
+        word = re.sub(r"['’]s$", "", m.group())
+        before = body[:m.start()].rstrip()
+        mid = bool(before) and (before[-1].isalnum() or before[-1] in _MID_SENTENCE_BEFORE)
+        acronym = len(word) >= 2 and word.isupper()
+        bare = _bare(word)
+        if not (mid or acronym) or len(bare) < 2 or word.startswith(("I'", "I’")):
+            continue
+        stem = bare[:4]
+        if bare in known or (len(bare) >= 4 and any(k.startswith(stem) for k in known)):
+            continue
+        names.append(word)
+    return names
+
+
+def _added_facts(data: dict, source_text: str) -> list[str]:
+    """Numbers and names in Claude's script that the draft and the idea do not contain.
+
+    Numbers are checked in everything that is published: the narration, the title, the
+    on-screen key points and the description. Names only in the narration: titles and key
+    points are often in Title Case or capitals, where every word would look like a name."""
+    kp = data.get("key_points")
+    published = " ".join([str(data.get("script_body") or ""), str(data.get("title") or ""),
+                          str(data.get("caption") or ""),
+                          " ".join(map(str, kp)) if isinstance(kp, list) else ""])
+    added = sorted(_numbers(published) - _numbers(source_text), key=len)
+    known = {_bare(w) for w in re.findall(r"[\w'’\-]+", source_text)}
+    return added + _new_names(str(data.get("script_body") or ""), known)
+
+
+def _idea_lines(prompt: str) -> str:
+    """The prompt's facts: the date line, IDEA, HOOK, ANGLE and the source links. Not the
+    instructions: their numbers ("40-55 characters", "12-15 search terms") are not facts."""
+    keep = re.compile(r"^(?:TODAY'S DATE:|IDEA:|HOOK:|ANGLE\b|- https?://)")
+    return "\n".join(line for line in prompt.splitlines() if keep.match(line))
+
+
+# Why Claude did not write a script, by kind, when the operator should hear about it: these
+# repeat on every reel until someone acts. Transient errors and a dropped reply are only logged.
+_CLAUDE_ISSUE_KINDS = ("no-key", "config", "ledger", "budget", "misconfigured")
+
+
+def _claude_write(prompt: str, draft: dict) -> tuple[dict | None, dict | None]:
+    """Claude's version of the script, or None to ship the grounded draft, plus the reason
+    worth reporting when Claude could not write (None otherwise). Fail-soft (rule 11): no key, a
+    spent budget, an API error, an unusable reply or an added fact all return None."""
+    note = _CLAUDE_DRAFT_NOTE.format(draft=json.dumps(draft, ensure_ascii=False))
+    try:
+        data = _parse_llm_json(llm.generate_claude(prompt + note, purpose="script"))
+    except llm.ClaudeUnavailable as e:
+        log.info("scriptwriter: Claude not used (%s); shipping the grounded draft", e)
+        return None, ({"kind": e.kind, "reason": str(e)} if e.kind in _CLAUDE_ISSUE_KINDS
+                      else None)
+    except llm.ClaudeMisconfigured as e:
+        log.error("scriptwriter: Claude rejected its configuration (%s); shipping the grounded "
+                  "draft", e)
+        return None, {"kind": "misconfigured", "reason": str(e)}
+    except Exception as e:  # noqa: BLE001 — Claude is best-effort; Gemini stays behind it
+        log.warning("scriptwriter: Claude write failed (%s); shipping the grounded draft", e)
+        return None, None
+    if not (data.get("script_body") or "").strip():
+        log.warning("scriptwriter: Claude returned no script_body; shipping the grounded draft")
+        return None, None
+    added = _added_facts(data, _idea_lines(prompt) + "\n" + json.dumps(draft, ensure_ascii=False))
+    if added:
+        log.warning("scriptwriter: Claude's script adds %s, which the grounded draft does not "
+                    "carry; shipping the draft", ", ".join(added))
+        return None, None
+    return data, None
+
+
 def _generate_script_json(prompt: str) -> dict:
-    """Write the script with live web-grounding (verifies facts), falling back to ungrounded
-    JSON mode if grounding is unavailable or returns unusable JSON. Accuracy guard for a public
-    channel — grounding lets the model catch a fabricated premise instead of repeating it.
+    """Write the script: Gemini researches it with live web-grounding, then Claude writes the
+    final version from that draft. Each step falls back: no Claude, or a Claude script that
+    adds a fact, means the grounded draft ships; no usable draft means ungrounded Gemini → Groq,
+    and no Claude call, since Claude would have nothing to take its facts from.
+    Grounding is the accuracy guard for a public channel: it lets the model catch a fabricated
+    premise instead of repeating it, and the draft carries those checked facts to Claude.
+
+    The result carries `writer` (claude | gemini-grounded | gemini) and, when Claude could not
+    write for a reason that repeats until someone acts, `claude_issue` {kind, reason}.
 
     ENABLE_GROUNDED_SCRIPT=false skips the grounded attempt entirely. It exists because on the
     Developer API this call is one of the 7 a 3-reel run spends from the single 20/day grounded
@@ -251,17 +383,30 @@ def _generate_script_json(prompt: str) -> dict:
     Vertex, without that cap, since 2026-09-04) — and when that budget runs dry it is the
     fact-check GATE that stops working. If one of the two has to go, the gate is worth more: it
     re-verifies the finished script, so a fabricated premise is still caught downstream. Default
-    stays ON — this is a lever for a busy day, not a silent quality cut."""
-    if not config.get_bool("ENABLE_GROUNDED_SCRIPT", True):
-        log.info("scriptwriter: grounded write disabled; using ungrounded JSON mode.")
-        return _parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048))
-    try:
-        data = _parse_llm_json(llm.generate_grounded(prompt, max_tokens=2048))
-        if (data.get("script_body") or "").strip():
-            return data
-    except Exception as e:  # noqa: BLE001 — grounded write is best-effort; fall back
-        log.warning("scriptwriter: grounded write unusable (%s); using ungrounded JSON mode", e)
-    return _parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048))
+    stays ON — this is a lever for a busy day, not a silent quality cut.
+
+    ENABLE_CLAUDE_SCRIPT=false skips Claude, which is also what happens without
+    ANTHROPIC_API_KEY or once the month's budget is spent (llm.generate_claude)."""
+    draft = None
+    if config.get_bool("ENABLE_GROUNDED_SCRIPT", True):
+        try:
+            data = _parse_llm_json(llm.generate_grounded(prompt, max_tokens=2048))
+            if (data.get("script_body") or "").strip():
+                draft = data
+        except Exception as e:  # noqa: BLE001 — grounded write is best-effort; fall back
+            log.warning("scriptwriter: grounded write unusable (%s)", e)
+    else:
+        log.info("scriptwriter: grounded write disabled.")
+    if draft is None:
+        log.info("scriptwriter: no grounded draft, so no Claude call; using ungrounded JSON mode.")
+        return {**_parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048)),
+                "writer": "gemini"}
+    if not config.get_bool("ENABLE_CLAUDE_SCRIPT", True):
+        return {**draft, "writer": "gemini-grounded"}
+    written, issue = _claude_write(prompt, draft)
+    if written:
+        return {**written, "writer": "claude"}
+    return {**draft, "writer": "gemini-grounded", "claude_issue": issue}
 
 
 # A cheap free-API pass that scores the opening hook and, only if it's weak, sharpens the title +
@@ -774,4 +919,5 @@ def write_script(idea: dict, template: str = "N") -> dict:
     script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None)
     return {"script_id": script_id, "script_body": body, "caption": caption,
             "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points,
-            "tone": tone_for(idea, body)}
+            "tone": tone_for(idea, body), "writer": data.get("writer"),
+            "claude_issue": data.get("claude_issue")}

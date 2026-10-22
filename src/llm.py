@@ -3,10 +3,15 @@
 Contract:
     what it does : one entry point for free-tier text generation; transparent failover.
     how to use   : `from src.llm import generate; text = generate(prompt, json=True)`
-    depends on   : google-genai, groq, requests, src.config (GEMINI_API_KEY, GROQ_API_KEY).
+    depends on   : google-genai, groq, anthropic, requests, src.config (GEMINI_API_KEY,
+                   GROQ_API_KEY, optional ANTHROPIC_API_KEY), src.db (the Claude spend ledger).
 
-Used by the scriptwriter (Module 3) and the ideation fallback. NOT used for Claude —
-Claude ideation runs only in the Routine (rule 4). Respect free-tier quotas (rule 13).
+Used by the scriptwriter (Module 3) and the ideation fallback. Respect free-tier quotas (rule 13).
+
+Claude: `generate_claude` calls the paid Anthropic API with ANTHROPIC_API_KEY, held to a
+monthly budget (ANTHROPIC_MONTHLY_BUDGET_USD, default $4) through the `claude_spend` ledger.
+It is NOT part of `generate`'s failover chain: the scriptwriter calls it on purpose and keeps
+Gemini behind it. The Claude Code OAuth token is never used here (rule 4).
 
 Optional third provider: **GitHub Models** — ⚠️ **RETIRED BY GITHUB** (HTTP 410
 `github_models_retirement_brownout`, verified 2026-09-01). Still opt-in via ENABLE_GH_MODELS /
@@ -709,6 +714,172 @@ def _gen_github_models(prompt: str, *, json: bool, max_tokens: int) -> str:
     if not choices:
         raise RuntimeError("github models returned no choices")
     return choices[0].get("message", {}).get("content") or ""
+
+
+# --- Claude (Anthropic API, billed per token) -------------------------------------------------
+# Added 2026-10-22 at the operator's request: Claude writes every reel's script, within $4 a month.
+# Measured that day on the real Template N prompt with a research draft (~2,870 input tokens):
+#   claude-opus-5-5   effort low     1,267 output tokens  $0.037  14 s
+#   claude-opus-5-5   effort medium  2,734 output tokens  $0.066  25 s
+#   claude-sonnet-5-5 effort low       505 output tokens  $0.011   5 s  (91 words: over the cap)
+# Opus 5.5 always thinks (thinking cannot be switched off, and its tokens bill as output), so
+# effort is the cost lever. At low, $4 covers about 108 scripts a month.
+_ANTHROPIC_MODEL = config.get("ANTHROPIC_MODEL", "claude-opus-5-5")
+# USD per million tokens (input, output), Anthropic's list prices as of 2026-10. A model not in
+# this table is costed at the most expensive tier, so a typo can only make the guard stricter.
+_ANTHROPIC_PRICES = {
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+}
+_ANTHROPIC_PRICE_FALLBACK = (10.00, 50.00)  # Fable tier, the highest list price
+# max_tokens per effort. Thinking tokens count against it, so room grows with the effort: a fixed
+# 8,000 would cut off high-effort replies, and a cut-off reply is billed in full and thrown away.
+# medium used 2,734 output tokens when measured. Other effort values are refused, not sent.
+_CLAUDE_MAX_TOKENS = {"low": 8000, "medium": 12000, "high": 16000}
+_CLAUDE_RETRY_WAIT = 5.0
+
+
+class ClaudeUnavailable(RuntimeError):
+    """Claude was not called. `kind` says why: no-key, config, ledger or budget."""
+
+    def __init__(self, message: str, kind: str):
+        super().__init__(message)
+        self.kind = kind
+
+
+class ClaudeMisconfigured(RuntimeError):
+    """The API refused the request as configured: a bad or revoked key (401/403), an unknown
+    model (404) or a parameter it rejects (400). Every later call would fail the same way."""
+
+
+@lru_cache(maxsize=1)
+def _anthropic_client():
+    """Cached Anthropic client. Imported lazily so the module loads without the SDK.
+
+    The SDK's own retries are off: they retry a timeout too, and a timed-out request may have
+    been billed, so one reservation could cover two paid calls. `_claude_create` retries only
+    the errors that are never billed."""
+    import anthropic
+
+    return anthropic.Anthropic(api_key=config.require("ANTHROPIC_API_KEY"),
+                               timeout=_llm_timeout_ms() / 1000, max_retries=0)
+
+
+def _claude_create(**kwargs):
+    """messages.create, retried once on 429 or a 5xx (overloaded): an error status is never billed."""
+    import anthropic
+
+    try:
+        return _anthropic_client().messages.create(**kwargs)
+    except anthropic.APIStatusError as e:
+        if not (e.status_code == 429 or e.status_code >= 500):
+            raise
+        log.warning("llm: Claude answered %s; retrying once in %.0fs", e.status_code,
+                    _CLAUDE_RETRY_WAIT)
+        time.sleep(_CLAUDE_RETRY_WAIT)
+        return _anthropic_client().messages.create(**kwargs)
+
+
+def _release_reservation(db, row_id: int) -> None:
+    """Drop a reservation; if that fails it stays counted at its worst case, the safe side."""
+    try:
+        db.release_claude_spend(row_id)
+    except Exception as e:  # noqa: BLE001 — an over-count is the safe failure
+        log.warning("llm: Claude reservation %s could not be released (%s); it stays counted",
+                    row_id, e)
+
+
+def claude_budget_usd() -> float:
+    """The month's Claude budget in USD (ANTHROPIC_MONTHLY_BUDGET_USD, default 4)."""
+    try:
+        return max(0.0, float(config.get("ANTHROPIC_MONTHLY_BUDGET_USD", "4")))
+    except (TypeError, ValueError):
+        return 4.0
+
+
+def claude_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+    """What a call cost at list price. Output tokens include the thinking tokens."""
+    price_in, price_out = _ANTHROPIC_PRICES.get(model, _ANTHROPIC_PRICE_FALLBACK)
+    return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
+
+
+def generate_claude(prompt: str, *, purpose: str = "script") -> str:
+    """One Claude call, held to the monthly budget. Returns the reply's text.
+
+    Reserve, check, call, settle. The call's WORST case (the prompt at about 3 characters a
+    token, which overestimates English, and every one of max_tokens) is written to
+    `claude_spend` first, and the month's sum is read after, so it includes this reservation and
+    any other run's. Over the budget, the reservation is dropped and nothing is sent. After the
+    reply the row is settled to the real cost. A call that fails without an answer (a timeout,
+    a lost connection) keeps its worst case, because it may have been billed; one answered with
+    an error status is released, because it was not. An unusable ledger refuses the call: an
+    unknown spend is not one to add to.
+
+    Raises ClaudeUnavailable when the call was not made, ClaudeMisconfigured when the API
+    rejected the configuration, and RuntimeError (or the SDK's error) when it was made but gave
+    nothing usable: a refusal, a cut-off reply or empty text."""
+    import anthropic
+
+    from src import db
+
+    if not config.get("ANTHROPIC_API_KEY"):
+        raise ClaudeUnavailable("ANTHROPIC_API_KEY is not set", "no-key")
+    effort = (config.get("ANTHROPIC_EFFORT", "low") or "low").strip().lower()
+    max_tokens = _CLAUDE_MAX_TOKENS.get(effort)
+    if max_tokens is None:
+        raise ClaudeUnavailable(f"ANTHROPIC_EFFORT={effort!r} is not one of "
+                                f"{', '.join(_CLAUDE_MAX_TOKENS)}", "config")
+    model, budget = _ANTHROPIC_MODEL, claude_budget_usd()
+    worst = claude_cost_usd(model, len(prompt) // 3 + 1, max_tokens)
+    try:
+        row_id = db.reserve_claude_spend(model=model, purpose=purpose, cost_usd=worst)
+    except Exception as e:  # noqa: BLE001 — any ledger failure refuses the call
+        raise ClaudeUnavailable(f"the claude_spend ledger is unusable ({e})", "ledger") from e
+    try:
+        spent = db.claude_spend_this_month()
+    except Exception as e:  # noqa: BLE001
+        _release_reservation(db, row_id)
+        raise ClaudeUnavailable(f"the claude_spend ledger is unusable ({e})", "ledger") from e
+    if spent > budget:
+        _release_reservation(db, row_id)
+        raise ClaudeUnavailable(f"${spent - worst:.2f} of the ${budget:.2f} monthly budget is "
+                                f"spent and this call could cost up to ${worst:.2f}", "budget")
+
+    try:
+        resp = _claude_create(model=model, max_tokens=max_tokens,
+                              output_config={"effort": effort},
+                              messages=[{"role": "user", "content": prompt}])
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError,
+            anthropic.NotFoundError, anthropic.BadRequestError) as e:
+        _release_reservation(db, row_id)
+        raise ClaudeMisconfigured(f"{type(e).__name__}: {e}") from e
+    except anthropic.APIStatusError:
+        _release_reservation(db, row_id)
+        raise
+    except anthropic.APIConnectionError:
+        log.warning("llm: Claude call failed without an answer; its worst case of $%.2f stays "
+                    "counted", worst)
+        raise
+    usage = resp.usage
+    input_tokens = (usage.input_tokens + (usage.cache_creation_input_tokens or 0)
+                    + (usage.cache_read_input_tokens or 0))
+    cost = claude_cost_usd(model, input_tokens, usage.output_tokens)
+    try:
+        db.settle_claude_spend(row_id, input_tokens=input_tokens,
+                               output_tokens=usage.output_tokens, cost_usd=cost)
+    except Exception as e:  # noqa: BLE001 — the reply is paid for; the worst case stays counted
+        log.warning("llm: Claude reservation %s could not be settled (%s); its worst case of "
+                    "$%.2f stays counted", row_id, e, worst)
+    log.info("llm: Claude %s (%s, effort %s) cost $%.4f; $%.2f of $%.2f spent this month",
+             model, purpose, effort, cost, spent - worst + cost, budget)
+
+    if resp.stop_reason != "end_turn":
+        raise RuntimeError(f"claude stopped with {resp.stop_reason!r}, not a finished reply")
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    if not text.strip():
+        raise RuntimeError("claude returned no text")
+    return text
 
 
 def generate(prompt: str, *, json: bool = False, max_tokens: int = 1024,

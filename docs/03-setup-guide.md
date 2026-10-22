@@ -27,15 +27,33 @@ CI uses GitHub's `ubuntu-24.04` runner with Python 3.12 and apt's `ffmpeg` and `
 
 ---
 
-## 1. Claude Code (Pro) — optional, dormant
+## 1. Claude — the scriptwriter (Anthropic API, $4/month) · optional
 
-Nothing in the running system needs Claude. Ideation runs on Gemini via Vertex AI (§2b), with
-Groq picking the stories. An Anthropic Routine (`routines/ideation.md`) is optional and has never
-run in production; it would write `data/daily-ideas.json` and commit it, and must never touch
-Supabase or any secret. Update its prompt before enabling one: it predates the truth-first policy.
+Since 2026-10-22 Claude writes every reel's final script. Gemini still does the web research: its
+grounded draft is Claude's fact base, and the fact-check gate re-checks Claude's script. Claude
+cannot search, so the code also checks that every number and name in Claude's script is already
+in the draft or the idea; if not, the draft ships. Without a key, or without a grounded draft,
+the pipeline runs as it did before this section existed.
 
-ToS (rule 4): Claude runs **only** through official Claude Code / Routines. Never put
-`CLAUDE_CODE_OAUTH_TOKEN` into Python, the Agent SDK or a workflow; no code or workflow reads it.
+1. console.anthropic.com → **API keys** → create a key. Save it as `ANTHROPIC_API_KEY` in `.env`
+   and as a GitHub Actions secret of the same name.
+2. Create the `claude_spend` table (the SQL in §4). Each Claude call first reserves its worst
+   case there, the month's total is read with that reservation in it, and the call is not sent
+   if the total passes `ANTHROPIC_MONTHLY_BUDGET_USD` (default 4). The row is then settled to
+   the real cost; a call that dies without an answer stays counted at its worst case. Without
+   the table no Claude call is made, because the spend cannot be checked. A missing table, a
+   bad key or setting, or a spent month is reported to Telegram once a run.
+3. Optional, recommended: set a monthly spend limit on the key's workspace in the Console as a
+   second stop that does not depend on this code.
+
+Model and effort are `ANTHROPIC_MODEL` (default `claude-opus-5-5`) and `ANTHROPIC_EFFORT`
+(default `low`); measured costs are in `.env.example`. `ENABLE_CLAUDE_SCRIPT=false` switches it off.
+
+ToS (rule 4): the Claude **subscription** runs **only** through official Claude Code / Routines.
+Never put `CLAUDE_CODE_OAUTH_TOKEN` into Python, the Agent SDK or a workflow; no code or workflow
+reads it, and the local `.env` no longer holds it. The paid API key above is the only way code
+reaches Claude. An Anthropic Routine (`routines/ideation.md`) remains optional and has never run
+in production; update its prompt before enabling one, since it predates the truth-first policy.
 
 ---
 
@@ -208,6 +226,18 @@ create table hook_performance (            -- unused today
   avg_views numeric
 );
 
+create table claude_spend (                -- one row per Claude call; holds the monthly budget
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  model text not null,
+  purpose text not null,                   -- script
+  input_tokens int not null,
+  output_tokens int not null,              -- includes thinking tokens
+  cost_usd numeric(10, 6) not null,
+  settled boolean not null default true    -- false: a worst-case reservation for a call that
+);                                         -- died mid-flight (a timeout); it stays counted
+create index claude_spend_created_at on claude_spend (created_at);
+
 -- RLS on every table, with no policies: the publishable key gets nothing, and the
 -- server-side sb_secret_ key bypasses RLS.
 alter table ideas            enable row level security;
@@ -215,6 +245,7 @@ alter table scripts          enable row level security;
 alter table posts            enable row level security;
 alter table analytics        enable row level security;
 alter table hook_performance enable row level security;
+alter table claude_spend     enable row level security;
 
 -- A project created before 2026-09-27 adds the two newer columns with the migration
 -- `record_factcheck_verdict_and_voice` (applied to the live project):
@@ -334,10 +365,11 @@ Without a key or voice the chain moves on to edge-tts (`en-IN-PrabhatNeural`), t
 1. The live repo, `Shaan-alpha/AI-Reel-Factory`, is **public**, which gives unlimited Actions
    minutes. A private repo gets 2,000 minutes/month on the Free plan, and one run can take up to
    90 minutes.
-2. **Settings → Secrets and variables → Actions → New repository secret.** The 14 in force:
+2. **Settings → Secrets and variables → Actions → New repository secret.** The 15 in force:
    `GEMINI_API_KEY`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `TELEGRAM_BOT_TOKEN`,
    `TELEGRAM_CHAT_ID`, `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`,
-   `GOOGLE_TTS_API_KEY`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`.
+   `GOOGLE_TTS_API_KEY`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`,
+   `ANTHROPIC_API_KEY` (§1, added 2026-10-22).
    Nothing for Vertex: it is keyless (§2b). The workflows also read `GEMINI_TTS_API_KEY`,
    `FACTCHECK_API_KEY` and `GH_MODELS_KEY`; none is set or needed (on Vertex the fact-check key
    is ignored, and GitHub Models is retired).

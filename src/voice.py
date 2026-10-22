@@ -537,12 +537,28 @@ def _write_gemini_audio(audio: bytes, mime: str, out_path: str) -> float:
     return len(audio) / float(2 * channels * rate)
 
 
+# Ceiling on one whole edge-tts synthesis. A 30 s narration streams in about 2 s (measured
+# 2026-10-22); edge-tts's own timeouts are per connection and per message, not per synthesis.
+_EDGE_TIMEOUT_S = 120
+
+
 def _stream_chunks(text: str, voice: str, rate: str):
-    """Yield edge-tts stream chunks (audio + WordBoundary). Isolated for testability."""
+    """Yield edge-tts stream chunks (audio + WordBoundary). Isolated for testability.
+
+    Not `Communicate.stream_sync()`: it streams on a worker thread and waits for a sentinel that
+    is queued only on success, so any failure hung the caller forever instead of raising (still
+    true in edge-tts 7.3.1). Found 2026-10-22, when Microsoft answered 7.2.8 with a 403: the local
+    suite never finished, and a reel reaching this third voice link would have hung until the
+    job's limit without ever trying Kokoro (rule 11). Here the error reaches the caller."""
+    import asyncio
+
     import edge_tts
 
-    comm = edge_tts.Communicate(text, voice, rate=rate)
-    yield from comm.stream_sync()
+    async def _collect():
+        comm = edge_tts.Communicate(text, voice, rate=rate)
+        return [chunk async for chunk in comm.stream()]
+
+    yield from asyncio.run(asyncio.wait_for(_collect(), timeout=_EDGE_TIMEOUT_S))
 
 
 def _synthesize_edge_tts(text: str, out_path: str, voice: str, rate: str) -> float:

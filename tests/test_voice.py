@@ -200,6 +200,39 @@ def test_kokoro_pacing_disabled_is_one_shot(monkeypatch, tmp_path):
     assert dur == pytest.approx(0.1, abs=0.01)
 
 
+def test_an_edge_tts_failure_raises_instead_of_hanging(monkeypatch, tmp_path):
+    """edge-tts's Communicate.stream_sync() streams on a worker thread and waits for a sentinel
+    queued only on success, so a failure hung the caller forever (a 403 from Microsoft,
+    2026-10-22): the local suite never finished, and in production a reel that reached this
+    third voice link would have hung until the job's limit, never trying Kokoro."""
+    import threading
+
+    import edge_tts
+
+    class _Refused(edge_tts.Communicate):  # keeps the real stream_sync, to catch a regression
+        def __init__(self, *_a, **_k):
+            pass
+
+        async def stream(self):
+            raise RuntimeError("403, message='Invalid response status'")
+            yield  # noqa: unreachable — makes this an async generator, like the real one
+
+    monkeypatch.setattr(edge_tts, "Communicate", _Refused)
+    outcome = {}
+
+    def _run():
+        try:
+            voice._synthesize_edge_tts("x", str(tmp_path / "e.mp3"), "en-IN-PrabhatNeural", "+0%")
+        except Exception as e:  # noqa: BLE001
+            outcome["error"] = e
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(10)
+    assert not worker.is_alive(), "an edge-tts failure hung the caller"
+    assert "403" in str(outcome.get("error"))
+
+
 # --- live ------------------------------------------------------------------------------
 
 def test_live_kokoro(monkeypatch, tmp_path):

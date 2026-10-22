@@ -5,7 +5,8 @@ Contract:
     how to use   : import the helpers below; pass/return plain dicts (typed rows).
     depends on   : supabase-py, src.config (SUPABASE_URL, SUPABASE_KEY = sb_secret_ key).
 
-Tables (see docs/03-setup-guide.md §4): ideas, scripts, posts, analytics, hook_performance.
+Tables (see docs/03-setup-guide.md §4): ideas, scripts, posts, analytics, hook_performance,
+claude_spend (one row per Claude call, the ledger that holds the Anthropic budget).
 RLS is enabled on every table; this layer authenticates with the server-side **secret** key
 (`sb_secret_…`), which bypasses RLS. Never use the publishable key here. Never store video
 here — only rows/metadata (rule 15).
@@ -418,3 +419,44 @@ def find_post(script_id: int, platform: str) -> dict | None:
         .eq("script_id", script_id).eq("platform", platform).limit(1).execute().data
     )
     return rows[0] if rows else None
+
+
+# --- claude_spend (the Anthropic budget) ----------------------------------------------------
+
+def claude_spend_this_month() -> float:
+    """USD recorded against Claude since the start of this calendar month (UTC).
+
+    A month is a few hundred rows at most, well under PostgREST's 1,000-row page, so the sum is
+    taken here rather than in a database function."""
+    start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    rows = (get_client().table("claude_spend").select("cost_usd")
+            .gte("created_at", start.isoformat()).execute().data)
+    return sum(float(r.get("cost_usd") or 0) for r in rows)
+
+
+def reserve_claude_spend(*, model: str, purpose: str, cost_usd: float) -> int:
+    """Reserve a call's worst-case cost before it is sent; return the row id.
+
+    The row counts in the month's sum until it is settled or released, so a call that dies
+    mid-flight (a timeout, a killed job) stays counted at its worst case: it may have been
+    billed. `created_at` is stamped here, as insert_post does, rather than trusted to a column
+    default, because the month's sum filters on it."""
+    return get_client().table("claude_spend").insert({
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "model": model, "purpose": purpose, "input_tokens": 0, "output_tokens": 0,
+        "cost_usd": round(cost_usd, 6), "settled": False,
+    }).execute().data[0]["id"]
+
+
+def settle_claude_spend(row_id: int, *, input_tokens: int, output_tokens: int,
+                        cost_usd: float) -> None:
+    """Replace a reservation with what the call actually cost."""
+    get_client().table("claude_spend").update({
+        "input_tokens": input_tokens, "output_tokens": output_tokens,
+        "cost_usd": round(cost_usd, 6), "settled": True,
+    }).eq("id", row_id).execute()
+
+
+def release_claude_spend(row_id: int) -> None:
+    """Drop a reservation for a call that was never billed (refused, or answered with an error)."""
+    get_client().table("claude_spend").delete().eq("id", row_id).execute()
