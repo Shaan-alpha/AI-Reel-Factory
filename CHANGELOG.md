@@ -13,6 +13,34 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Added (2026-10-22: Claude writes the script; details: STATUS.md)
+- **Claude as the scriptwriter** (`scriptwriter`, `llm`): Gemini's grounded write becomes a
+  draft, and Claude (`claude-opus-5-5`, effort `low`, about $0.037 a script) writes the final
+  script from it without adding facts. The fact-check gate checks Claude's script as before.
+  Without Claude the grounded draft ships, so the old path is the fallback.
+- **A $4/month Anthropic budget** (`llm.generate_claude`, `db`): each call reserves its worst
+  case in a new `claude_spend` table before it is sent, the month's total is checked with that
+  reservation in it, and the row is settled to the real cost after. A call that dies without an
+  answer stays counted at its worst case. An unusable ledger refuses the call.
+- **Claude adds no facts** (`scriptwriter._added_facts`): a Claude script with a number or a
+  proper name that the grounded draft and the idea lack is dropped, and the draft ships. Claude
+  is not called without a grounded draft.
+- **Claude problems reach Telegram** (`production._report_claude`): a missing key, a bad
+  setting, an unusable ledger, a spent month or a rejected request, once a run.
+- New settings: `ANTHROPIC_API_KEY` (an Actions secret), `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT`,
+  `ANTHROPIC_MONTHLY_BUDGET_USD`, `ENABLE_CLAUDE_SCRIPT`. Dependency: `anthropic==1.12.1`.
+
+### Fixed (2026-10-22)
+- **edge-tts hung instead of failing** (`voice`): `Communicate.stream_sync()` waits forever
+  when its stream raises, so a reel reaching the third voice link could hang until the job's
+  limit without trying Kokoro, and the local test suite never finished. The stream now runs
+  under our own 120 s ceiling and its error surfaces. `edge-tts==7.3.1`: Microsoft answered
+  7.2.8 with a 403.
+
+### Removed (2026-10-22)
+- `CLAUDE_CODE_OAUTH_TOKEN` from `.env.example` (and the operator's local `.env`). Code reaches
+  Claude only through the paid API key (rule 4).
+
 ### Fixed (2026-10-09 audit, production down since 2026-10-01; details: STATUS.md)
 - **Every reel failed at the caption step** (`subtitles`): CI resolved PyAV 19, an unpinned
   dependency of faster-whisper, and faster-whisper 1.2.1's `av.open(..., metadata_errors=...)`

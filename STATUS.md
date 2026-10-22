@@ -7,11 +7,11 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups and the 2026-10-09 audit (CHANGELOG `[Unreleased]`) · CI **689 pass, 5 skipped** (run 37886269322; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**Last updated:** 2026-10-09 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
+**Last updated:** 2026-10-22 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
   ↳ ⚠️ **both Developer-API TTS models shut down 2026-11-17** (replacements `gemini-3.8-flash-tts` / `-lite-tts`): operator ear test needed first
-**Models:** Vertex: text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` → `3.5-flash` · fact-check `gemini-3.5-flash` → `3.5-flash-lite` · ideation research `gemini-3.5-flash-lite` → `3.5-flash` (prose). Groq `openai/gpt-oss-120b` picks stories and is the text failover. Nothing on Vertex uses `gemini-2.5-flash`, which Vertex retires 2026-10-20
+**Models:** script writer **`claude-opus-5-5`** (Anthropic API, effort low, $4/month cap, since 2026-10-22) · Vertex: text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` → `3.5-flash` · fact-check `gemini-3.5-flash` → `3.5-flash-lite` · ideation research `gemini-3.5-flash-lite` → `3.5-flash` (prose). Groq `openai/gpt-oss-120b` picks stories and is the text failover. Nothing on Vertex uses `gemini-2.5-flash`, which Vertex retires 2026-10-20
 **Trigger:** **on demand only** (`/makeshort` or the workflow button); the scheduled digests were removed 2026-09-29 (operator); nothing is produced without a tap
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
 **Brand:** But It Matters · YouTube handle **@butitmatters** · Telegram bot **@ai_reel_factory_bot**
@@ -25,10 +25,11 @@
 | Production | ✅ Live, **on demand only**: about 81 public Shorts on **@butitmatters**, about 0.7 a day against the 4–5 goal. Down 2026-10-01 → 10-09 (PyAV 19), back since |
 | Pipeline code ([src/](src/)) | ✅ Every module implemented and tested (table below); CI **689 pass, 5 skipped** |
 | Design / docs | ✅ 8 docs in [docs/](docs/) · rules in [CLAUDE.md](CLAUDE.md) |
-| GitHub Actions | `make-short` (the pipeline), `production` (manual-only), `tests` (push, PR, daily), `analytics` (daily), `verify-tts` / `verify-vertex` (manual); all on `ubuntu-24.04`, Python 3.12. 14 secrets, Pixabay included (`CLAUDE_CODE_OAUTH_TOKEN` deliberately absent, rule 4). Repo variables: `FACTCHECK_STRICT=true`, `VISUAL_SOURCE=ai`, `YOUTUBE_PRIVACY=public`, `GOOGLE_TTS_VOICE` |
+| GitHub Actions | `make-short` (the pipeline), `production` (manual-only), `tests` (push, PR, daily), `analytics` (daily), `verify-tts` / `verify-vertex` (manual); all on `ubuntu-24.04`, Python 3.12. 15 secrets, Pixabay and `ANTHROPIC_API_KEY` (2026-10-22) included (`CLAUDE_CODE_OAUTH_TOKEN` deliberately absent, rule 4). Repo variables: `FACTCHECK_STRICT=true`, `VISUAL_SOURCE=ai`, `YOUTUBE_PRIVACY=public`, `GOOGLE_TTS_VOICE` |
 | Telegram bot ([telegram-bot/](telegram-bot/)) | ✅ Vercel project `telegram-bot`, team `shaan-alphas-projects`, account **shaan-alpha** (the operator has two Vercel accounts; deploy from this one). CLI-deployed, not git-connected: every bot change needs `vercel deploy --prod` from `telegram-bot/`. Last deploy 2026-10-09 |
 | Google Cloud `but-it-matters-tts` (billed) | Vertex AI (keyless: Workload Identity Federation in CI, ADC locally) + Cloud Text-to-Speech (Chirp). ₹450/month budget with 50/90/100% alerts (alerts only, not a hard stop) |
-| Supabase (free) | ✅ `ideas` · `scripts` · `posts` · `analytics` (+ `hook_performance`, unused); RLS on; server-side `sb_secret_` key |
+| Supabase (free) | ✅ `ideas` · `scripts` · `posts` · `analytics` · `claude_spend` (the Anthropic budget ledger, 2026-10-22) (+ `hook_performance`, unused); RLS on; server-side `sb_secret_` key |
+| Anthropic API (billed) | Claude writes the final script; $4/month cap enforced in code by `claude_spend`. No Console spend limit set yet |
 | YouTube | ✅ **@butitmatters**, titled **But It Matters**. Token scopes `youtube.upload` + `youtube.readonly`; `yt-analytics.readonly` needs a re-auth |
 | Script templates | Template N is the only one wired (embedded in `scriptwriter.py`); D, A, C are written but unused |
 | Claude Routine ([routines/ideation.md](routines/ideation.md)) | Optional and **dormant**: it has never run in production, and `data/daily-ideas.json` is empty |
@@ -42,7 +43,7 @@ Numbers are the modules' own (docs/01 §5 and the module docstrings); rows follo
 |---|--------|--------|
 | 1 | Ideation (`ideation_fallback.py`, `news.py`, `trends.py`) | ✅ The live engine (the file name predates it): Google News RSS (India front page + World, Business, Technology, Science; 24 stories) and Google Trends (IN) → Groq picks N distinct stories → Gemini researches them in prose with grounded search on Vertex (`IDEATION_MODEL`), each idea keeping its own story's citations → JSON ideas on `gemini-3.8-flash` (Groq failover). ≥ 2 live source links per idea (`MIN_SOURCES`), Google News search top-up, 10-day story dedup. A Claude Routine file would be read first; it is empty |
 | 2 | Approval (`approval.py` + the Vercel bot) | ✅ Digest with ✅ Approve / ⏭️ Pass / ❌ Reject; the bot writes each tap to Supabase (webhook mode); at most 3 approvals a run (`APPROVAL_CAP`); deaths and serious harm flagged "Sensitive" |
-| 3 | Scriptwriter (`scriptwriter.py`) | ✅ Template N on `gemini-3.8-flash` (Groq failover), grounded write on `gemini-3.5-flash-lite` → `3.5-flash`; a why-it-matters take; ≤ 80 words (LLM tighten pass, then a whole-sentence cut); hook punch-up except on somber stories; titles ≤ 70 chars; key-point cards; somber tone for deaths and serious harm |
+| 3 | Scriptwriter (`scriptwriter.py`) | ✅ Template N: a grounded Gemini draft (`gemini-3.5-flash-lite` → `3.5-flash`), then **Claude** (`claude-opus-5-5`, effort low, ~$0.037) writes the final script from it, capped at $4/month by the `claude_spend` ledger (since 2026-10-22); without Claude the draft ships; ungrounded `gemini-3.8-flash` (Groq failover) last; a why-it-matters take; ≤ 80 words (LLM tighten pass, then a whole-sentence cut); hook punch-up except on somber stories; titles ≤ 70 chars; key-point cards; somber tone for deaths and serious harm |
 | 11 | Fact-check gate (`factcheck.py`) | ✅ Every script, before voicing: `gemini-3.5-flash` → `3.5-flash-lite` on Vertex, grounded; 2 samples (either can block); blocks fabrication, waives imprecision (`FACTCHECK_SEVERITY=critical`); one repair pass; strict mode holds the reel if the checker cannot run. A blocked idea gets status `blocked` |
 | 4 | Voice (`voice.py`) | ✅ Gemini TTS `gemini-3.1-flash-tts-preview`, voice Zubenelgenubi, labelled style prompt. Same voice: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA; then Chirp 3 HD `en-IN-Chirp3-HD-Zubenelgenubi` → edge-tts `en-IN-PrabhatNeural` → Kokoro `am_michael` (one male narrator throughout). Telegram alert when a reel leaves the channel voice; `posts.voice` records the engine |
 | 5 | Visuals (`visuals.py`) | ✅ `VISUAL_SOURCE=ai`: Cloudflare FLUX.2 klein (768×1344, per-shot seeds, 4 shots at a time) → FLUX.1 schnell → a Pexels photo, each with Ken Burns motion; stock video (Pexels → Pixabay) if the image path fails. Stock is under the Pexels/Pixabay licences, not CC0 |
@@ -123,6 +124,70 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 ---
 
 ## Log
+
+### 2026-10-22 — Claude writes every script (Anthropic API, $4/month cap)
+
+Operator: remove the Claude OAuth token, use an Anthropic API key, and have Claude work on every
+reel with at most $4 a month of Anthropic spend.
+
+**Done**
+- `CLAUDE_CODE_OAUTH_TOKEN` is gone from the local `.env`; `ANTHROPIC_API_KEY` replaces it (the
+  key starts `sk-ant-usr`, an unfamiliar prefix, and the API accepts it: `models.list` and real
+  calls work). The old token stays valid until revoked from the operator's Claude account.
+- **Flow** (`scriptwriter._generate_script_json`): Gemini's grounded write is now a draft. Claude
+  rewrites it into the final script with the draft as its only fact base ("add no facts"), and
+  the fact-check gate then checks Claude's script as before. Fallbacks: no Claude → the grounded
+  draft ships; no draft → Claude writes from the idea alone; neither → ungrounded Gemini → Groq.
+  The hook punch-up, the tighten pass and the gate are unchanged.
+- **Budget** (`llm.generate_claude`): a new Supabase table, `claude_spend` (created on the live
+  project through the Supabase CLI; SQL in docs/03 §4). Reserve, check, call, settle: the call's
+  worst case (max_tokens 8k/12k/16k by effort) is inserted first, the month's sum is read with it
+  included, and over `ANTHROPIC_MONTHLY_BUDGET_USD` (4) the reservation is dropped and nothing is
+  sent. After the reply the row is settled to the real cost. A timeout or lost connection keeps
+  the worst case (it may have been billed); an error status releases it (it was not). The SDK's
+  retries are off, since they retried timeouts; 429/5xx get one retry of our own. An unusable
+  ledger refuses the call. Prices are a table in `llm.py`; an unknown model is costed at the top
+  tier. Server-side refusal fallbacks are deliberately off: a refusal falls back to the grounded
+  draft, and another model's price would escape the guard.
+- **Audit** (code-review skill, then each finding checked, test first): Claude could add a fact
+  from memory that the gate waives as "couldn't confirm", so `scriptwriter._added_facts` now drops
+  a Claude script with any number (digits or spelled) or proper name absent from the draft and the
+  idea, and the draft ships; tested on Claude's three real rewrites, which pass. No grounded
+  draft, no Claude call. Repeating Claude problems (no key, bad `ANTHROPIC_EFFORT`, unusable
+  ledger, spent month, a 401/403/400/404) reach Telegram once a run (`production._report_claude`)
+  instead of being logged and forgotten; `write_script` returns `writer` and `claude_issue`.
+  Not changed: the model is read at import, as Gemini's and Groq's are; the concurrency finding
+  is covered by the reservation (both workflows already share the `reel-pipeline` group).
+- **edge-tts hang, pre-existing** (systematic debugging): the full local suite never finished.
+  `test_live_edge_tts` hung because Microsoft answers edge-tts 7.2.8 with a 403, and edge-tts's
+  `stream_sync()` waits forever when its stream raises (still so in 7.3.1). In production that
+  would hang a reel reaching the third voice link until the job's limit, never trying Kokoro.
+  `voice._stream_chunks` now runs the stream itself with a 120 s ceiling so the error surfaces;
+  `edge-tts==7.3.1` (2026-10-13) synthesizes again (measured: 30 audio chunks in 1.5 s).
+  **The daily `tests` workflow has been dead since 2026-10-14**: all 8 scheduled runs were
+  cancelled at the job's 25-minute limit, the log going silent after the 82% mark, where
+  `test_live_edge_tts` sits. No `make-short` run since 2026-10-13, so production never hit it.
+- **Tests:** locally **739 pass, 5 skipped** (the 5 opt-in live tests) in 102 s; 50 new across
+  `tests/test_claude.py`, `test_production.py` and `test_voice.py`. CI has not run this code.
+- **Measured** on the real Template N prompt (~2,870 input tokens): Opus 5.5 at low effort
+  $0.037 (14 s), at medium $0.066 (25 s); Sonnet 5.5 at low $0.011 (5 s, but 91 words, over the
+  80-word cap). Default: `claude-opus-5-5`, effort `low`, so $4 is about 108 scripts a month
+  against today's ~21. The live end-to-end call through the new code cost $0.032 and was written
+  to the ledger, and a live run of `scriptwriter._claude_write` after the audit fixes ($0.032)
+  reserved, settled and passed the fact check. Spend so far: $0.177 (five rows, ids 1-5).
+- `anthropic==1.12.1` pinned (2.0.0 shipped the day before; 1.12.1 is two weeks old). The
+  `ANTHROPIC_API_KEY` Actions secret is set (15 secrets); both workflows pass it plus
+  `ANTHROPIC_MODEL` / `ANTHROPIC_EFFORT` / `ANTHROPIC_MONTHLY_BUDGET_USD` / `ENABLE_CLAUDE_SCRIPT`
+  (repo variables, all optional). conftest blocks the Anthropic client in unit tests.
+- Docs: CLAUDE.md rules 2, 4, 11, 13; docs/03 §1 and §4; docs/04; `.env.example`.
+
+**Not done / open**
+- CI had not run this code when it was merged (operator: commit, push and merge). The first
+  `tests` run after the merge is the proof; it should end the 25-minute timeouts.
+- Cost caps, decided by the operator the same day: **separate**. Google keeps ≤ $5/month and
+  Claude has its own ≤ $4/month, so metered spend can reach about $9 (CLAUDE.md rule 2).
+- No Console spend limit is set on the Anthropic workspace; docs/03 §1 recommends one as a
+  second stop that does not depend on this code.
 
 ### 2026-10-09 — Production down since 10-01, a full audit, and the 10-20 / 11-17 deprecations
 

@@ -11,7 +11,7 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 
 - **Channel:** *But It Matters* — daily impact news/info explainers (India + world), truth-first: verdicts allowed when the facts carry them (rule 6).
 - **Primary goal:** Reliably ship 4–5 captioned Shorts/day. **Consistency beats sophistication.**
-- **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2).
+- **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2). The Anthropic API has its own, **separate ≤ $4/month** for Claude's scripts (operator, 2026-10-22), enforced in code, so metered spend can reach about $9 a month in all.
 
 ## Onboarding (do this before working)
 
@@ -47,19 +47,23 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
    billed per token, with Gemini 3 grounding free up to 5,000 queries/month; the Lyria 2 music
    beds were a one-off $0.66) and **Cloud Text-to-Speech** (Chirp 3 HD, a later voice
    fallback). A ₹450/month budget with 50/90/100% alerts watches the billing account; it
-   alerts, it does not stop spending. Any **new** billed service, or any spend that could
-   exceed $5/month, is **stop-and-flag** — never sign up silently. (Rule 4's Claude-ToS
-   boundary still holds absolutely.)
+   alerts, it does not stop spending. The **Anthropic API** (Claude writes each reel's final
+   script; operator, 2026-10-22) has its own cap of **$4/month**, separate from the $5 above
+   (operator's choice, 2026-10-22) and enforced in code: the `claude_spend` ledger refuses any
+   call whose worst case would pass it (`ANTHROPIC_MONTHLY_BUDGET_USD`). Any **new** billed
+   service, or any spend that could exceed either cap, is **stop-and-flag** — never sign up
+   silently. (Rule 4's Claude-ToS boundary still holds absolutely.)
 3. **Never self-attribute.** No `Co-Authored-By`, no "Generated with Claude Code," no AI
    credit anywhere — commits, PRs, code comments, or docs. *(This overrides default git
    behavior. Applies to this repo.)*
 
 ### B. Non-negotiable guardrails
 
-4. **ToS boundary.** Claude ideation runs **only** via official Claude Code / Anthropic
-   Routines. **Never** pipe `CLAUDE_CODE_OAUTH_TOKEN` into custom Python or the Agent SDK —
-   that is a Terms-of-Service violation. The pipeline's own ideation (the live path) uses
-   Gemini on Vertex AI and Groq, never Claude.
+4. **ToS boundary.** The Claude **subscription** runs **only** via official Claude Code /
+   Anthropic Routines. **Never** pipe `CLAUDE_CODE_OAUTH_TOKEN` into custom Python or the Agent
+   SDK — that is a Terms-of-Service violation. Pipeline code reaches Claude only through the
+   paid Anthropic API with `ANTHROPIC_API_KEY` (the scriptwriter, since 2026-10-22), which the
+   API's terms allow. Ideation uses Gemini on Vertex AI and Groq.
 5. **Secrets hygiene.** Never commit real keys. Only `.env.example` (blank values) is
    committed. Real values live in a local `.env` (gitignored), GitHub Actions secrets, and the
    bot's Vercel environment variables. Vertex AI uses no stored key (Workload Identity
@@ -108,7 +112,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 11. **Fallbacks are mandatory — the digest never dies.** Every external dependency has a
     fallback chain: ideation **Gemini on Vertex (grounded) → Groq**, with the free Google News
     RSS search topping up sources (a Claude Routine may feed ideas first, but it is optional and
-    dormant); scripts **Gemini → Groq**; voice **Gemini TTS (one voice: Developer API → Vertex)
+    dormant); scripts **Claude (writing from Gemini's grounded draft) → that grounded draft →
+    ungrounded Gemini → Groq**; voice **Gemini TTS (one voice: Developer API → Vertex)
     → Chirp 3 HD → edge-tts → Kokoro**; visuals **FLUX.2 klein → FLUX.1 schnell (Cloudflare
     Workers AI) → Pexels photos → Pexels/Pixabay video**. A single upstream failure must never
     kill a run.
@@ -119,7 +124,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
     Developer API's small free per-model daily quota (in production it serves only the
     Developer-API TTS links, and a 429 there moves the reel to Vertex); on Vertex every token
     is billed and Gemini 3 grounding is free up to 5,000 queries/month; Groq per-model limits;
-    Cloudflare Workers AI 10,000 neurons/day; Supabase 500 MB DB. Log usage; alert via
+    Claude $4/month (every call is logged to `claude_spend`; about $0.037 a script on Opus 5.5
+    at low effort); Cloudflare Workers AI 10,000 neurons/day; Supabase 500 MB DB. Log usage; alert via
     Telegram on a hard failure.
 14. **Fail loud on misconfig, soft on runtime.** A missing required secret/env var = hard stop
     with a clear message (`config.py` fails loudly). One reel failing inside a run's batch =
