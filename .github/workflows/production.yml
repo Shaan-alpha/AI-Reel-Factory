@@ -26,6 +26,11 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # The pipeline's time-limit guard counts down from here (src/production.py). Python starts
+      # only after checkout, apt and pip, and on 2026-10-22 apt alone took 16+ minutes.
+      - name: Note when the job started
+        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
 
       # Keyless auth to Google Cloud. This org's policy blocks BOTH API keys and service-account
