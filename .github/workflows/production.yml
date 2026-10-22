@@ -77,6 +77,13 @@ jobs:
           GCP_PROJECT: ${{ vars.GCP_PROJECT || 'but-it-matters-tts' }}
           GCP_LOCATION: ${{ vars.GCP_LOCATION || 'global' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # Claude writes the final script from Gemini's grounded draft (paid API). No key, a spent
+          # month or ENABLE_CLAUDE_SCRIPT=false -> the grounded draft ships, as before 2026-10-22.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          ANTHROPIC_EFFORT: ${{ vars.ANTHROPIC_EFFORT || 'low' }}                  # low ~$0.037 a script, medium ~$0.066
+          ANTHROPIC_MONTHLY_BUDGET_USD: ${{ vars.ANTHROPIC_MONTHLY_BUDGET_USD || '4' }} # held by the claude_spend ledger
+          ENABLE_CLAUDE_SCRIPT: ${{ vars.ENABLE_CLAUDE_SCRIPT }}                    # empty = on
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
