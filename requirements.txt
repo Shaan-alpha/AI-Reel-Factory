@@ -13,7 +13,8 @@ supabase==2.31.0               # Supabase Postgres client
 
 # Voice (Module 4)
 kokoro-onnx==0.5.0             # primary humanized TTS (Apache-2.0, CPU/ONNX; int8 model auto-downloads)
-edge-tts==7.2.8               # narration fallback (free, no key)
+edge-tts==7.3.1               # narration fallback (free, no key). 7.2.8 got a 403 from
+                              # Microsoft by 2026-10-22; 7.3.1 (2026-10-13) synthesizes
 # NOTE: Kokoro needs espeak-ng on Linux for phonemization — install it in CI (apt-get).
 
 # Video (Modules 5, 6, 7)
