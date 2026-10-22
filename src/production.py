@@ -58,8 +58,10 @@ class FactCheckUnavailable(RuntimeError):
 # The job's hard kill (timeout-minutes) is invisible to Python, and a kill skips every except
 # block: an idea mid-chain stays 'approved', and one killed between the upload and insert_post
 # is invisible to both idempotency guards, so a rerun would publish it twice. The workflow
-# passes its timeout as JOB_TIMEOUT_MINUTES. The clock starts when this module is imported, a
-# few minutes after the job itself (checkout, pip, FFmpeg): JOB_SETUP_MINUTES covers that.
+# passes its timeout as JOB_TIMEOUT_MINUTES and, from its first step, the job's start as
+# JOB_STARTED_AT (epoch seconds). Setup is not a fixed few minutes: a crawling Ubuntu mirror held
+# apt for 16+ minutes on 2026-10-22. Without JOB_STARTED_AT the clock starts when this module is
+# imported and JOB_SETUP_MINUTES stands in for the setup.
 _STARTED = time.monotonic()
 
 
@@ -67,11 +69,14 @@ def _seconds_left() -> float | None:
     """Seconds before the job is killed, or None when no timeout is configured (a local run)."""
     try:
         total = float(config.get("JOB_TIMEOUT_MINUTES", "0") or 0)
+        started_at = float(config.get("JOB_STARTED_AT", "0") or 0)
         setup = float(config.get("JOB_SETUP_MINUTES", "5") or 0)
     except (TypeError, ValueError):
         return None
     if total <= 0:
         return None
+    if started_at > 0:
+        return total * 60 - (time.time() - started_at)
     return (total - setup) * 60 - (time.monotonic() - _STARTED)
 
 

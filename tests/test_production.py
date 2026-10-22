@@ -804,6 +804,19 @@ def test_the_time_left_counts_down_from_the_job_limit(monkeypatch):
     assert 74 * 60 < left <= 75 * 60, left  # 90 - 5 setup - 10 already spent
 
 
+def test_the_time_left_counts_from_the_job_start_when_the_workflow_records_it(monkeypatch):
+    # 2026-10-22: a crawling Ubuntu mirror held apt for 16+ minutes. Python started that late,
+    # so a fixed 5-minute setup allowance would have overstated the time left by 11+ minutes.
+    started = production.time.time() - 30 * 60  # job began 30 min ago
+    monkeypatch.setattr(production.config, "get",
+                        lambda k, d=None: {"JOB_TIMEOUT_MINUTES": "90",
+                                           "JOB_STARTED_AT": str(int(started)),
+                                           "JOB_SETUP_MINUTES": "5"}.get(k, d))
+    monkeypatch.setattr(production, "_STARTED", production.time.monotonic())  # Python just began
+    left = production._seconds_left()
+    assert 59 * 60 < left <= 60 * 60 + 1, left  # 90 - 30 spent, whatever setup took
+
+
 def test_a_reel_that_cannot_finish_in_time_is_not_started(monkeypatch):
     monkeypatch.setattr(production.db, "get_approved_ideas",
                         lambda: [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}])

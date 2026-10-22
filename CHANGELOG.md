@@ -36,6 +36,13 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
   limit without trying Kokoro, and the local test suite never finished. The stream now runs
   under our own 120 s ceiling and its error surfaces. `edge-tts==7.3.1`: Microsoft answered
   7.2.8 with a 403.
+- **A slow apt mirror stalled the run before Python** (`make-short`, `production`, `tests`
+  workflows): the FFmpeg + espeak-ng .debs (99 MB) now come from an Actions cache, so the
+  Ubuntu mirror serves only the index and whatever changed. On 2026-10-22 the mirror ran at
+  ~60 KB/s and 16 minutes passed with no digest.
+- **The time-limit guard trusted a fixed 5-minute setup** (`production._seconds_left`): the
+  workflow now records `JOB_STARTED_AT` in its first step and the guard counts from it, so a
+  long setup can no longer lead it to start a reel the job's kill would cut off.
 
 ### Removed (2026-10-22)
 - `CLAUDE_CODE_OAUTH_TOKEN` from `.env.example` (and the operator's local `.env`). Code reaches
