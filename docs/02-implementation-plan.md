@@ -6,7 +6,7 @@
 > [03-setup-guide.md](03-setup-guide.md) and `.env.example`, not this checklist.
 
 Every module below is built, tested and publishing captioned Shorts to
-**[@butitmatters](https://youtube.com/@butitmatters)**. The build departed from this plan in
+**[@butitmatters](https://www.youtube.com/channel/UC5rDIoOPYLrHaf2IQ5hRlRw)**. The build departed from this plan in
 these ways (checked against the code 2026-10-09):
 
 - **On demand, not cron.** A run starts from `/makeshort` in the Telegram bot or the

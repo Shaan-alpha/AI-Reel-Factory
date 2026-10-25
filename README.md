@@ -1,7 +1,7 @@
 # 🎬 AI Reel Factory: **But It Matters**
 
 **Channel:** *But It Matters*, daily impact news/info explainers (India + world).
-**Live:** publishing captioned Shorts to **[@butitmatters](https://youtube.com/@butitmatters)**.
+**Live:** publishing captioned Shorts to **[@butitmatters](https://www.youtube.com/channel/UC5rDIoOPYLrHaf2IQ5hRlRw)**.
 
 A near-zero-cost autonomous system that researches the news, writes scripts, fact-checks them,
 narrates in a near-human voice, generates story-specific visuals, edits a polished captioned
@@ -10,6 +10,10 @@ with `/makeshort`, then approve the ideas worth making from the digest (up to 3 
 
 > **Primary goal:** Reliably publish **4–5 automated, captioned YouTube Shorts per day.**
 > Consistency beats sophistication. Don't chase perfection early.
+
+<p align="center">
+  <img src="docs/screenshots/channel-shorts.webp" alt="The But It Matters channel on YouTube: a row of recent Shorts made by the pipeline, each with AI-generated B-roll and burned-in captions" width="900">
+</p>
 
 ---
 
