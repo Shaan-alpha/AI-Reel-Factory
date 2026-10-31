@@ -1,14 +1,14 @@
 # 🎬 AI Reel Factory: **But It Matters**
 
-**Channel:** *But It Matters*, daily impact news/info explainers (India + world).
+**Channel:** *But It Matters*, impact news/info explainers (India + world).
 **Live:** publishing captioned Shorts to **[@butitmatters](https://www.youtube.com/channel/UC5rDIoOPYLrHaf2IQ5hRlRw)**.
 
-A near-zero-cost autonomous system that researches the news, writes scripts, fact-checks them,
+A low-cost, on-demand system that researches the news, writes scripts, fact-checks them,
 narrates in a near-human voice, generates story-specific visuals, edits a polished captioned
 vertical video, and publishes faceless Shorts. The human part happens in Telegram: start a run
 with `/makeshort`, then approve the ideas worth making from the digest (up to 3 a run).
 
-> **Primary goal:** Reliably publish **4–5 automated, captioned YouTube Shorts per day.**
+> **Primary goal:** Reliably turn every approved idea into a **fact-checked, captioned YouTube Short.**
 > Consistency beats sophistication. Don't chase perfection early.
 
 <p align="center">
@@ -46,7 +46,7 @@ with `/makeshort`, then approve the ideas worth making from the digest (up to 3 
 | **Ideation** | Google News + Google Trends RSS → **Groq** picks distinct stories → **Gemini on Vertex AI** researches them with grounded search → ideas with ≥ 2 source links. A Claude Routine (`routines/ideation.md`) is optional and dormant | Vertex: per token |
 | Database/state | Supabase Postgres | Free |
 | Approval UI | Telegram digest: ✅ Approve / ⏭️ Pass / ❌ Reject (up to 3 a run) | Free |
-| Scripts | `gemini-3.8-flash` on Vertex (grounded write on `gemini-3.5-flash-lite` → `3.5-flash`); Groq `openai/gpt-oss-120b` failover | Vertex: per token |
+| Scripts | `gemini-3.8-flash` on Vertex writes a grounded draft (grounded write on `gemini-3.5-flash-lite` → `3.5-flash`); **Claude** rewrites it into the final script with the draft as its only fact base (a script that adds a number or name is dropped and the draft ships); Groq `openai/gpt-oss-120b` failover | Vertex: per token; Anthropic API: ≤ $4/month cap |
 | **Fact-check gate** | `gemini-3.5-flash` → `3.5-flash-lite` on Vertex, grounded: 2 samples, blocks fabrication, one repair pass | Vertex: per token |
 | **Narration** | **Gemini TTS** `gemini-3.1-flash-tts-preview`, Zubenelgenubi (Developer API, then the same voice on Vertex) → Chirp 3 HD → edge-tts (en-IN) → Kokoro | Developer API free; Vertex + Chirp billed |
 | **Visuals** | **AI B-roll: Cloudflare Workers AI FLUX.2 klein → FLUX.1 schnell + Ken Burns** → Pexels photos → Pexels/Pixabay stock video | Free |
@@ -58,7 +58,8 @@ with `/makeshort`, then approve the ideas worth making from the digest (up to 3 
 Vertex AI (Gemini text, grounding, the fact-check gate, the same-voice TTS fallback) and Cloud
 Text-to-Speech (Chirp), both on Google Cloud project `but-it-matters-tts`, watched by a
 ₹450/month budget with 50/90/100% alerts. Spend so far fits the cap; everything else runs on
-free tiers.
+free tiers. Claude's scripts (since 2026-10-22) are billed on the Anthropic API under their own,
+separate **≤ $4/month** cap, enforced in code, so metered spend can reach about $9 a month in all.
 
 ---
 
