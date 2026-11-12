@@ -181,7 +181,7 @@ def test_footer_is_idempotent(monkeypatch):
     monkeypatch.delenv("ENABLE_DESC_FOOTER", raising=False)
     once = production._with_footer("body text")
     twice = production._with_footer(once)            # re-applying must not double the footer
-    assert once == twice and twice.count("#ButItMatters") == 1
+    assert once == twice and twice.count(production._DEFAULT_FOOTER) == 1
 
 
 def test_footer_env_override(monkeypatch):
@@ -240,18 +240,18 @@ def test_ensure_ideas_noop_when_queue_has_work(monkeypatch):
     assert production.ensure_ideas_and_digest() == 0
 
 
-def test_build_metadata_prefers_seo_title_and_merges_tags():
+def test_build_metadata_prefers_seo_title_and_keeps_hashtags_out_of_tags():
     idea = {"title": "fallback title"}
     script = {"title": "SEO Title", "caption": "desc",
               "hashtags": ["#ISRO", "#Shorts"], "tags": ["isro", "space mission", "rocket"]}
     meta = production._build_metadata(idea, script, include_channel_tags=False)
     assert meta["title"] == "SEO Title"
-    # hashtags(#-stripped) + tags, case-insensitively de-duped, order preserved
-    assert meta["tags"] == ["ISRO", "Shorts", "space mission", "rocket"]
+    # the writer's tags only, order preserved; hashtags go on the description's last line
+    assert meta["tags"] == ["isro", "space mission", "rocket"]
 
-    # With channel tags included
+    # With channel tags included: the brand only
     meta_full = production._build_metadata(idea, script, include_channel_tags=True)
-    assert "But It Matters" in meta_full["tags"]
+    assert meta_full["tags"] == ["isro", "space mission", "rocket", "But It Matters"]
 
 
 def test_build_metadata_falls_back_to_idea_title():
@@ -776,17 +776,18 @@ def test_the_cron_path_does_not_poll_telegram_in_webhook_mode(monkeypatch):
     production.run()
 
 
-def test_the_india_tag_only_goes_on_india_stories():
-    """It was on every upload, the US-only White House story included."""
+def test_no_fixed_channel_tag_but_the_brand():
+    """Design 9.9: 'News Shorts', 'Trending News' and the India tag are gone."""
     script = {"title": "T", "caption": "c", "hashtags": [], "tags": []}
     us = production._build_metadata({"title": "Networks boycott White House coverage"}, script)
     india = production._build_metadata({"title": "Rupee hits a record low against the dollar"},
                                         script)
-    assert "India News Explainer" not in us["tags"] and "India News Explainer" in india["tags"]
+    assert us["tags"] == india["tags"] == ["But It Matters"]
 
 
-def test_the_footer_matches_the_real_length():
-    assert "in 30 seconds" in production._DEFAULT_FOOTER
+def test_the_footer_names_the_channel():
+    assert "But It Matters" in production._DEFAULT_FOOTER
+    assert "@butitmatters" in production._DEFAULT_FOOTER
 
 
 def test_the_on_screen_source_is_a_publisher_not_the_aggregator():
@@ -1009,3 +1010,37 @@ def test_the_grounding_is_stored_next_to_the_verdict(monkeypatch, tmp_path):
     monkeypatch.setattr(production.db, "set_script_grounding", lambda sid, g: stored.append((sid, g)))
     production.produce_one(IDEA, str(tmp_path))
     assert stored == [(SCRIPT["script_id"], {"draft_citations": 3, "gate_citations": [5, 4]})]
+
+
+# --- stage 1b: hashtags, tags, footer, category (design 9.9) --------------------------------
+
+def test_hashtags_are_three_at_most_on_the_last_line():
+    script = {"title": "T", "caption": "Line one.\nLine two.",
+              "hashtags": ["#ISRO", "#Shorts", "#viral", "#Gaganyaan", "#Space"],
+              "tags": ["isro launch"]}
+    meta = production._build_metadata({"title": "ISRO launch", "niche": "space"}, script)
+    assert meta["description"].endswith("\n\n#ISRO #Gaganyaan #ButItMatters")
+    assert meta["tags"] == ["isro launch", "But It Matters"]
+    assert production._hashtag_line(["#Space-X", "#fyp", "#ButItMatters", "#Mars"]) == \
+        "#Mars #ButItMatters"
+
+
+def test_tags_are_six_from_the_writer_plus_the_brand():
+    tags = ["ISRO", "Gaganyaan", "इसरो", "isro rocket", "reusable rocket", "space India",
+            "launch cost", "Sriharikota"]
+    script = {"title": "T", "caption": "c", "hashtags": [], "tags": tags}
+    meta = production._build_metadata({"title": "Rupee hits a record low"}, script)
+    assert meta["tags"] == tags[:6] + ["But It Matters"]
+
+
+def test_the_footer_makes_no_every_day_claim():
+    assert "every day" not in production._DEFAULT_FOOTER.lower()
+    assert "#" not in production._DEFAULT_FOOTER and "\n" not in production._DEFAULT_FOOTER
+
+
+def test_the_category_follows_the_story():
+    script = {"title": "T", "caption": "c", "hashtags": [], "tags": []}
+    for niche, category in (("tech", "28"), ("science", "28"), ("space", "28"),
+                            ("india-politics", "25"), ("money", "25"), (None, "25")):
+        meta = production._build_metadata({"title": "T", "niche": niche}, script)
+        assert meta["category_id"] == category, niche

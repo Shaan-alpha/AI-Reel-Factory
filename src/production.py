@@ -109,17 +109,12 @@ def _source_domain(sources: list[str] | None) -> str | None:
 
 _PLATFORM = "youtube"
 
-# Brand footer appended to every Short's description (branding + CTA + 3 brand hashtags).
-# Complements — never duplicates — the scriptwriter's caption (hook, sources, AI disclosure) and
-# publish's #Shorts. Kept to 3 hashtags so the total stays under YouTube's 15-hashtag cap.
-# Override the whole block via the DESCRIPTION_FOOTER env var; disable via ENABLE_DESC_FOOTER=false.
-_DEFAULT_FOOTER = (
-    "—\n"
-    "📌 But It Matters — the news that actually matters, in 30 seconds.\n"
-    "🔔 New explainer Shorts every day → Subscribe @butitmatters\n\n"
-    "#ButItMatters #NewsShorts #WhyItMatters"
-)
-_YT_DESCRIPTION_MAX = 4900  # YouTube hard cap is 5000; leave headroom for publish's #Shorts
+# Brand footer appended to every Short's description: one line, with no "every day" claim the
+# channel does not keep and no hashtags (design 9.9; the hashtag line follows it). It complements
+# the scriptwriter's caption (claim, why it matters, sources, AI disclosure). Override it via the
+# DESCRIPTION_FOOTER env var; disable it via ENABLE_DESC_FOOTER=false.
+_DEFAULT_FOOTER = "But It Matters: what happened, and why it matters. Subscribe @butitmatters"
+_YT_DESCRIPTION_MAX = 4900  # YouTube hard cap is 5000; leave headroom for the hashtag line
 
 
 def _with_footer(description: str) -> str:
@@ -142,31 +137,62 @@ def _work_root() -> str:
     return root
 
 
-_CORE_CHANNEL_TAGS = ("But It Matters", "News Shorts", "Why It Matters", "Trending News")
-# Added only when the story involves India: it was on every upload, US-only stories included.
-_INDIA_TAG = "India News Explainer"
+# A story set in India gets Indian settings in its visuals.
 _INDIA_RE = re.compile(r"(?i)\b(india|indian|indians|modi|delhi|mumbai|rupee|isro|bjp|lok sabha|"
                        r"rajya sabha|kolkata|chennai|bengaluru|bangalore|hyderabad)\b")
 
+# Design 9.9: at most six tags from the writer (names and alternate spellings) plus the brand;
+# the other fixed channel tags ("News Shorts", "Trending News", the India tag) are gone.
+_BRAND_TAG = "But It Matters"
+_MAX_WRITER_TAGS = 6
+# Hashtags: up to two from the writer naming the story's subject or event, then the brand. The
+# generic ones say nothing about the story and are dropped.
+_BRAND_HASHTAG = "#ButItMatters"
+_MAX_WRITER_HASHTAGS = 2
+_GENERIC_HASHTAGS = frozenset(("shorts", "youtubeshorts", "viral", "trending", "fyp", "foryou",
+                               "explore", "news", "breaking", "breakingnews", "newsshorts"))
+# YouTube's category from the idea's stored category: Science & Technology, else News & Politics.
+_SCIENCE_TECH = frozenset(("science", "space", "tech"))
+
+
+def _hashtag_line(writer_hashtags: list[str]) -> str:
+    """The description's last line: at most three hashtags, up to two of the writer's that name
+    the story (letters, digits and underscores only; generic ones dropped), then the brand."""
+    picked, seen = [], {_BRAND_HASHTAG[1:].lower()}
+    for raw in writer_hashtags or []:
+        word = str(raw).strip().lstrip("#")
+        key = word.lower()
+        if not re.fullmatch(r"\w+", word) or key in _GENERIC_HASHTAGS or key in seen:
+            continue
+        seen.add(key)
+        picked.append("#" + word)
+        if len(picked) == _MAX_WRITER_HASHTAGS:
+            break
+    return " ".join([*picked, _BRAND_HASHTAG])
+
 
 def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True) -> dict:
-    """Map an idea + its script into YouTube upload metadata (publish enforces disclosure/#Shorts).
+    """Map an idea + its script into YouTube upload metadata (publish enforces disclosure).
 
-    Prefers the scriptwriter's SEO title; merges hashtags + SEO tags + core channel tags (de-duped)
-    for maximum Shorts discoverability and search indexing.
+    Prefers the scriptwriter's SEO title. The description is the caption, the footer and, last,
+    the hashtag line; the tags are the writer's (at most six) plus the brand. Hashtags are no
+    longer merged into the tags (design 9.9).
     """
     title = (script.get("title") or idea.get("title") or "").strip()
     seen, tags = set(), []
-    extra_tags: tuple = ()
-    if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True):
-        story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
-        extra_tags = _CORE_CHANNEL_TAGS + ((_INDIA_TAG,) if _INDIA_RE.search(story) else ())
-    for t in [*script.get("hashtags", []), *script.get("tags", []), *extra_tags]:
+    for t in script.get("tags") or []:
         t = str(t).lstrip("#").strip()
-        if t and t.lower() not in seen:
+        if t and t.lower() not in seen and t.lower() != _BRAND_TAG.lower():
             seen.add(t.lower())
             tags.append(t)
-    return {"title": title, "description": _with_footer(script.get("caption", "")), "tags": tags}
+    tags = tags[:_MAX_WRITER_TAGS]
+    if include_channel_tags and config.get_bool("ENABLE_CHANNEL_TAGS", True):
+        tags.append(_BRAND_TAG)
+    description = _with_footer(script.get("caption", ""))
+    hashtags = _hashtag_line(script.get("hashtags") or [])
+    description = f"{description.rstrip()}\n\n{hashtags}" if description.strip() else hashtags
+    category = "28" if str(idea.get("niche") or "").lower() in _SCIENCE_TECH else "25"
+    return {"title": title, "description": description, "tags": tags, "category_id": category}
 
 
 # How reels are made, stamped on every post (posts.format) so the relaunch can be judged on the

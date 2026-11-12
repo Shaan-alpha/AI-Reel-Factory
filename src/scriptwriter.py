@@ -8,10 +8,11 @@ Contract:
 
 ORIGINALITY IS THE MONETIZATION GATE (docs/08 §1): the script's core value is the
 "why it matters" ANALYSIS, not a summary. Rewrite facts in own words + cite. Caption must
-include source links + an AI-disclosure line. Keyword-rich title (SEO). Append #Shorts.
+include source links + an AI-disclosure line. Keyword-rich title (SEO).
 
-The compliance requirements (source links, AI-disclosure line, #Shorts) are enforced in
-code AFTER the LLM responds — never trusted to the model, because they gate monetization.
+The compliance requirements (source links, AI-disclosure line) are enforced in code AFTER the
+LLM responds — never trusted to the model, because they gate monetization. #Shorts is no longer
+added (design 9.9); production composes the hashtag line.
 The executable prompt below mirrors templates/template-N-news-impact.md (the design source);
 keep the two in sync.
 """
@@ -37,6 +38,8 @@ DISCLOSURE_LINE = "AI-generated narration and music; stock visuals."
 # With VISUAL_SOURCE=ai (the live setting) the reel shows Flux images, not stock footage, so the
 # line above under-disclosed on every reel. Over-disclosing is safe; under-disclosing is not.
 DISCLOSURE_LINE_AI = "AI-generated narration, images and music."
+# The AI-video format (design 9.9): the shots themselves are generated video.
+DISCLOSURE_LINE_AI_VIDEO = "AI-generated narration, video and music."
 # Music joined both lines on 2026-09-29: the beds in assets/music are generated with Google Lyria
 # (tools/generate_music_beds.py). With the music switched off the line over-discloses, which is
 # the safe direction.
@@ -804,18 +807,23 @@ _SOURCES_LINE_RE = re.compile(r"(?im)^[ \t]*sources?[ \t]*:.*$")
 _MAX_CAPTION_SOURCES = 3
 
 
+def _host(url: str) -> str:
+    host = urlparse(url).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def _publishable_sources(sources: list[str]) -> list[str]:
-    """The sources worth printing: publisher links first, one per outlet, then Google News
-    links, at most three. Unresolved grounding redirects (vertexaisearch.cloud.google.com) are
-    left out: they expire, and some 404 from the start. One is kept only if nothing else exists,
-    since a reel with no citation at all is the worse failure (docs/08)."""
+    """The sources worth printing: publisher links, one per outlet, at most three (design 9.9:
+    61% of the newest 30 descriptions' links were aggregators). A Google News link is kept only
+    when there is no publisher, and an unresolved grounding redirect (it expires, and some 404
+    from the start) only when there is nothing else: a reel with no citation at all is the worse
+    failure (docs/08)."""
     seen, publisher, gnews, redirects = set(), [], [], []
     for raw in sources or []:
         url = str(raw).strip()
         if not url.lower().startswith(("http://", "https://")):
             continue
-        host = urlparse(url).netloc.lower()
-        host = host[4:] if host.startswith("www.") else host
+        host = _host(url)
         if "grounding-api-redirect" in url or host.endswith("vertexaisearch.cloud.google.com"):
             redirects.append(url)
         elif host == "news.google.com":
@@ -823,11 +831,37 @@ def _publishable_sources(sources: list[str]) -> list[str]:
         elif host and host not in seen:
             seen.add(host)
             publisher.append(url)
-    return (publisher + gnews)[:_MAX_CAPTION_SOURCES] or redirects[:1]
+    return publisher[:_MAX_CAPTION_SOURCES] or gnews[:1] or redirects[:1]
+
+
+# How a source is named in the description; any other host is printed as it is.
+_PUBLISHER_NAMES = {
+    "thehindu.com": "The Hindu", "indianexpress.com": "The Indian Express",
+    "hindustantimes.com": "Hindustan Times", "timesofindia.indiatimes.com": "The Times of India",
+    "economictimes.indiatimes.com": "The Economic Times", "livemint.com": "Mint",
+    "business-standard.com": "Business Standard", "ndtv.com": "NDTV", "indiatoday.in": "India Today",
+    "news18.com": "News18", "thehindubusinessline.com": "BusinessLine", "theprint.in": "ThePrint",
+    "scroll.in": "Scroll", "thewire.in": "The Wire", "moneycontrol.com": "Moneycontrol",
+    "deccanherald.com": "Deccan Herald", "firstpost.com": "Firstpost", "pib.gov.in": "PIB",
+    "isro.gov.in": "ISRO", "reuters.com": "Reuters", "apnews.com": "AP News", "afp.com": "AFP",
+    "bbc.com": "BBC", "bbc.co.uk": "BBC", "aljazeera.com": "Al Jazeera",
+    "theguardian.com": "The Guardian", "nytimes.com": "The New York Times",
+    "washingtonpost.com": "The Washington Post", "wsj.com": "The Wall Street Journal",
+    "bloomberg.com": "Bloomberg", "ft.com": "Financial Times", "cnn.com": "CNN",
+    "cnbc.com": "CNBC", "dw.com": "DW", "france24.com": "France 24", "nasa.gov": "NASA",
+    "who.int": "WHO", "techcrunch.com": "TechCrunch", "theverge.com": "The Verge",
+    "news.google.com": "Google News", "vertexaisearch.cloud.google.com": "Google Search",
+}
+
+
+def _publisher_name(url: str) -> str:
+    host = _host(url)
+    return _PUBLISHER_NAMES.get(host, host)
 
 
 def _ensure_sources(caption: str, sources: list[str]) -> str:
-    """Exactly ONE 'Sources:' block, built from the idea's fetched sources (sourcing gate).
+    """Exactly ONE 'Sources:' block, built from the idea's fetched sources (sourcing gate), each
+    line the publisher's name and its own link (design 9.9).
 
     The model used to write its own 'Sources:' line from memory, and this function then added
     the real sources under a SECOND header. Every recent description had both, and 12 of the 53
@@ -840,13 +874,16 @@ def _ensure_sources(caption: str, sources: list[str]) -> str:
     if not usable:
         return text
     # One per line: Google News links run 249-884 characters, so joined they are a wall.
-    block = "Sources:" + "".join("\n" + u for u in usable)
+    block = "Sources:" + "".join(f"\n{_publisher_name(u)}: {u}" for u in usable)
     return f"{text}\n\n{block}" if text else block
 
 
 def _disclosure_line() -> str:
-    """The disclosure that matches what the reel shows (VISUAL_SOURCE=ai means Flux images)."""
+    """The disclosure that matches what the reel shows: VISUAL_SOURCE=ai_video means AI video
+    shots, ai means Flux images, anything else stock (design 9.9)."""
     source = str(config.get("VISUAL_SOURCE", "photos") or "").strip().lower()
+    if source == "ai_video":
+        return DISCLOSURE_LINE_AI_VIDEO
     return DISCLOSURE_LINE_AI if source == "ai" else DISCLOSURE_LINE
 
 
@@ -897,13 +934,6 @@ def _ensure_delivery_tag(body: str, payoff: int | None = None) -> str:
         return body
     log.info("scriptwriter: script had no delivery tag; inserted [serious] on the payoff turn.")
     return f"{body[:at]}[serious] {body[at:]}".strip()
-
-
-def _ensure_shorts(hashtags: list[str]) -> list[str]:
-    """Guarantee #Shorts is present (YouTube classifies the upload as a Short)."""
-    if any(h.lower() == "#shorts" for h in hashtags):
-        return hashtags
-    return [*hashtags, "#Shorts"]
 
 
 _REPAIR_PROMPT = """A fact-checker blocked this YouTube Shorts narration about: {topic}
@@ -1143,7 +1173,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
 
     Returns the same dict plus the new `script_id`. Raises ValueError if the LLM reply
     can't be parsed into a non-empty script (caller skips that one reel — rule 14: soft on
-    runtime). Compliance fields (sources, disclosure, #Shorts) are enforced here, not trusted
+    runtime). Compliance fields (sources, disclosure) are enforced here, not trusted
     to the model.
     """
     idea_id = idea.get("id")
@@ -1197,7 +1227,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
     hashtags = data.get("hashtags")
     if not isinstance(hashtags, list):
         hashtags = []
-    hashtags = _ensure_shorts([str(h) for h in hashtags])
+    hashtags = [str(h).strip() for h in hashtags if str(h).strip()]
 
     # Markdown is stripped from the caption too: YouTube prints '*you*' with the asterisks.
     caption = _ensure_disclosure(_ensure_sources(_strip_markdown(data.get("caption") or ""),

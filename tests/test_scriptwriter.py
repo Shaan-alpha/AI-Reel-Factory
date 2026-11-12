@@ -94,7 +94,7 @@ def test_persists_published_title_for_learning_loop(monkeypatch):
     assert captured["title"] == "Oil Export WARS \U0001f6e2️"  # passed through to db.insert_script
 
 
-def test_enforces_disclosure_sources_and_shorts_when_llm_omits_them(monkeypatch):
+def test_enforces_disclosure_and_sources_when_llm_omits_them(monkeypatch):
     reply = json.dumps({
         "script_body": "Body that is long enough to pass the soft word check. " * 4,
         "caption": "A caption with no sources and no disclosure.",
@@ -102,8 +102,8 @@ def test_enforces_disclosure_sources_and_shorts_when_llm_omits_them(monkeypatch)
     })
     scriptwriter_captured = _patch(monkeypatch, reply)
     out = scriptwriter.write_script(IDEA)
-    # #Shorts appended
-    assert any(h.lower() == "#shorts" for h in out["hashtags"])
+    # #Shorts is no longer added (design 9.9)
+    assert not any(h.lower() == "#shorts" for h in out["hashtags"])
     # both source URLs present
     assert "https://example.com/isro" in out["caption"]
     assert "https://example.org/space" in out["caption"]
@@ -482,7 +482,8 @@ def test_sources_are_listed_one_per_line(monkeypatch):
     chars each (measured). Joined with ' | ' two of them are an unreadable wall in the YouTube
     description; one per line at least keeps the block scannable."""
     caption = scriptwriter._ensure_sources("Hook.", ["https://a.example/1", "https://b.example/2"])
-    assert caption.endswith("Sources:\nhttps://a.example/1\nhttps://b.example/2")
+    assert caption.endswith("Sources:\na.example: https://a.example/1\n"
+                            "b.example: https://b.example/2")
 
 
 def test_sources_already_cited_are_not_repeated():
@@ -563,8 +564,10 @@ def test_caption_gets_exactly_one_sources_block_of_real_links():
     assert "voanews" not in out and "latimes" not in out, "model-written links are dropped"
     assert "vertexaisearch" not in out, "unresolved grounding redirects expire"
     assert out.count("afp.com") == 1, "one link per outlet"
-    assert out.splitlines()[-3:] == ["https://www.afp.com/en/real", "https://citizen.digital/a",
-                                     "https://news.google.com/rss/articles/CBMi"]
+    # publishers by name; the aggregator link goes when a publisher is there (design 9.9)
+    assert out.splitlines()[-3:] == ["Sources:", "AFP: https://www.afp.com/en/real",
+                                     "citizen.digital: https://citizen.digital/a"]
+    assert "news.google.com" not in out
 
 
 def test_a_redirect_is_kept_when_it_is_the_only_citation():
@@ -1083,3 +1086,35 @@ def test_the_draft_reports_its_citations(monkeypatch):
         out = scriptwriter.write_script(IDEA)
         assert out["grounding"] == {"draft_citations": n}
         assert wording in notes[-1], n
+
+
+# --- stage 1b: a readable description (design 9.9) -------------------------------------------
+
+def test_sources_are_publisher_names_with_their_links():
+    out = scriptwriter._ensure_sources("Hook.", ["https://www.thehindu.com/news/a",
+                                                 "https://news.google.com/rss/articles/X",
+                                                 "https://example.org/b"])
+    assert out.endswith("Sources:\nThe Hindu: https://www.thehindu.com/news/a\n"
+                        "example.org: https://example.org/b")
+
+
+def test_sources_keep_one_link_when_only_aggregators_exist():
+    out = scriptwriter._ensure_sources("Hook.", ["https://news.google.com/rss/articles/A",
+                                                 "https://news.google.com/rss/articles/B"])
+    assert out.endswith("Sources:\nGoogle News: https://news.google.com/rss/articles/A")
+
+
+def test_the_disclosure_line_follows_the_visual_source(monkeypatch):
+    for source, line in (("ai_video", "AI-generated narration, video and music."),
+                         ("ai", scriptwriter.DISCLOSURE_LINE_AI),
+                         ("photos", scriptwriter.DISCLOSURE_LINE),
+                         ("video", scriptwriter.DISCLOSURE_LINE)):
+        monkeypatch.setenv("VISUAL_SOURCE", source)
+        assert scriptwriter._ensure_disclosure("Hook.").endswith("\n\n" + line), source
+
+
+def test_write_script_no_longer_adds_shorts(monkeypatch):
+    _patch(monkeypatch, json.dumps({"title": "ISRO rocket lands itself", "caption": "c",
+                                    "script_body": "ISRO's rocket landed itself on Tuesday.",
+                                    "hashtags": ["#ISRO"]}))
+    assert scriptwriter.write_script(IDEA)["hashtags"] == ["#ISRO"]

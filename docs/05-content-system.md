@@ -72,8 +72,14 @@ Narrative; strong for "how this unfolded" backstories.
   the "why it matters" sentence still required, and no hook rewrite.
 - One development per reel. No call to action.
 - **Sources are cited by code, not the model:** the description gets one "Sources:" block from
-  the idea's fetched sources, and the reel shows "Source: <publisher>" for its first ~3 s.
-- `#Shorts` and the **AI-disclosure** line are added in code (see playbook).
+  the idea's fetched sources, each line the publisher's name and its own link (a Google News
+  link only when no publisher link exists), and the reel shows "Source: <publisher>" for its
+  first ~3 s.
+- **The description** (design 9.9): the claim with its main keyword, one sentence on why it
+  matters, the sources, the **AI-disclosure** line (added in code, by visual source), a one-line
+  footer, and last a hashtag line of at most three: up to two naming the story, then
+  `#ButItMatters`. `#Shorts` and generic hashtags are no longer added. **Tags:** at most six from
+  the writer plus "But It Matters". **Category:** 28 for science, space and tech, else 25.
 - **Karaoke captions are burned in** (Module 7): 3-word groups, each word lit as it is spoken.
   faster-whisper times the words; the text comes from the approved script.
 

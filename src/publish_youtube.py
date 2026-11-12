@@ -114,15 +114,15 @@ def _cap_tags(tags: list[str], limit: int = 480) -> list[str]:
 
 
 def _build_body(metadata: dict) -> dict:
-    """Map pipeline metadata → a videos.insert request body. Enforces #Shorts + disclosure."""
+    """Map pipeline metadata → a videos.insert request body. Enforces the disclosure flag.
+
+    #Shorts is no longer added (design 9.9): a vertical video under three minutes is a Short
+    without it, and the description's last line is now the story's own hashtags."""
     title = (metadata.get("title") or "").replace("<", "").replace(">", "").strip()[:100]
     if not title:
         raise ValueError("publish: metadata['title'] is required.")
 
-    desc = metadata.get("description") or ""
-    if "#shorts" not in desc.lower():
-        desc = (desc.rstrip() + "\n\n#Shorts").strip()
-    desc = _clean_description(desc)
+    desc = _clean_description(metadata.get("description") or "")
 
     tags = [_clean_tag(t) for t in (metadata.get("tags") or [])]
     tags = [t for t in tags if t]

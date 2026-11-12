@@ -117,7 +117,8 @@ Source: [fair-use guide 2026](https://joyspace.ai/copyright-proof-shorts-fair-us
 - **Factual framing; a verdict only where the evidence supports it** (§5, truth over neutrality,
   2026-07-27). No sensationalism, no unverified rumor, no "BREAKING" bait.
 - **Cite the source**, in code: the description carries one "Sources:" block built from the
-  idea's fetched sources (up to three links: one per outlet, then Google News), and the reel shows
+  idea's fetched sources (up to three, one per outlet, each as the publisher's name and its own
+  link; a Google News link only when no publisher link exists), and the reel shows
   "Source: <publisher>" on screen for its first ~3 s. The model writes no links: remembered URLs
   were often dead.
 - Prefer **established developments** over fast-moving rumors (the "daily explainer" cadence
@@ -240,7 +241,7 @@ Everything else rests on your tap in the digest.
 | **11 Fact check** | §5: two samples, one repair, idea `blocked` on fabrication, reel held under strict mode when the checker cannot run. |
 | **5 Visuals** | Our own AI illustrations (no recognizable real people) or Pexels/Pixabay stock without identifiable faces; **no broadcaster footage**; AI images never photoreal fakes of real people/events; places named in the story kept; a cut every ~3.5 s. |
 | **7 Subtitles** | Burn an on-screen **"Source: <publisher>"** citation for the first ~3 s. The frame-1 hook banner (the title) and the key-point cards are published claims, so the gate checks them too. |
-| **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; the description is summary + Sources block + disclosure line + brand footer + `#Shorts`. |
+| **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; the description is the claim + why it matters + Sources block + disclosure line + a one-line footer + at most three hashtags ending `#ButItMatters` (`#Shorts` no longer added, 2026-11-12). |
 | **10 Analytics** | Daily view snapshots; the best and worst recent titles feed the ideation prompt. Retention is not pulled: nothing calls the YouTube Analytics API, and the token would first need the `yt-analytics.readonly` scope. |
 
 ---

@@ -149,7 +149,7 @@ jobs:
           MUSIC_LU_BELOW_VOICE: ${{ vars.MUSIC_LU_BELOW_VOICE || '11' }}      # bed level under the voice (8 = more present)
           ENABLE_MUSIC_OFFSET: ${{ vars.ENABLE_MUSIC_OFFSET || 'true' }}      # each reel starts its bed at a different bar
           ENABLE_GRAPHIC_CARDS: ${{ vars.ENABLE_GRAPHIC_CARDS || 'false' }}  # PIL stat cards vs ASS text cards
-          ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append core channel tags after SEO tags
+          ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append the brand tag after the writer's tags
           # Optional 3rd LLM provider. GH_ prefix is REQUIRED: GitHub rejects secret/variable
           # names starting with GITHUB_. Inert unless ENABLE_GH_MODELS/PREFER_GH_MODELS is true.
           GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}               # PAT scoped to `models: read` only
