@@ -29,6 +29,7 @@ from functools import lru_cache
 
 from src import config
 from src.assembly import BT709_TAGS, _ffmpeg, x264_args
+from src.text import ends_clause
 
 log = logging.getLogger(__name__)
 
@@ -282,7 +283,6 @@ _LIBASS_WIDTH = 0.632
 _KARAOKE_PX = 104
 # 1080 minus MarginL 90 and MarginR 150: the right-hand 120 px is the Shorts action rail.
 _MAX_CAPTION_PX = 840
-_SENTENCE_END = re.compile(r"[.!?:;…]['\")\]]*$")
 
 
 @lru_cache(maxsize=1)
@@ -319,7 +319,7 @@ def _caption_groups(words: list[tuple[float, float, str]],
             groups.append(cur)
             cur = []
         cur.append(w)
-        if _SENTENCE_END.search(w[2].strip()):
+        if ends_clause(w[2]):
             groups.append(cur)
             cur = []
     if cur:

@@ -24,6 +24,7 @@ import re
 from urllib.parse import urlparse
 
 from src import config, db, llm
+from src.text import SENTENCE_END_RE, split_sentences
 
 log = logging.getLogger(__name__)
 
@@ -517,12 +518,7 @@ _CTA_RE = re.compile(r"(?i)\b(subscribe|follow (?:us|for|along)|hit (?:the )?(?:
 
 def _sentences(body: str) -> list[str]:
     """Split into sentences; a delivery tag stays with the sentence it introduces."""
-    out, last = [], 0
-    for m in _SENTENCE_END_RE.finditer(body):
-        out.append(body[last:m.end()].strip())
-        last = m.end()
-    out.append(body[last:].strip())
-    return [x for x in out if x]
+    return split_sentences(body)
 
 
 def _truncate_to_words(body: str, max_words: int) -> str:
@@ -721,9 +717,10 @@ def _ensure_disclosure(caption: str) -> str:
 _WHY_IT_MATTERS_RE = re.compile(
     r"(?i)\b(here'?s why\b|why (?:it|this)(?: actually)? matters\b"
     r"|(?:it|this) (?:actually )?matters because\b|the real (?:point|issue) (?:here )?is\b)")
-# Sentence boundary: terminator + whitespace. Used to walk BACK to the start of the sentence the
-# bridge lives in, so the tag lands on the whole payoff rather than mid-clause.
-_SENTENCE_END_RE = re.compile(r"[.!?…](?:[\"')\]]*)\s+")
+# Sentence boundary: terminator + whitespace (src/text.py, shared with the voice and subtitles).
+# Used to walk BACK to the start of the sentence the bridge lives in, so the tag lands on the whole
+# payoff rather than mid-clause.
+_SENTENCE_END_RE = SENTENCE_END_RE
 
 
 def _ensure_delivery_tag(body: str) -> str:
