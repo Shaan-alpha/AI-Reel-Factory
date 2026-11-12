@@ -202,8 +202,10 @@ wording:
   non-confirmation, with no word of contradiction, moves to minor. Since 2026-10-09 the waiver
   never covers a quote or statement, a court ruling, a law, or blame, cause, responsibility or
   attribution, nor a finding that says there is "no record" of something: that is how a checker
-  reports an invented quote or ruling, so those still block. A statistic the checker merely could
-  not confirm stays waived.
+  reports an invented quote or ruling, so those still block. Since 2026-11-12 it never covers a
+  forecast or consequence (for India above all: the payoff says what changes for a person there),
+  which must be stated by a source or follow directly from sourced facts. A statistic the checker
+  merely could not confirm stays waived.
 - **The findings outrank the verdict word:** "pass" with a blocking finding blocks; "fail" with
   only minor findings ships; "fail" that names nothing blocks.
 - **An off-shape reply is asked again once** (no verdict object, or JSON that cannot be read).

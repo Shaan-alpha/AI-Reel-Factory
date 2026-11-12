@@ -42,9 +42,24 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   `docs/superpowers/plans/2026-11-12-stage-1b-script-and-packaging.md`). The calls made while
   building 1b are listed in STATUS.md's 2026-11-12 log and the ledger. Each plan's ledger is under
   `.superpowers/sdd/<plan name>/progress.md` (git-ignored).
+- **The final review of stage 1 is done** (8 important findings fixed test-first, 870 pass; see
+  STATUS.md). The operator asked for push and merge once the fixes were in.
+  **Deferred minors from that review:**
+  - `db.expire_stale_pending_ideas` still writes `passed`, so ideas aged out after 24 h count in
+    the 10-day story window (design 8.5 wants them `expired`);
+  - an aggregator-only description keeps one Google News link, not two;
+  - `_category` matches substrings ("Transport" maps to sport);
+  - the Wikipedia signal skips a run when yesterday's list is not yet published (use the newest
+    day);
+  - with no network, the demand fetches can add about 6.7 minutes of timeouts;
+  - the idea's stored `demand` is the model's copy, unchecked against the real lines;
+  - a title cut can end on a preposition;
+  - `_pass_untapped` and its log still say "passed";
+  - a very long line in `news.py`;
+  - 9.1's warning for six or more words copied from a prompt example is not built;
+  - "Today's Wordle solution" passes the puzzle filter.
 
-**Next:** one final review of stage 1 (1a and 1b), its fix pass, then ask the operator before
-pushing; then stages 2-4 and the relaunch (design section 14).
+**Next:** stage 2 (Hinglish), then stages 3-4 and the relaunch (design section 14).
 
 ## 1. What the operator wants
 

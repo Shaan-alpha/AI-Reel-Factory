@@ -52,7 +52,8 @@ Narrative; strong for "how this unfolded" backstories.
 - **Length in seconds:** about 27 s (`SCRIPT_TARGET_SECONDS`, about 59 words at 2.2 a second),
   never more than 33 s (`SCRIPT_MAX_SECONDS`, about 73 words), and the prompt says so. Over the
   cap, the sentences the writer marked `optional` go first, from the end; then whole sentences
-  (the CTA first), never sentence one or the payoff the writer marked with `payoff_index`, and no
+  (the CTA first), never sentence one or the payoff the writer marked (it copies the sentence;
+  code finds it by its words, since the writer counts sentences differently), and no
   sentence is cut in half. The LLM tighten rewrite is retired (`ENABLE_SCRIPT_TIGHTEN=false`).
 - **Sentence one = the news.** No throat-clearing: a code check on every script refuses a
   wind-up word, a date or a day as the opening. The hook judge's rewrite is off

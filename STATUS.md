@@ -203,11 +203,13 @@ follow-up through; untapped ideas end `expired`, not banned; election matter is 
 - one title of at most 7 words and 44 characters (also the banner): one model shortening, then a
   word cut; a reply without a title uses the idea's under the same limits;
 - length in seconds (27 s target, 33 s cap, 2.2 words a second): optional sentences the writer
-  marks go first, never sentence one or the payoff it marks with `payoff_index`, which also places
+  marks go first, never sentence one or the payoff it marks (both copied as text and found by
+  their words), which also places
   the `[serious]` tag; the tighten rewrite and the hook judge are off (code and both workflows);
 - the repair may fix the title, the re-check sees it, and every model rewrite (repair, opening,
   hook judge) is refused if it adds a number or a name;
-- the gate thinks at the model's default with 8192 output tokens (about a cent more a reel), an
+- the gate thinks at the model's default (32,768 output tokens after the review; roughly two cents
+  a reel), an
   unsourced forecast for India blocks like unsupported blame, and the draft's and the gate's
   citation counts are stored (`scripts.grounding`); Claude hears "the draft searched" only when
   it has citations;
@@ -216,6 +218,25 @@ follow-up through; untapped ideas end `expired`, not banned; election matter is 
   `#Shorts`; tags: the writer's six plus the brand; category 28 for science, space and tech.
 852 pass, 5 skipped; with every `.env` key blanked, 841 pass and only the known `NICHE` artifact
 fails. SQL: two `scripts` columns at the end of docs/03 §4 (the code runs without them).
+
+**Final review of stage 1 (1a and 1b)** by a fresh reviewer: no critical issue, 8 important, all
+fixed test-first:
+- an unsourced forecast for India no longer slips through the "could not confirm" waiver (rule 6
+  updated);
+- the gate's budget at default thinking is 32,768 tokens, and an unreadable reply is asked again
+  at minimal thinking. Measured on two real scripts (441, 436): about 2,800-3,100 thinking tokens,
+  finish STOP, both verdicts parsed; roughly two cents a reel;
+- the writer copies its payoff and optional sentences as text, found by their words: it counts
+  sentences its own way, so indices landed on the wrong sentence;
+- the repair keeps a payoff (or marks its rewritten one) and may fix the description and cards,
+  which the re-check, the stored caption and the upload then use;
+- a follow-up returns only after a published story;
+- "India" no longer makes two stories one;
+- the election window covers polling day and the two days before, in Indian dates;
+- top-up ideas get their story's category.
+870 pass, 5 skipped; with `.env` blanked only the `NICHE` artifact fails. The repository variables
+`ENABLE_HOOK_JUDGE`, `ENABLE_SCRIPT_TIGHTEN`, `SCRIPT_MAX_WORDS` and `VOICE_STYLE_PROMPT` are not
+set, so the new defaults apply. Deferred minors are listed in the handoff.
 
 ### 2026-11-10 — A new format chosen; design, research and a reach audit in progress (no code changed)
 

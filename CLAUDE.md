@@ -88,7 +88,9 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
      pass missing a real story is routine, and two sources disagreeing is not proof the script is
      wrong (both can be wrong, both can be right, or they measure different things). One
      exception, in code since 2026-10-09: the waiver never reaches a quote, ruling, law or blame
-     that the checker flags and no source records; that blocks as invented.
+     that the checker flags and no source records; that blocks as invented. Since 2026-11-12 the
+     same holds for a forecast or consequence for India that no source states (the payoff says
+     what changes for a person in India, so an unsourced one is an invented claim).
      `FACTCHECK_SEVERITY=any` restores block-on-every-discrepancy.
    - **Sensitivity filter still applies** — communal/religious incitement, anything that could
      inflame violence, rumour-as-fact, deepfakes, graphic tragedy exploitation, and medical or

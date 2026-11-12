@@ -20,8 +20,9 @@ in sync. Design: [section 9 of the AI-video reels design](../docs/superpowers/sp
   measures, what it compares with, why it matters); the belief (the belief it overturns, only
   when a source records it, the evidence, why it matters).
 - **The payoff** says what changes for a person in India (a price, a rule, a date, a risk, a
-  job), from the sources; with no Indian stake, what changes for anyone. The writer marks it with
-  `payoff_index`.
+  job), from the sources; with no Indian stake, what changes for anyone. The writer marks it by
+  copying it into `payoff`; code finds it by its words. A forecast for India must come from a
+  source: the fact-check blocks one that none states.
 - **Length** in seconds: about 27 seconds (about 59 words), never more than 33 seconds (about 73
   words). Sentences the writer marks `optional` are cut first, never sentence one or the payoff.
 - **Rewrite facts in your own words.** Never copy phrasing, and never copy the idea's angle. The
@@ -64,7 +65,8 @@ responsible, but the sharper the verdict, the more certain its facts. An indepen
 runs on this script before it is voiced.
 
 Also return: "title" (≤ 7 words, ≤ 44 characters), "caption" (two lines, no links, no question),
-"hashtags" (≤ 2), "tags" (≤ 6), "key_points" (2-3 cards), "payoff_index", "optional", "structure".
+"hashtags" (≤ 2), "tags" (≤ 6), "key_points" (2-3 cards), "payoff" and "optional" (sentences
+copied from the narration), "structure".
 Return ONLY JSON.
 
 + EMPHASIS (ENABLE_HUMAN_ANGLE): develop the ANGLE in your own words; never copy its sentences.
@@ -73,7 +75,7 @@ Return ONLY JSON.
 ```
 
 ## Output
-`{ title, script_body, caption, hashtags[], tags[], key_points[], payoff_index, optional[], structure }`.
+`{ title, script_body, caption, hashtags[], tags[], key_points[], payoff, optional[], structure }`.
 Module 3 writes the title, body, caption and hashtags to the `scripts` table (the fact-check
 verdict joins them in `scripts.factcheck`); tags go into the upload metadata and key points become
 the on-screen cards.
