@@ -942,11 +942,11 @@ def test_optional_sentences_go_first_and_never_the_payoff(monkeypatch):
     monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
     assert len(scriptwriter._visible_words(_LONG_BODY)) == 85
     # 85 > 73: dropping sentence 2 is enough (70 words); 4 is the payoff, so it stays.
-    out = scriptwriter._enforce_length(_LONG_BODY, 1, optional=[2, 4], payoff=4)
+    out = scriptwriter._enforce_length(_LONG_BODY, 1, optional=[_S[2], _S[4]], payoff=_S[4])
     assert out == " ".join([_S[0], _S[1], _S[3], _S[4], _S[5]])
     # At 50, sentence 2 goes, then whole sentences from the end, never 0 or the payoff.
     monkeypatch.setenv("SCRIPT_MAX_WORDS", "50")
-    out = scriptwriter._enforce_length(_LONG_BODY, 1, optional=[2, 4], payoff=4)
+    out = scriptwriter._enforce_length(_LONG_BODY, 1, optional=[_S[2], _S[4]], payoff=_S[4])
     assert _S[0] in out and _S[4] in out and _S[2] not in out
     assert len(scriptwriter._visible_words(out)) <= 50
 
@@ -955,7 +955,7 @@ def test_over_budget_without_optional_sentences_keeps_the_payoff(monkeypatch):
     _clear_length(monkeypatch)
     monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
     monkeypatch.setenv("SCRIPT_MAX_WORDS", "40")
-    out = scriptwriter._enforce_length(_LONG_BODY, 1, payoff=2)
+    out = scriptwriter._enforce_length(_LONG_BODY, 1, payoff=_S[2])
     assert out.startswith(_S[0]) and _S[2] in out
     assert len(scriptwriter._visible_words(out)) <= 40
 
@@ -967,19 +967,20 @@ def test_the_tighten_rewrite_is_off_by_default(monkeypatch):
     scriptwriter._enforce_length(_LONG_BODY, 1)
 
 
-def test_the_payoff_tag_follows_payoff_index():
+def test_the_payoff_tag_follows_the_marked_payoff():
     body = "Fact one here. Fact two here. Prices will rise by June. More detail follows."
-    out = scriptwriter._ensure_delivery_tag(body, payoff=2)
+    out = scriptwriter._ensure_delivery_tag(body, payoff="Prices will rise by June.")
     assert out == "Fact one here. Fact two here. [serious] Prices will rise by June. " \
                   "More detail follows."
-    assert scriptwriter._ensure_delivery_tag(body, payoff=9) == body  # out of range: no guess
+    # A payoff that is not in the script: no guess (and no bridge phrase to match here).
+    assert scriptwriter._ensure_delivery_tag(body, payoff="Something else entirely.") == body
 
 
 def test_write_script_uses_the_writers_payoff_and_optional_marks(monkeypatch, caplog):
     _clear_length(monkeypatch)
     captured = _patch(monkeypatch, json.dumps({
         "title": "Zero news", "script_body": _LONG_BODY, "caption": "c", "hashtags": [],
-        "payoff_index": 4, "optional": [2]}))
+        "payoff": _S[4], "optional": [_S[2]]}))
     monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
     with caplog.at_level("WARNING"):
         out = scriptwriter.write_script(IDEA)
@@ -1118,3 +1119,129 @@ def test_write_script_no_longer_adds_shorts(monkeypatch):
                                     "script_body": "ISRO's rocket landed itself on Tuesday.",
                                     "hashtags": ["#ISRO"]}))
     assert scriptwriter.write_script(IDEA)["hashtags"] == ["#ISRO"]
+
+
+# --- final review of stage 1: the writer's marks are matched by text (2026-11-12) -------------
+
+_BEAT_BODY = ("ISRO's rocket landed itself on Tuesday. The winner is... India. Launch costs could "
+              "fall for Indian startups. More detail follows here.")
+
+
+def test_the_payoff_is_found_by_its_text_when_our_sentence_split_differs():
+    """'The winner is... India.' is one sentence to the writer and two to our splitter, so a
+    sentence index from the writer landed one sentence early."""
+    assert len(scriptwriter._sentences(_BEAT_BODY)) == 5  # the writer counts 4
+    out = scriptwriter._ensure_delivery_tag(
+        _BEAT_BODY, payoff="Launch costs could fall for Indian startups.")
+    assert "[serious] Launch costs could fall" in out
+
+
+def test_a_payoff_our_splitter_cuts_in_two_is_protected_whole(monkeypatch):
+    _clear_length(monkeypatch)
+    monkeypatch.setenv("SCRIPT_MAX_WORDS", "30")
+    body = _BEAT_BODY + " " + " ".join(["Filler"] * 30) + "."
+    assert scriptwriter._locate(body, "The winner is... India.") == [1, 2]
+    out = scriptwriter._enforce_length(body, 1, payoff="The winner is... India.")
+    assert "The winner is..." in out and "India." in out
+
+
+def test_a_payoff_on_sentence_one_puts_no_tag_at_the_start():
+    body = "Fares rise for Indian students from June. The rule was set on Monday."
+    out = scriptwriter._ensure_delivery_tag(body, payoff="Fares rise for Indian students from June.")
+    assert not out.startswith("[")
+
+
+def test_optional_sentences_are_matched_by_text_not_position(monkeypatch):
+    """With an index the writer's 'optional' sentence 2 was our 'India.' fragment."""
+    _clear_length(monkeypatch)
+    monkeypatch.setenv("SCRIPT_MAX_WORDS", "30")  # the floor; this body is 34 words
+    body = _BEAT_BODY + " Extra words make this closing sentence long enough to pass the cap."
+    out = scriptwriter._enforce_length(body, 1, optional=["More detail follows here."],
+                                       payoff="Launch costs could fall for Indian startups.")
+    assert "More detail follows here." not in out
+    assert "The winner is... India." in out and "Launch costs could fall" in out
+    assert "Extra words make this closing sentence" in out
+
+
+def test_claude_may_not_take_a_number_from_the_draft_s_marks(monkeypatch):
+    """The draft's metadata ('payoff_index': 3) used to count as a fact Claude could repeat."""
+    draft = {"title": "ISRO rocket lands itself", "caption": "c", "hashtags": [],
+             "script_body": "ISRO's rocket landed itself on Tuesday.", "payoff_index": 3}
+    monkeypatch.setattr(scriptwriter.llm, "generate_claude", lambda p, **k: json.dumps(
+        {**draft, "script_body": "ISRO's rocket landed itself three times on Tuesday."}))
+    written, _issue = scriptwriter._claude_write("IDEA: ISRO rocket", draft)
+    assert written is None
+
+
+def test_write_script_returns_the_payoff_it_kept(monkeypatch):
+    _clear_length(monkeypatch)
+    _patch(monkeypatch, json.dumps({
+        "title": "ISRO rocket lands itself", "script_body": _BEAT_BODY, "caption": "c",
+        "hashtags": [], "payoff": "Launch costs could fall for Indian startups."}))
+    out = scriptwriter.write_script(IDEA)
+    assert out["payoff"] == "Launch costs could fall for Indian startups."
+    assert "[serious] Launch costs could fall" in out["script_body"]
+
+
+# --- final review of stage 1: the repair keeps a payoff and may fix the description -----------
+
+_PAYOFF = "Launch costs could fall for Indian startups."
+_MARKED_BODY = "The US passed a tariff law. " + " ".join(["Word"] * 45) + ". " + _PAYOFF
+_HOUSE = ["the law claim is false: only the House passed the bill"]
+
+
+def _repair_json(monkeypatch, **reply):
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded", lambda *a, **k: json.dumps(reply))
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+
+
+def test_a_repair_that_drops_the_marked_payoff_is_refused(monkeypatch):
+    """The bridge phrase was the repair's only payoff check, and the new brief no longer asks
+    for it: a repair could delete the payoff and pass."""
+    _repair_json(monkeypatch, script_body="The US House passed a tariff bill. " +
+                 " ".join(["Word"] * 45) + ".")
+    assert scriptwriter.repair_script(_MARKED_BODY, _HOUSE, topic="tariffs",
+                                      payoff=_PAYOFF) is None
+
+
+def test_a_repair_that_keeps_the_payoff_is_tagged_there(monkeypatch):
+    fixed = "The US House passed a tariff bill. " + " ".join(["Word"] * 45) + ". " + _PAYOFF
+    _repair_json(monkeypatch, script_body=fixed)
+    out = scriptwriter.repair_script(_MARKED_BODY, _HOUSE, topic="tariffs", payoff=_PAYOFF)
+    assert out["payoff"] == _PAYOFF and "[serious] " + _PAYOFF in out["script_body"]
+
+
+def test_a_repair_that_rewrites_the_payoff_marks_the_new_one(monkeypatch):
+    new_payoff = "Launch costs could fall for Indian startups soon."  # adds no name or number
+    fixed = "The US House passed a tariff bill. " + " ".join(["Word"] * 45) + ". " + new_payoff
+    _repair_json(monkeypatch, script_body=fixed, payoff=new_payoff)
+    out = scriptwriter.repair_script(_MARKED_BODY, _HOUSE, topic="tariffs", payoff=_PAYOFF)
+    assert out["payoff"] == new_payoff and "[serious] " + new_payoff in out["script_body"]
+
+
+def test_the_repair_may_fix_the_description_and_cards(monkeypatch):
+    fixed = "The US House passed a tariff bill. " + " ".join(["Word"] * 45) + ". " + _PAYOFF
+    _repair_json(monkeypatch, script_body=fixed, title="US House passes a tariff bill",
+                 description="The US House passed a tariff bill.\nIt is not law yet.",
+                 key_points=["House bill, not law"])
+    out = scriptwriter.repair_script(_MARKED_BODY, _HOUSE, topic="tariffs",
+                                     title="US tariff law passes",
+                                     summary="The US passed a tariff law.\nIt changes trade.",
+                                     key_points=["Tariff law passed"], payoff=_PAYOFF)
+    assert out["summary"] == "The US House passed a tariff bill.\nIt is not law yet."
+    assert out["key_points"] == ["House bill, not law"]
+    # A description or card that adds a number keeps the original.
+    _repair_json(monkeypatch, script_body=fixed, description="A 90 percent tariff bill passed.",
+                 key_points=["90 percent tariff"])
+    out = scriptwriter.repair_script(_MARKED_BODY, _HOUSE, topic="tariffs",
+                                     summary="The US passed a tariff law.",
+                                     key_points=["Tariff law passed"], payoff=_PAYOFF)
+    assert out["summary"] == "The US passed a tariff law."
+    assert out["key_points"] == ["Tariff law passed"]
+
+
+def test_caption_for_rebuilds_sources_and_disclosure(monkeypatch):
+    monkeypatch.setenv("VISUAL_SOURCE", "ai")
+    out = scriptwriter.caption_for("Line one.\nLine two.", ["https://www.thehindu.com/a"])
+    assert out == ("Line one.\nLine two.\n\nSources:\nThe Hindu: https://www.thehindu.com/a"
+                   "\n\n" + scriptwriter.DISCLOSURE_LINE_AI)

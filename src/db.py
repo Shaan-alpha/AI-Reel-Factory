@@ -205,6 +205,11 @@ def update_script_body(script_id: int, body: str) -> None:
     get_client().table("scripts").update({"body": body}).eq("id", script_id).execute()
 
 
+def update_script_caption(script_id: int, caption: str) -> None:
+    """Replace a script's caption (the fact-check repair corrected its description)."""
+    get_client().table("scripts").update({"caption": caption}).eq("id", script_id).execute()
+
+
 def update_script_title(script_id: int, title: str) -> None:
     """Replace a script's title (the fact-check repair corrected it). Unlike
     backfill_script_title, this overwrites a stored title."""

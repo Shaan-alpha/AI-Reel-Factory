@@ -69,6 +69,7 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     monkeypatch.setattr(production.scriptwriter, "repair_script", lambda *a, **k: None)
     monkeypatch.setattr(production.db, "update_script_body", lambda *a, **k: None)
     monkeypatch.setattr(production.db, "update_script_title", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "update_script_caption", lambda *a, **k: None)
     return produced
 
 
@@ -724,7 +725,7 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _OK)
     saved, voiced = [], []
-    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None:
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None, **_:
                         {"script_body": "FIXED BODY", "title": title})
     monkeypatch.setattr(production.db, "update_script_body", lambda sid, b: saved.append(b))
     monkeypatch.setattr(production.voice, "synthesize",
@@ -736,7 +737,7 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
 def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _BLOCK)
-    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None:
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None, **_:
                         {"script_body": "STILL WRONG", "title": title})
     monkeypatch.setattr(production.db, "update_script_body",
                         lambda *a: pytest.fail("a failed repair must not be saved"))
@@ -988,7 +989,7 @@ def test_the_recheck_sees_the_repaired_title(monkeypatch, tmp_path):
 
     monkeypatch.setattr(production.factcheck, "verify", _verify)
     monkeypatch.setattr(production.scriptwriter, "repair_script",
-                        lambda body, f, topic=None, title=None:
+                        lambda body, f, topic=None, title=None, **_:
                         {"script_body": "FIXED BODY", "title": "Fixed title"})
     stored, published = [], []
     monkeypatch.setattr(production.db, "update_script_title", lambda sid, t: stored.append(t))
@@ -1044,3 +1045,37 @@ def test_the_category_follows_the_story():
                             ("india-politics", "25"), ("money", "25"), (None, "25")):
         meta = production._build_metadata({"title": "T", "niche": niche}, script)
         assert meta["category_id"] == category, niche
+
+
+
+def test_the_recheck_sees_the_repaired_description_and_cards(monkeypatch, tmp_path):
+    """Design 9.6: the re-check uses the repaired description too. The description's first line
+    restates the claim, so a false main claim left there blocked the re-check every time."""
+    _wire_happy(monkeypatch)
+    caption = ("Old line.\n\nSources:\nexample.org: https://example.org/a\n\n"
+               "AI-generated narration, images and music.")
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
+        **SCRIPT, "caption": caption, "key_points": ["Old card"], "payoff": "P sentence here."})
+    verdicts, screens, asked = iter([_BLOCK, _OK]), [], {}
+
+    def _verify(body, sources=None, title="", on_screen=None):
+        screens.append(on_screen)
+        return next(verdicts)
+
+    def _repair(body, findings, **k):
+        asked.update(k)
+        return {"script_body": "FIXED BODY", "title": k.get("title"), "summary": "New line.",
+                "key_points": ["New card"], "payoff": None}
+
+    monkeypatch.setattr(production.factcheck, "verify", _verify)
+    monkeypatch.setattr(production.scriptwriter, "repair_script", _repair)
+    stored, published = [], []
+    monkeypatch.setattr(production.db, "update_script_caption", lambda sid, c: stored.append(c))
+    monkeypatch.setattr(production.publish_youtube, "publish", lambda v, m, sid: published.append(
+        m["description"]) or ("VID1", "https://www.youtube.com/shorts/VID1"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert asked["summary"] == "Old line." and asked["key_points"] == ["Old card"]
+    assert asked["payoff"] == "P sentence here."
+    assert screens[1] == ["New card", "New line."]
+    assert stored and stored[0].startswith("New line.")
+    assert published[0].startswith("New line.")

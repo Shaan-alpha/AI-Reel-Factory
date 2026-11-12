@@ -103,15 +103,15 @@ remembered URL is usually a dead one), and no question to the viewer.
 spellings allowed). No '#'.
 - "key_points": 2-3 very short on-screen text cards (4 words or fewer each), the plainest facts or \
 numbers.
-- "payoff_index": the 0-based index of the "why it matters" sentence in script_body.
-- "optional": the 0-based indices of the sentences that could be cut without losing the story \
-(never sentence one or the payoff).
+- "payoff": the "why it matters" sentence, copied exactly from script_body.
+- "optional": the sentences that could be cut without losing the story (never sentence one or \
+the payoff), each copied exactly from script_body; an empty list when there are none.
 - "structure": the structure you followed: what-happened, number or belief.
 
 Return ONLY a JSON object, no markdown fences. Write every line break inside a string as the \
 two-character escape \\n — a raw newline inside a JSON string is invalid JSON. Inside a string, \
 put any quoted word in SINGLE quotes ('like this'): a raw double quote ends the string.
-{{"title": "the title", "script_body": "the spoken narration", "caption": "line one\\nline two", "hashtags": ["#subject"], "tags": ["a name", "another spelling"], "key_points": ["card", "card"], "payoff_index": 3, "optional": [2], "structure": "what-happened"}}
+{{"title": "the title", "script_body": "the spoken narration", "caption": "line one\\nline two", "hashtags": ["#subject"], "tags": ["a name", "another spelling"], "key_points": ["card", "card"], "payoff": "the why-it-matters sentence", "optional": ["a sentence that could go"], "structure": "what-happened"}}
 """
 
 
@@ -144,7 +144,7 @@ _SOMBER_NOTE = """
 TONE — this story involves loss of life or serious harm to people. Calm, respectful and direct,
 with no irony about the people affected, and only [serious] or [pause] as delivery tags. The
 "why it matters" sentence is still required, stated plainly (live 2026-09-27, a somber draft
-dropped it), and payoff_index still marks it."""
+dropped it), and "payoff" still marks it."""
 
 
 def tone_for(idea: dict, body: str = "") -> str:
@@ -444,12 +444,19 @@ def _claude_write(prompt: str, draft: dict,
     if not (data.get("script_body") or "").strip():
         log.warning("scriptwriter: Claude returned no script_body; shipping the grounded draft")
         return None, None
-    added = _added_facts(data, _idea_lines(prompt) + "\n" + json.dumps(draft, ensure_ascii=False))
+    # The fact base is what the draft publishes, not its bookkeeping: a mark like
+    # "payoff_index": 3 made "three" look like a sourced fact (final review, 2026-11-12).
+    facts = {k: draft[k] for k in _DRAFT_FACT_KEYS if k in draft}
+    added = _added_facts(data, _idea_lines(prompt) + "\n" + json.dumps(facts, ensure_ascii=False))
     if added:
         log.warning("scriptwriter: Claude's script adds %s, which the grounded draft does not "
                     "carry; shipping the draft", ", ".join(added))
         return None, None
     return data, None
+
+
+# The draft fields that carry facts; the rest (the writer's marks, its structure) do not.
+_DRAFT_FACT_KEYS = ("title", "script_body", "caption", "key_points", "tags", "hashtags")
 
 
 def _generate_script_json(prompt: str) -> dict:
@@ -599,41 +606,55 @@ def _visible_words(body: str) -> list[str]:
     return _TAG_IN_TEXT_RE.sub(" ", body).split()
 
 
-def _payoff_start(body: str, payoff: int | None = None) -> int | None:
+def _words_of(text: str) -> list[str]:
+    """A sentence's spoken words, lower-cased, without punctuation or tags: how a sentence the
+    writer copied is compared with ours."""
+    out = []
+    for word in _visible_words(text or ""):
+        word = re.sub(r"[^\w']", "", word.lower().replace("’", "'"))
+        if word:
+            out.append(word)
+    return out
+
+
+def _locate(body: str, sentence: str | None) -> list[int]:
+    """The indices of our sentences that together are `sentence`, one the writer copied from its
+    script (its payoff, or one it marked optional); [] when it is not there.
+
+    The writer marks sentences by their text, not their position (design 9.1, 9.5), because it
+    counts sentences its own way: "The winner is... India." is one sentence to it and two to our
+    splitter, so an index landed one sentence early (final review, 2026-11-12). Matched on the
+    exact run of spoken words, so a sentence our splitter cuts in two is still found whole, and
+    following the text through every cut and rewrite keeps the mark on the right sentence."""
+    target = _words_of(sentence or "")
+    if len(target) < 2:
+        return []
+    words = [_words_of(s) for s in _sentences(body)]
+    for i in range(len(words)):
+        got: list[str] = []
+        for j in range(i, len(words)):
+            got += words[j]
+            if got == target:
+                return list(range(i, j + 1))
+            if got != target[:len(got)]:
+                break
+    return []
+
+
+def _payoff_start(body: str, payoff: str | None = None) -> int | None:
     """Offset where the 'why it matters' sentence begins, or None when it cannot be placed.
 
-    With the writer's `payoff` (a sentence index, design 9.1) the payoff is marked, not matched:
-    out of range means None, never a guess. Without it, the bridge phrase is matched as before."""
-    if payoff is not None:
-        if not 0 <= payoff < len(_sentences(body)):
-            return None
-        return sentence_ends(body)[payoff - 1] if payoff else 0
+    The writer's marked `payoff` (its text) is used when it is in the body and is not sentence
+    one, which needs no tag and must never open on one; otherwise the bridge phrase is matched,
+    as before the writer marked its payoff."""
+    span = _locate(body, payoff)
+    if span and span[0] > 0:
+        return sentence_ends(body)[span[0] - 1]
     m = _WHY_IT_MATTERS_RE.search(body)
     if not m:
         return None
     starts = sentence_ends(body, 0, m.start())
     return starts[-1] if starts else 0
-
-
-def _as_index(value) -> int | None:
-    """A sentence index from the writer's JSON: an int or a digit string; anything else is None."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
-
-
-def _index_of(body: str, sentence: str | None) -> int | None:
-    """Where `sentence` sits among the body's sentences now; None when it is gone or unknown.
-    The payoff is followed by its text, since every cut and rewrite moves the indices."""
-    if not sentence:
-        return None
-    return next((i for i, s in enumerate(_sentences(body)) if s == sentence), None)
 
 
 # A call to action is the cheapest sentence in the script: it carries no fact and no payoff.
@@ -646,14 +667,15 @@ def _sentences(body: str) -> list[str]:
     return split_sentences(body)
 
 
-def _truncate_to_words(body: str, max_words: int, payoff: int | None = None) -> str:
+def _truncate_to_words(body: str, max_words: int, payoff: list[int] | None = None) -> str:
     """Hard length backstop: drop WHOLE sentences until the body fits max_words. Deterministic.
 
     Delivery tags are carried through with their sentence and do not count toward the cap.
 
     Two protected sentences: the hook (first) and the 'why it matters' turn, which is the
-    originality signal the monetization gate turns on (docs/08 §1); `payoff` (a sentence index)
-    names that turn when the writer marked it, else the bridge phrase is matched. Everything else goes in
+    originality signal the monetization gate turns on (docs/08 §1); `payoff` (our sentence
+    indices, from `_locate`) names that turn when the writer marked it, else the bridge phrase is
+    matched. Everything else goes in
     order of how little it costs: the call to action, then the loop-back close, then the setup
     from its end backwards, then any extra payoff detail.
 
@@ -677,15 +699,16 @@ def _truncate_to_words(body: str, max_words: int, payoff: int | None = None) -> 
             kept.append(piece)
         return " ".join(kept).strip()
 
-    if payoff is not None and 0 <= payoff < len(sents):
-        bridge = payoff
-    else:
+    protected = {i for i in (payoff or []) if 0 <= i < len(sents)}
+    if not protected:
         bridge = next((i for i, x in enumerate(sents) if _WHY_IT_MATTERS_RE.search(x)), None)
+        protected = {bridge} if bridge is not None else set()
+    bridge = max(protected) if protected else None  # the payoff's last sentence
     # The loop-back close is the last sentence that is not a call to action.
     last = max((i for i, x in enumerate(sents) if not _CTA_RE.search(x)), default=len(sents) - 1)
     cost: dict[int, tuple[int, int]] = {}
     for i, sent in enumerate(sents):
-        if i == 0 or i == bridge:
+        if i == 0 or i in protected:
             continue
         if _CTA_RE.search(sent):
             cost[i] = (0, -i)
@@ -762,31 +785,32 @@ def _strip_markdown(body: str) -> str:
     return body.replace("*", "")
 
 
-def _drop_optional(body: str, optional: list[int], payoff: int | None, max_words: int) -> str:
-    """Drop the sentences the writer marked optional, from the end, until the body fits; never
-    sentence one or the payoff (design 9.5). The result may still be over the cap."""
+def _drop_optional(body: str, optional: list[str], payoff: str | None, max_words: int) -> str:
+    """Drop the sentences the writer marked optional (their text), from the end, until the body
+    fits; never sentence one or the payoff (design 9.5). The result may still be over the cap."""
     sents = _sentences(body)
-    keep = list(range(len(sents)))
-    for i in sorted({i for i in optional if 0 < i < len(sents) and i != payoff}, reverse=True):
-        if len(_visible_words(" ".join(sents[j] for j in keep))) <= max_words:
+    protected = {0, *_locate(body, payoff)}
+    spans = {tuple(sp) for sp in (_locate(body, s) for s in optional) if sp}
+    keep = set(range(len(sents)))
+    for span in sorted((sp for sp in spans if not protected & set(sp)), reverse=True):
+        if len(_visible_words(" ".join(sents[j] for j in sorted(keep)))) <= max_words:
             break
-        keep.remove(i)
-    return " ".join(sents[j] for j in keep)
+        keep -= set(span)
+    return " ".join(sents[j] for j in sorted(keep))
 
 
-def _enforce_length(body: str, idea_id, optional: list[int] | None = None,
-                    payoff: int | None = None) -> str:
+def _enforce_length(body: str, idea_id, optional: list[str] | None = None,
+                    payoff: str | None = None) -> str:
     """Bring the body under the cap (design 9.5): the sentences the writer marked optional, from
     the end; then the tighten rewrite, retired by default (ENABLE_SCRIPT_TIGHTEN); then whole
-    sentences, keeping sentence one and the payoff (`payoff`, a sentence index, when known)."""
+    sentences, keeping sentence one and the payoff (`payoff`, its text, when the writer marked
+    it). The writer's marks are found by their text (`_locate`)."""
     max_words = _max_words()
     words = len(_visible_words(body))
     if words <= max_words:
         return body
     log.warning("scriptwriter: idea %s script %d words > %d cap; cutting.",
                 idea_id, words, max_words)
-    sents = _sentences(body)
-    payoff_text = sents[payoff] if payoff is not None and 0 <= payoff < len(sents) else None
     if optional:
         body = _drop_optional(body, optional, payoff, max_words)
         if len(_visible_words(body)) <= max_words:
@@ -799,7 +823,7 @@ def _enforce_length(body: str, idea_id, optional: list[int] | None = None,
             log.info("scriptwriter: idea %s tightened %d -> %d words.",
                      idea_id, words, len(_visible_words(tight)))
             return tight
-    return _truncate_to_words(body, max_words, payoff=_index_of(body, payoff_text))
+    return _truncate_to_words(body, max_words, payoff=_locate(body, payoff) or None)
 
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -878,6 +902,13 @@ def _ensure_sources(caption: str, sources: list[str]) -> str:
     return f"{text}\n\n{block}" if text else block
 
 
+def caption_for(summary: str, sources: list[str]) -> str:
+    """The published caption from its summary (the claim and why it matters): markdown and any
+    model-written links removed, the vetted sources added, then the disclosure line. Used for
+    the writer's caption and for one the fact-check repair corrected."""
+    return _ensure_disclosure(_ensure_sources(_strip_markdown(summary or ""), sources or []))
+
+
 def _disclosure_line() -> str:
     """The disclosure that matches what the reel shows: VISUAL_SOURCE=ai_video means AI video
     shots, ai means Flux images, anything else stock (design 9.9)."""
@@ -905,9 +936,9 @@ _WHY_IT_MATTERS_RE = re.compile(
     r"|(?:it|this) (?:actually )?matters because\b|the real (?:point|issue) (?:here )?is\b)")
 
 
-def _ensure_delivery_tag(body: str, payoff: int | None = None) -> str:
+def _ensure_delivery_tag(body: str, payoff: str | None = None) -> str:
     """Guarantee the script carries at least one delivery tag, on the 'why it matters' turn
-    (`payoff`, the sentence the writer marked, when known; else the bridge phrase).
+    (`payoff`, the sentence the writer marked, when it is in the body; else the bridge phrase).
 
     Measured 2026-08-07 against the last 5 produced scripts: two of them shipped with NO tags at
     all. The prompt says "AT MOST 3 … fewer is better", which permits zero — so on a channel whose
@@ -941,43 +972,56 @@ Its findings (each quotes a claim it judged false, sometimes with what is true i
 {findings}
 
 TITLE: {title}
+DESCRIPTION: {summary}
+ON-SCREEN CARDS: {cards}
 NARRATION:
 {body}
 
-Use web search to establish what is actually true about each flagged claim, then rewrite ONLY
-those sentences so they are accurate. Keep every other sentence word for word, including its
+Use web search to check what is actually true about each flagged claim, then rewrite ONLY those
+sentences so they are accurate. State only what the findings, the narration, the title, the
+description or the cards already carry: when the truth needs a number or a name that none of
+them has, remove the claim instead. Keep every other sentence word for word, including its
 delivery tags. The narration must still OPEN with a complete, accurate sentence that says what
 happened: if the flagged claim was the opening, replace it with a corrected opening, never just
-delete it. Never start with a delivery tag or with "Because", "And", "But" or "So". Keep the
-"why it matters" sentence. At most {max_words} spoken words. Plain text, no markdown. Correct the
-title too when a finding is about it (at most {title_words} words and {title_chars} characters);
-otherwise return it unchanged. Use only facts the narration, the title or the findings carry.
+delete it. Never start with a delivery tag or with "Because", "And", "But" or "So". Keep a "why it
+matters" sentence. At most {max_words} spoken words. Plain text, no markdown. Correct the title
+(at most {title_words} words and {title_chars} characters), the description and the cards too when
+a finding is about them; otherwise return them unchanged.
 
-Return ONLY a JSON object, no fences. Put any quoted word in SINGLE quotes:
-{{"script_body": "the corrected narration", "title": "the title"}}
+Return ONLY a JSON object, no fences. Put any quoted word in SINGLE quotes, and write a line break
+inside a string as \\n:
+{{"script_body": "the corrected narration", "payoff": "its why-it-matters sentence, copied exactly", "title": "the title", "description": "the description", "key_points": ["card"]}}
 """
 
 
 def repair_script(body: str, findings: list[str], topic: str | None = None,
-                  title: str | None = None) -> dict | None:
-    """Rewrite only what the fact-check blocked: {"script_body", "title"}, or None if the rewrite
-    is unusable.
+                  title: str | None = None, summary: str | None = None,
+                  key_points: list[str] | None = None,
+                  payoff: str | None = None) -> dict | None:
+    """Rewrite only what the fact-check blocked: {"script_body", "title", "summary",
+    "key_points", "payoff"}, or None if the rewrite is unusable.
 
     A block used to throw the whole reel away, although the checker's findings usually say
     exactly what is true instead (idea 308: "the bill has already been signed into law"). The
-    caller re-verifies the result, title included, with the gate, so this can only ever make a
-    reel eligible, never wave a false claim through. Like every model-written rewrite it adds no
-    number or name that the body, the title, the findings and the topic lack (design 9.6)."""
+    caller re-verifies the result, title, description (`summary`, the caption before its sources)
+    and cards included, with the gate, so this can only ever make a reel eligible, never wave a
+    false claim through (design 9.6). Like every model-written rewrite it adds no number or name
+    that what it was given lacks, and it keeps a "why it matters" sentence: the writer's `payoff`
+    as it was, or the one the repair marks."""
     if not findings:
         return None
     max_words = _max_words()
     title = (title or "").strip()
+    summary = (summary or "").strip()
+    cards = [str(c).strip() for c in (key_points or []) if str(c).strip()]
     # Today's date, like the writer and the gate: a grounded rewrite without it dated September
     # news to June (STATUS 2026-09-28).
     prompt = llm.today_line() + _REPAIR_PROMPT.format(topic=topic or "the news story",
                                    findings="\n".join(f"- {f}" for f in findings[:6]),
-                                   title=title or "(none)", body=body, max_words=max_words,
-                                   title_words=_TITLE_MAX_WORDS, title_chars=_TITLE_MAX)
+                                   title=title or "(none)", summary=summary or "(none)",
+                                   cards="; ".join(cards) or "(none)", body=body,
+                                   max_words=max_words, title_words=_TITLE_MAX_WORDS,
+                                   title_chars=_TITLE_MAX)
     try:
         # Grounded: a finding often names the false claim without saying what is true, so the
         # rewrite has to look it up. Ungrounded JSON mode is the fallback.
@@ -990,7 +1034,17 @@ def repair_script(body: str, findings: list[str], topic: str | None = None,
     except Exception as e:  # noqa: BLE001 — the block stands
         log.warning("scriptwriter: repair pass failed (%s)", e)
         return None
-    new = _enforce_length(_strip_markdown(str(data.get("script_body") or "").strip()), "repair")
+    raw_new = _strip_markdown(str(data.get("script_body") or "").strip())
+    # The payoff: the writer's, kept as it was, or the one the repair marks after rewriting it.
+    marked = data.get("payoff")
+    marked = marked.strip() if isinstance(marked, str) else ""
+    if payoff and _locate(raw_new, payoff):
+        payoff_new = payoff
+    elif marked and _locate(raw_new, marked):
+        payoff_new = marked
+    else:
+        payoff_new = None
+    new = _enforce_length(raw_new, "repair", payoff=payoff_new)
     if not _opens_with_a_hook(new):
         # Live 2026-09-27 (idea 308): the first repair deleted the flagged opening and left the
         # reel starting "[pause] [sarcastic] Because nothing screams...". It passed the gate.
@@ -998,9 +1052,14 @@ def repair_script(body: str, findings: list[str], topic: str | None = None,
         return None
     if len(_visible_words(new)) < 40:
         return None
-    if _WHY_IT_MATTERS_RE.search(body) and not _WHY_IT_MATTERS_RE.search(new):
+    # The bridge phrase was the only check here, and the new brief no longer asks for it, so a
+    # repair could delete the payoff and pass (final review, 2026-11-12).
+    payoff_new = payoff_new if payoff_new and _locate(new, payoff_new) else None
+    if ((payoff or _WHY_IT_MATTERS_RE.search(body)) and payoff_new is None
+            and not _WHY_IT_MATTERS_RE.search(new)):
+        log.warning("scriptwriter: repair lost the 'why it matters' sentence; the block stands.")
         return None
-    source_text = "\n".join([body, title, topic or "", *map(str, findings)])
+    source_text = "\n".join([body, title, summary, *cards, topic or "", *map(str, findings)])
     added = _added_facts({"script_body": new}, source_text)
     if added:
         log.warning("scriptwriter: repair adds %s, which nothing it was given carries; the block "
@@ -1014,7 +1073,22 @@ def repair_script(body: str, findings: list[str], topic: str | None = None,
             new_title = title
         else:
             new_title = _shorten_title(new_title, new)
-    return {"script_body": _ensure_delivery_tag(new), "title": new_title or title}
+    # The description and the cards are published claims too (design 9.6): repaired when a
+    # finding is about them, and kept as they were if the repair adds a number to them.
+    new_summary = _strip_markdown(str(data.get("description") or "").strip())
+    if new_summary and new_summary != summary and _added_facts({"caption": new_summary},
+                                                               source_text):
+        log.warning("scriptwriter: repaired description adds a number; keeping the description.")
+        new_summary = summary
+    new_cards = data.get("key_points")
+    new_cards = ([str(c).strip() for c in new_cards if str(c).strip()][:5]
+                 if isinstance(new_cards, list) else [])
+    if new_cards and new_cards != cards and _added_facts({"key_points": new_cards}, source_text):
+        log.warning("scriptwriter: repaired cards add a number; keeping the cards.")
+        new_cards = cards
+    return {"script_body": _ensure_delivery_tag(new, payoff_new), "title": new_title or title,
+            "summary": new_summary or summary, "key_points": new_cards or cards,
+            "payoff": payoff_new}
 
 
 _DANGLING_OPENERS = ("because", "and", "but", "so", "which", "or")
@@ -1191,24 +1265,23 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # fact-check and the banner see the title that is published.
     title = _shorten_title(str(data.get("title") or idea.get("title") or "").strip(), body)
 
-    # The writer marks its payoff and the sentences it could lose (design 9.1, 9.5). The payoff is
-    # followed by its text from here on, since cuts and rewrites move the indices. Without the
-    # marks, everything below works as it did: the bridge phrase locates the payoff.
-    sents = _sentences(body)
-    payoff_index = _as_index(data.get("payoff_index"))
-    payoff_text = (sents[payoff_index] if payoff_index is not None
-                   and 0 <= payoff_index < len(sents) else None)
-    if payoff_index is not None and payoff_text is None:
-        log.warning("scriptwriter: idea %s payoff_index %s is out of range (%d sentences)",
-                    idea_id, payoff_index, len(sents))
+    # The writer copies its payoff and the sentences it could lose (design 9.1, 9.5); they are
+    # found by their text through every cut and rewrite (`_locate`). Without the marks, or with
+    # a payoff that is not in the script, everything below works as it did: the bridge phrase
+    # locates the payoff.
+    payoff = data.get("payoff")
+    payoff = payoff.strip() if isinstance(payoff, str) and payoff.strip() else None
+    if payoff and not _locate(body, payoff):
+        log.warning("scriptwriter: idea %s marked a payoff that is not a sentence of its script "
+                    "(%r); using the bridge phrase instead", idea_id, payoff[:80])
+        payoff = None
     optional = data.get("optional")
-    optional = ([i for i in map(_as_index, optional) if i is not None]
-                if isinstance(optional, list) else [])
+    optional = [s for s in optional if isinstance(s, str)] if isinstance(optional, list) else []
 
     # Fit the cap BEFORE the punch-up: the punch-up only accepts a rewrite that is under the cap,
     # so on the 100-word drafts every run was producing it could not act (9 of 16 logged
     # decisions were "unusable").
-    body = _enforce_length(body, idea_id, optional, _index_of(body, payoff_text))
+    body = _enforce_length(body, idea_id, optional, payoff)
 
     # The opening, on every script and before the gate (design 9.2): sentence one states the news.
     problem = opening_problem(body)
@@ -1230,8 +1303,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
     hashtags = [str(h).strip() for h in hashtags if str(h).strip()]
 
     # Markdown is stripped from the caption too: YouTube prints '*you*' with the asterisks.
-    caption = _ensure_disclosure(_ensure_sources(_strip_markdown(data.get("caption") or ""),
-                                                 idea.get("sources") or []))
+    caption = caption_for(str(data.get("caption") or ""), idea.get("sources") or [])
 
     tags = data.get("tags")
     tags = [str(t).lstrip("#").strip() for t in tags if str(t).strip()] if isinstance(tags, list) else []
@@ -1242,8 +1314,9 @@ def write_script(idea: dict, template: str = "N") -> dict:
                   if isinstance(kp, list) else [])
 
     # The punch-up is capped too; this is a no-op without it.
-    body = _enforce_length(body, idea_id, payoff=_index_of(body, payoff_text))
-    payoff_now = _index_of(body, payoff_text)
+    body = _enforce_length(body, idea_id, payoff=payoff)
+    # The marked payoff, if it survived the opening fix and any punch-up.
+    payoff_now = payoff if payoff and _locate(body, payoff) else None
     if len(_visible_words(body)) < 50:
         log.warning("scriptwriter: idea %s script is short (%d words)",
                     idea_id, len(_visible_words(body)))
@@ -1280,4 +1353,5 @@ def write_script(idea: dict, template: str = "N") -> dict:
             "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points,
             "tone": tone_for(idea, body), "writer": data.get("writer"),
             "claude_issue": data.get("claude_issue"), "structure": structure,
-            "grounding": data.get("grounding") or {"draft_citations": None}}
+            "grounding": data.get("grounding") or {"draft_citations": None},
+            "payoff": payoff_now}

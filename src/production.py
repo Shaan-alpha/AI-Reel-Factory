@@ -307,13 +307,18 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         # One repair pass, then the SAME gate again. It can only make a reel eligible: the
         # rewrite is re-verified, and a second block stands.
         fixed = scriptwriter.repair_script(script["script_body"], check["unsupported"],
-                                           topic=idea.get("title"), title=script.get("title"))
+                                           topic=idea.get("title"), title=script.get("title"),
+                                           summary=summary_text,
+                                           key_points=script.get("key_points") or [],
+                                           payoff=script.get("payoff"))
         if fixed:
-            # The repair may correct the title too (design 9.6), so the re-check sees the
-            # repaired title, and it is the one stored and published.
+            # The repair may correct the title, the description and the cards too (design 9.6),
+            # so the re-check sees what it returned, and that is what is stored and published.
             new_title = fixed.get("title") or script.get("title") or ""
+            new_summary = fixed.get("summary") or summary_text
+            new_cards = fixed.get("key_points") or (script.get("key_points") or [])
             recheck = factcheck.verify(fixed["script_body"], idea.get("sources"), new_title,
-                                       on_screen=[*(script.get("key_points") or []), summary_text])
+                                       on_screen=[*new_cards, new_summary])
             if recheck["ok"] and factcheck.gate_ran(recheck):
                 log.warning("produce: idea %s repaired after the fact-check block (%s)",
                             idea_id, factcheck.summary(check))
@@ -322,6 +327,12 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
                 if new_title != (script.get("title") or ""):
                     script["title"] = new_title
                     db.update_script_title(script["script_id"], new_title)
+                if new_summary != summary_text:
+                    script["caption"] = scriptwriter.caption_for(new_summary,
+                                                                 idea.get("sources") or [])
+                    db.update_script_caption(script["script_id"], script["caption"])
+                script["key_points"] = new_cards
+                script["payoff"] = fixed.get("payoff")
                 check = recheck
             else:
                 log.warning("produce: idea %s repair did not pass the gate either", idea_id)
