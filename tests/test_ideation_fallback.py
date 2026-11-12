@@ -1165,3 +1165,24 @@ def test_a_followup_with_new_sources_is_allowed():
     assert not fb._repeats_recent_story(new, old)
     assert fb._repeats_recent_story({**new, "sources": ["https://old.example/b"]}, old)
     assert fb._repeats_recent_story({**new, "followup": False}, old)
+
+
+# --- rules that bind selection in India (design 8.7) -----------------------------------------
+
+def test_election_matter_is_dropped_inside_the_silence(monkeypatch):
+    from datetime import date
+
+    monkeypatch.setenv("ELECTION_SILENCE", "Bihar:2026-11-14")
+    poll = {"title": "Bihar election: what the exit polls missed", "hook": "", "angle": ""}
+    flood = {"title": "Bihar floods cut off 40 villages", "hook": "", "angle": ""}
+    assert fb._in_election_silence(poll, today=date(2026, 11, 13))
+    assert fb._in_election_silence(poll, today=date(2026, 11, 14))
+    assert not fb._in_election_silence(poll, today=date(2026, 11, 16))
+    assert not fb._in_election_silence(flood, today=date(2026, 11, 13))
+    monkeypatch.delenv("ELECTION_SILENCE")
+    assert not fb._in_election_silence(poll, today=date(2026, 11, 13))
+
+
+def test_the_prompt_carries_the_india_rules():
+    assert "names the court record or official order it rests on" in fb._PROMPT
+    assert "explain the terms and the mechanisms" in fb._PROMPT

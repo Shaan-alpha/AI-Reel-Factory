@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -167,7 +168,9 @@ even when that is unflattering to a government, company or party — a well-sour
 not "taking a side". You MAY reach a verdict and say plainly who is responsible, provided every \
 load-bearing fact is verifiable and cited. What you may NOT do is assert anything you cannot \
 source: an unverifiable claim is worthless however satisfying it sounds. Politics, government \
-actions and court rulings are fully in scope. EXCLUDE only: communal/religious incitement or \
+actions and court rulings are fully in scope. An allegation names the court record or official \
+order it rests on. In a live conflict, explain the terms and the mechanisms, and never take a \
+side in the fighting. EXCLUDE only: communal/religious incitement or \
 hate; anything that could inflame violence; unverified rumors/claims stated as fact; deepfakes/ \
 impersonation; graphic tragedy exploitation; medical/financial advice stated as fact.
 
@@ -674,6 +677,10 @@ def _validate_and_clean(ideas: list[dict], existing: list[dict] | None = None) -
             continue
         if title.lower() in seen_titles:
             continue
+        if _in_election_silence(idea):
+            log.info("ideation_fallback: dropping %r (election matter inside the silence "
+                     "period, ELECTION_SILENCE)", title)
+            continue
         toks = _tokens(title)
         if toks and any(len(toks & kt) / len(toks | kt) >= 0.6 for kt in kept_tokens):
             log.debug("ideation_fallback: dropping near-duplicate %r", title)
@@ -922,6 +929,35 @@ def _produce_ideas(target: int) -> list[dict]:
     except Exception as e:  # noqa: BLE001 — the top-up is a bonus; keep what we already have
         log.warning("ideation: ungrounded top-up failed (%s); keeping %d idea(s)", e, len(clean))
     return clean[:_MAX_IDEAS]
+
+
+_ELECTION_WORDS = re.compile(r"(?i)\b(?:elections?|polls?|polling|votes?|voting|campaign|"
+                             r"candidates?|exit polls?)\b")
+
+
+def _in_election_silence(idea: dict, today: date | None = None) -> bool:
+    """True when the idea is election matter for a state inside the 48 hours before its polling
+    closes (design 8.7; section 126 of the Representation of the People Act, whose reach over an
+    independent channel is untested). ELECTION_SILENCE lists `State:YYYY-MM-DD` pairs and is
+    kept by hand; the window is the polling date and the day before."""
+    raw = config.get("ELECTION_SILENCE") or ""
+    if not raw.strip():
+        return False
+    today = today or datetime.now(timezone.utc).date()
+    text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+    if not _ELECTION_WORDS.search(text):
+        return False
+    for pair in raw.split(","):
+        state, _, when = pair.partition(":")
+        try:
+            polling = date.fromisoformat(when.strip())
+        except ValueError:
+            log.warning("ideation: ELECTION_SILENCE entry %r is not State:YYYY-MM-DD", pair)
+            continue
+        if (state.strip() and re.search(rf"(?i)\b{re.escape(state.strip())}\b", text)
+                and polling - timedelta(days=1) <= today <= polling):
+            return True
+    return False
 
 
 def _enforce_mix(ranked: list[dict], n: int) -> list[dict]:
