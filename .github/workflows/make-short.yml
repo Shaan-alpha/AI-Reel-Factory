@@ -181,10 +181,10 @@ jobs:
           SFX_DIR: ${{ vars.SFX_DIR }}                              # where generated SFX wavs cache
           CAPTION_FONT_FILE: ${{ vars.CAPTION_FONT_FILE }}          # ttf for libass + stat cards
           VOICE_STYLE_PROMPT: ${{ vars.VOICE_STYLE_PROMPT }}          # gemini engine only; 'off' = no direction (the pre-09-01 sound)
-          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}  # free; any failure tries Vertex + 2.5 with the same voice before Chirp
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}  # voiced on Vertex since 2026-11-12 (the Developer API retires it 2026-11-17); then Vertex 2.5, same voice, before Chirp
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Zubenelgenubi' }}  # chosen by ear; bare name
           GEMINI_TTS_API_KEY: ${{ secrets.GEMINI_TTS_API_KEY }}       # optional; isolates TTS quota
-          GEMINI_TTS_VERTEX_FALLBACK: ${{ vars.GEMINI_TTS_VERTEX_FALLBACK || 'true' }}  # same voice on Vertex before Chirp (billed, ~$0.5/mo)
+          GEMINI_TTS_VERTEX_FALLBACK: ${{ vars.GEMINI_TTS_VERTEX_FALLBACK || 'true' }}  # Vertex voices the channel (billed, cents a reel); false = Developer API only
           GEMINI_TTS_TIMEOUT_SECONDS: ${{ vars.GEMINI_TTS_TIMEOUT_SECONDS || '120' }}  # the SDK default is no timeout at all
           DAILY_REEL_CAP: ${{ vars.DAILY_REEL_CAP || '3' }}           # operator ships 3 Shorts/day
           APPROVAL_CAP: ${{ vars.APPROVAL_CAP || '3' }}               # keep approvals in step with it

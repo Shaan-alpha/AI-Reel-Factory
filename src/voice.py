@@ -7,14 +7,16 @@ Contract:
     depends on   : Gemini Developer API TTS → Google Cloud TTS (Chirp 3 HD) → edge-tts → Kokoro
                    (rule 11: every engine has a fallback behind it).
 
-Default engine is **Gemini TTS** on the free `gemini-3.1-flash-tts-preview` model, voice
+Default engine is **Gemini TTS** on the `gemini-3.1-flash-tts-preview` model, voice
 **Zubenelgenubi** ("Casual") — chosen by ear because it carries dry sarcasm, which is the
 channel's whole register. The model was picked the same way on 2026-08-07: the operator ranked
-3.1-flash > 2.5-flash > Chirp on an identical script. That ranking is also the order this module
-degrades in, which is the only reason a *preview* model is safe as the default — a 503 lands on
-the second-favourite sound, not on a surprise. The chain then falls through to Chirp 3 HD,
-edge-tts and Kokoro, resolved by name at call time so a missing key or a withdrawn preview model
-just advances a link. Pick the primary via VOICE_ENGINE (gemini|google|edge|kokoro).
+3.1-flash > 2.5-flash > Chirp on an identical script, and kept 3.1 over both 3.8 models by ear on
+2026-11-12. That ranking is also the order this module degrades in, which is the only reason a
+*preview* model is safe as the default — a 503 lands on the second-favourite sound, not on a
+surprise. Since 2026-11-12 the model is voiced on **Vertex** wherever Vertex is set up: the
+Developer API shuts it down on 2026-11-17 (`_DEV_TTS_RETIRING`). The chain then falls through to
+Chirp 3 HD, edge-tts and Kokoro, resolved by name at call time so a missing key or a withdrawn
+preview model just advances a link. Pick the primary via VOICE_ENGINE (gemini|google|edge|kokoro).
 
 **Expressive delivery is per-engine**, because the control signals are not portable:
   · `gemini`  — promptable: honours VOICE_STYLE_PROMPT *and* inline style tags ([sarcastic]).
@@ -308,9 +310,13 @@ def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
 
 # Models this chain voices on Vertex in the channel voice (measured 2026-09-27). The 3.8 TTS
 # models answered 404 on Vertex then; Vertex serves them now (probed 2026-10-09), but they stay
-# out of the chain until the operator picks a 3.8 voice (3.1 shuts down on the Developer API on
-# 2026-11-17).
+# out of the chain: on 2026-11-12 the operator heard both against 3.1 and kept 3.1.
 _GEMINI_TTS_VERTEX_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-tts")
+# The Developer API shuts these two down on 2026-11-17. The operator asked on 2026-11-12 to move
+# off them at once, so wherever Vertex is set up (both production workflows) they are never asked
+# of the Developer API: the channel voice comes from Vertex, billed at cents a reel. A run with
+# only an API key (a fresh local clone) still uses the Developer API until the shutdown.
+_DEV_TTS_RETIRING = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
 # The GA model on Vertex: the last same-voice attempt before the chain leaves Gemini.
 _GEMINI_TTS_VERTEX_STABLE = "gemini-2.5-flash-tts"
 # Values of VOICE_STYLE_PROMPT that mean "no direction at all". An empty value cannot say that:
@@ -367,16 +373,22 @@ def _vertex_tts_enabled() -> bool:
 def _gemini_tts_attempts(model: str, have_key: bool) -> list[tuple[str, str]]:
     """(backend, model) pairs to try, in order. Every one speaks with the same voice.
 
-    Developer API first (free), then the same model on Vertex, which has separate capacity: the
-    2026-09-15 reels lost the channel voice to Chirp when the Developer API 503'd on BOTH its
-    models at once. Then the stable preview, then Vertex's GA model."""
+    With Vertex set up: the model on Vertex, then Vertex's GA model; the two models the Developer
+    API retires on 2026-11-17 are not asked of it (_DEV_TTS_RETIRING). A model Vertex does not
+    serve still goes to the Developer API first. Without Vertex: the Developer API's model, then
+    its stable preview. Vertex has capacity of its own: the 2026-09-15 reels lost the channel voice
+    to Chirp when the Developer API 503'd on BOTH its models at once."""
     vertex = _vertex_tts_enabled()
+
+    def dev(m: str) -> bool:
+        return have_key and not (vertex and m in _DEV_TTS_RETIRING)
+
     pairs = []
-    if have_key:
+    if dev(model):
         pairs.append(("dev", model))
     if vertex and model in _GEMINI_TTS_VERTEX_MODELS:
         pairs.append(("vertex", model))
-    if have_key:
+    if dev(_GEMINI_TTS_STABLE):
         pairs.append(("dev", _GEMINI_TTS_STABLE))
     if vertex:
         pairs.append(("vertex", _GEMINI_TTS_VERTEX_STABLE))

@@ -2,11 +2,12 @@
 
     python tools/verify_gemini_tts.py
 
-The channel voice (Zubenelgenubi) lives only on Gemini TTS, and voice.py tries it on two
-backends before falling back to Chirp: the Developer API (GEMINI_API_KEY, free) and Vertex AI
-(Application Default Credentials locally, Workload Identity Federation in CI). This renders one
-short line on each and reports OK or the exact failure, so a broken credential shows up here
-rather than as a reel voiced by Chirp. Two short requests; nothing is published or stored.
+The channel voice (Zubenelgenubi) lives only on Gemini TTS, and voice.py tries it on Vertex AI
+(Application Default Credentials locally, Workload Identity Federation in CI) before falling back
+to Chirp; the Developer API (GEMINI_API_KEY) is used only for models it keeps serving, since it
+shuts down 3.1 and the 2.5 preview on 2026-11-17. This renders one short line on each backend in
+use and reports OK or the exact failure, so a broken credential shows up here rather than as a reel
+voiced by Chirp. One or two short requests; nothing is published or stored.
 """
 from __future__ import annotations
 
@@ -58,7 +59,12 @@ def main() -> int:
     print(f"model: {config.get('GEMINI_TTS_MODEL', voice._GEMINI_TTS_PRIMARY)}   "
           f"voice: {config.get('GEMINI_TTS_VOICE', 'Zubenelgenubi')}")
     results = []
-    if config.get("GEMINI_TTS_API_KEY") or config.get("GEMINI_API_KEY"):
+    model = config.get("GEMINI_TTS_MODEL", voice._GEMINI_TTS_PRIMARY)
+    if model in voice._DEV_TTS_RETIRING:
+        # Production no longer asks the Developer API for this model (voice._DEV_TTS_RETIRING),
+        # and from 2026-11-17 it cannot answer, so its result would fail a healthy setup.
+        print("[SKIP] developer  retired for this model (shut down 2026-11-17); Vertex voices it")
+    elif config.get("GEMINI_TTS_API_KEY") or config.get("GEMINI_API_KEY"):
         results.append(_one("developer", {"GEMINI_TTS_VERTEX_FALLBACK": "false"}))
     else:
         print("[SKIP] developer  no GEMINI_API_KEY")

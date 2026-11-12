@@ -5,12 +5,13 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
-**Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit and the 2026-10-22 Claude scriptwriter (PR #13) (CHANGELOG `[Unreleased]`) · CI **740 pass, 5 skipped** (run 39756475459; the 5 are opt-in live tests)
+**Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**Last updated:** 2026-10-22 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked against the code and data and the design rewritten (2026-11-12); the build plan is next. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**Last updated:** 2026-11-12 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
-  ↳ same-voice chain: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
-  ↳ ⚠️ **both Developer-API TTS models shut down 2026-11-17** (replacements `gemini-3.8-flash-tts` / `-lite-tts`): operator ear test needed first
+  ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
+  ↳ the Developer API is no longer asked for 3.1 or the 2.5 preview (it shuts both down 2026-11-17); the operator kept 3.1 over both 3.8 models by ear on 2026-11-12
 **Models:** script writer **`claude-opus-5-5`** (Anthropic API, effort low, $4/month cap, since 2026-10-22) · Vertex: text `gemini-3.8-flash` · grounding `gemini-3.5-flash-lite` → `3.5-flash` · fact-check `gemini-3.5-flash` → `3.5-flash-lite` · ideation research `gemini-3.5-flash-lite` → `3.5-flash` (prose). Groq `openai/gpt-oss-120b` picks stories and is the text failover. Nothing on Vertex uses `gemini-2.5-flash`, which Vertex retires 2026-10-20
 **Trigger:** **on demand only** (`/makeshort` or the workflow button); the scheduled digests were removed 2026-09-29 (operator); nothing is produced without a tap
 **Editorial policy:** **truth over neutrality** — verdicts allowed; `factcheck.verify()` blocks **fabrication**, waives imprecision (`FACTCHECK_SEVERITY`)
@@ -23,7 +24,7 @@
 | Area | State |
 |------|-------|
 | Production | ✅ Live, **on demand only**: about 81 public Shorts on **@butitmatters**, about 0.7 a day against the 4–5 goal. Down 2026-10-01 → 10-09 (PyAV 19), back since |
-| Pipeline code ([src/](src/)) | ✅ Every module implemented and tested (table below); CI **740 pass, 5 skipped** |
+| Pipeline code ([src/](src/)) | ✅ Every module implemented and tested (table below); CI **741 pass, 5 skipped** |
 | Design / docs | ✅ 8 docs in [docs/](docs/) · rules in [CLAUDE.md](CLAUDE.md) |
 | GitHub Actions | `make-short` (the pipeline), `production` (manual-only), `tests` (push, PR, daily), `analytics` (daily), `verify-tts` / `verify-vertex` (manual); all on `ubuntu-24.04`, Python 3.12. 15 secrets, Pixabay and `ANTHROPIC_API_KEY` (2026-10-22) included (`CLAUDE_CODE_OAUTH_TOKEN` deliberately absent, rule 4). Repo variables: `FACTCHECK_STRICT=true`, `VISUAL_SOURCE=ai`, `YOUTUBE_PRIVACY=public`, `GOOGLE_TTS_VOICE` |
 | Telegram bot ([telegram-bot/](telegram-bot/)) | ✅ Vercel project `telegram-bot`, team `shaan-alphas-projects`, account **shaan-alpha** (the operator has two Vercel accounts; deploy from this one). CLI-deployed, not git-connected: every bot change needs `vercel deploy --prod` from `telegram-bot/`. Last deploy 2026-10-09 |
@@ -45,7 +46,7 @@ Numbers are the modules' own (docs/01 §5 and the module docstrings); rows follo
 | 2 | Approval (`approval.py` + the Vercel bot) | ✅ Digest with ✅ Approve / ⏭️ Pass / ❌ Reject; the bot writes each tap to Supabase (webhook mode); at most 3 approvals a run (`APPROVAL_CAP`); deaths and serious harm flagged "Sensitive" |
 | 3 | Scriptwriter (`scriptwriter.py`) | ✅ Template N: a grounded Gemini draft (`gemini-3.5-flash-lite` → `3.5-flash`), then **Claude** (`claude-opus-5-5`, effort low, ~$0.037) writes the final script from it, capped at $4/month by the `claude_spend` ledger (since 2026-10-22); without Claude the draft ships; ungrounded `gemini-3.8-flash` (Groq failover) last; a why-it-matters take; ≤ 80 words (LLM tighten pass, then a whole-sentence cut); hook punch-up except on somber stories; titles ≤ 70 chars; key-point cards; somber tone for deaths and serious harm |
 | 11 | Fact-check gate (`factcheck.py`) | ✅ Every script, before voicing: `gemini-3.5-flash` → `3.5-flash-lite` on Vertex, grounded; 2 samples (either can block); blocks fabrication, waives imprecision (`FACTCHECK_SEVERITY=critical`); one repair pass; strict mode holds the reel if the checker cannot run. A blocked idea gets status `blocked` |
-| 4 | Voice (`voice.py`) | ✅ Gemini TTS `gemini-3.1-flash-tts-preview`, voice Zubenelgenubi, labelled style prompt. Same voice: Developer API 3.1 → Vertex 3.1 → Developer 2.5 → Vertex 2.5 GA; then Chirp 3 HD `en-IN-Chirp3-HD-Zubenelgenubi` → edge-tts `en-IN-PrabhatNeural` → Kokoro `am_michael` (one male narrator throughout). Telegram alert when a reel leaves the channel voice; `posts.voice` records the engine |
+| 4 | Voice (`voice.py`) | ✅ Gemini TTS `gemini-3.1-flash-tts-preview`, voice Zubenelgenubi, labelled style prompt. Same voice: Vertex 3.1 → Vertex 2.5 GA (since 2026-11-12; the Developer API is used only where Vertex is not set up); then Chirp 3 HD `en-IN-Chirp3-HD-Zubenelgenubi` → edge-tts `en-IN-PrabhatNeural` → Kokoro `am_michael` (one male narrator throughout). Telegram alert when a reel leaves the channel voice; `posts.voice` records the engine |
 | 5 | Visuals (`visuals.py`) | ✅ `VISUAL_SOURCE=ai`: Cloudflare FLUX.2 klein (768×1344, per-shot seeds, 4 shots at a time) → FLUX.1 schnell → a Pexels photo, each with Ken Burns motion; stock video (Pexels → Pixabay) if the image path fails. Stock is under the Pexels/Pixabay licences, not CC0 |
 | 6 | Assembly (`assembly.py`, `audio_sfx.py`, `graphics.py`) | ✅ FFmpeg 1080×1920 H.264: crossfades, grade, vignette (grain off), one of four AI-generated music beds (Google Lyria 2, disclosed) with ducking, a click every 2nd cut, -14 LUFS, logo bug, seamless loop, CRF 20 / 8 Mbps cap, BT.709 |
 | 7 | Captions (`subtitles.py`) | ✅ faster-whisper `base` times the words (audio decoded by FFmpeg; PyAV pinned to 18.1.0 and off this path); the text comes from the approved script; karaoke in 3-word groups, frame-1 hook, key-point cards, "Source: <publisher>" lower-third, Montserrat |
@@ -58,11 +59,15 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 
 ## Next actions
 
+- **New format:** AI-video shots, Hinglish narration, English subtitles, Indian viewers. The
+  audit is checked and the design rewritten (2026-11-12,
+  [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
+  next, the build plan, then the build in stages. State and decisions are in
+  [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
-  - **before 2026-11-17**: ear-test `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts`
-    (Zubenelgenubi) and pick the channel voice's successor; both current Developer-API TTS
-    models shut down that day and every reel would move to the billed Vertex path. The code
-    switch follows the pick;
+  - ~~before 2026-11-17: ear-test the 3.8 TTS models~~ Done 2026-11-12: the operator kept
+    `gemini-3.1-flash-tts-preview` (Charon, Hinglish) over both 3.8 models, and the voice moved
+    to Vertex the same day;
   - settle the two source questions under Open decisions;
   - unlist or delete the two public Shorts that never passed the gate, `xRUo6GxYwYo` and
     `NKPb-InUoJU` (the pipeline's YouTube token cannot edit videos);
@@ -75,11 +80,11 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
     `containsSyntheticMedia=true`, but our scopes cannot read it back; open since 2026-06-09);
   - note the 9 Shorts found gone from YouTube on 2026-09-28: they were never reported (the
     alert had no Telegram secrets until 2026-10-09), and their IDs are in the 2026-10-09 log;
-  - re-run `tools/get_youtube_token.py` when convenient: it asks for `yt-analytics.readonly`,
-    which a future retention pull needs (nothing reads it yet).
-- **Code, when there is time** (the 2026-10-09 log's "Not done here"): the 3.8 TTS migration
-  after the pick; a hashed lock file for CI; a scheduled model-liveness canary; the lower
-  findings listed there.
+  - ~~re-run `tools/get_youtube_token.py`~~ Not needed: the YouTube Analytics API was only
+    disabled on the OAuth client's project; enabled 2026-11-12, today's token reads retention.
+- **Code, when there is time** (the 2026-10-09 log's "Not done here"): a hashed lock file for
+  CI; a scheduled model-liveness canary; the lower findings listed there. (The 3.8 TTS
+  migration is not needed: the operator kept 3.1, now on Vertex.)
 
 ### Operating model: on demand only (since 2026-09-29)
 Start a run with `/makeshort [N]` in the Telegram bot (N ideas, 1–8, default 5; it waits 30 min)
@@ -125,6 +130,97 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
+### 2026-11-12 — The voice moves to Vertex now; the audit checked; the design rewritten
+
+**Voice (live once merged).** The Developer API shuts down `gemini-3.1-flash-tts-preview` and
+`gemini-2.5-flash-preview-tts` on 2026-11-17. The operator heard test 4's Hinglish lines in Charon
+on 3.1 and on both 3.8 models (`test-videos/voice_A/B/C_*.mp3`) and chose 3.1 ("voice a is better
+than others"), then asked for the change "now". So wherever Vertex is set up (both production
+workflows), those two models are no longer asked of the Developer API: the channel voice comes from
+Vertex 3.1, then Vertex's 2.5 GA model, then Chirp (`voice._DEV_TTS_RETIRING`). Billed on Vertex at
+cents a reel, inside the Google Cloud cap. `tools/verify_gemini_tts.py` skips the Developer API for
+those models. The live voice stays Zubenelgenubi until the new format launches with Charon.
+
+**YouTube Analytics.** The first query failed with `accessNotConfigured`: the API was disabled on
+the OAuth client's Google Cloud project (`composed-maxim-498517-f0`). Enabled (free); today's
+refresh token then read retention and country with no new consent. Lifetime baseline: 16,048 views,
+44% engaged, 71% of each Short watched on average; **39% of views from the US, 5.2% from India**;
+86% from the Shorts feed. The old audience was not Indian.
+
+**The audit, checked.** Four second reviewers checked all 88 findings against the code and data
+(`research_notes/Channel audit 2026-11-10/verification/`): none was wrong outright, many details
+changed (for example, the fallback voices fail silently on Hinglish; the judging rule's false-alarm
+rate is about 5%, not 2%; titles of 7 words or fewer mattered even when the banner fitted).
+
+**The design, rewritten** on the checked audit, the India research and the review's 21 confirmed
+findings: [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md).
+Next: a builder's read of it, then the build plan.
+
+### 2026-11-10 — A new format chosen; design, research and a reach audit in progress (no code changed)
+
+The operator compared four test videos and chose the direction for every reel from now on.
+Nothing under `src/`, `tests/` or `.github/` has changed and nothing is committed. The full
+state, file map and next steps are in
+[docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
+
+**Decided by the operator**
+
+- Visuals: the pipeline's FLUX stills, each animated into a 5-second clip by Kling 2.5 Turbo on
+  **Higgsfield** (a new, approved billed service). About $1 a reel, about 20 reels a month,
+  $60-80 a month at most. **No spend cap in code**; costs are to be logged.
+- Narration in **Hinglish**, an informative male voice (Gemini TTS `Charon` in the tests);
+  subtitles stay in English. Audience: Indian viewers.
+- Topics: trending, high-impact stories from anywhere, not mainly politics.
+- No watermark and no on-screen AI label; the disclosure line stays in the description. The
+  corner logo and music beds stay.
+- A full audit of the pipeline and its prompts for watchability and reach.
+
+**Measured**
+
+- Kling 2.5 Turbo Standard image-to-video: $0.179 per 5 s clip, about 100 s to generate. A
+  four-clip, 26.7 s test reel cost $0.72. Lip-synced presenter tests cost about $2.50 each and
+  were dropped. The four tests used about $5.78 of Higgsfield balance.
+- The channel: 87 live Shorts, about 16,000 views in total, **median 44 views**, best 1,256.
+
+**Written so far**
+
+- Design, first draft: `docs/superpowers/specs/2026-11-10-ai-video-reels-design.md` (it
+  predates the Hinglish and India decisions and is to be rewritten).
+- Research with sources: `docs/superpowers/specs/2026-11-10-ai-video-reels-research.md`.
+- A design review confirmed 21 issues to fix before building; they are listed in the handoff.
+- India research: five notes and one report, `reports/Hinglish Shorts reach in India.md`.
+- A full audit in eight lenses (data, ideation, script, voice and audio, visuals and edit,
+  packaging, throughput, prompts): 88 findings, all in
+  `research_notes/Channel audit 2026-11-10/FINDINGS.md`, with the eight reports beside it.
+  The findings have not been independently verified.
+- Raw notes, the channel data export, test scripts and the test videos are under
+  `research_notes/`, `reports/` and `test-videos/`, kept out of git on this machine.
+
+**What the research and audit say, in short** (detail and evidence grades in the handoff):
+
+- The story and its first sentence decide reach. Length, pace and title tricks did not
+  separate leading Hinglish channels' hits from their ordinary Shorts.
+- The pipeline cannot see why viewers leave: it stores one public view count a day. Reading
+  retention and viewer country needs the `yt-analytics.readonly` scope (the existing operator
+  item: re-run `tools/get_youtube_token.py`).
+- Hinglish narration breaks the caption step as built (it would burn invented English with no
+  error) and five other English-only assumptions, including the fallback voices and the
+  language declared to YouTube.
+- Scripts that opened on a wind-up word were picked up 9 times in 41 against 21 in 46 for
+  scripts that start on the subject; the scriptwriter was adding the wind-up.
+- The headline pool cannot supply enough science and technology stories, and the "winning
+  titles" feedback would steer the new format back to the old one.
+- India's rules in force since 2026-02-20 put AI labelling on platforms; the uploader declares.
+  No burned-in label is required. A draft that would require one had not been adopted as far
+  as the research found.
+- The 2026-11-17 voice deadline now also matters for the new format: Gemini 3.8 TTS takes a
+  different request, and the backup voices as configured cannot read Hinglish.
+
+**Next (when the operator says to continue):** check the audit's main claims, rewrite the
+design once, write the build plan, then build in stages. **Blockers:** none. The one-time setup
+(the `HF_API_KEY` secret, new SQL in Supabase, repository variables) waits for the build and
+the operator's go-ahead. Decisions waiting for the operator are listed in the handoff, section 6c.
+
 ### 2026-10-22 — A crawling Ubuntu mirror held `/makeshort 1` in apt for 16 minutes
 
 Operator: `/makeshort 1` had run 12 minutes with nothing on Telegram. Run 39785910849.
@@ -141,7 +237,7 @@ Operator: `/makeshort 1` had run 12 minutes with nothing on Telegram. Run 397859
   90-minute kill cuts mid-chain: the idea stranded at `approved`, or a kill between upload and
   `insert_post` that a rerun publishes twice.
 
-**Done** (local suite **741 pass, 5 skipped**; CI not yet run on it)
+**Done** (PR #14, merged as `c388ebc`; CI **741 pass, 5 skipped** on the branch, the PR and `main`)
 - The job's first step writes `JOB_STARTED_AT` (epoch seconds) to `$GITHUB_ENV` in
   `make-short.yml` and `production.yml`; `_seconds_left()` counts from it, and falls back to
   `JOB_SETUP_MINUTES` without it. Test watched failing first (85 min claimed, 60 real).
@@ -151,9 +247,32 @@ Operator: `/makeshort 1` had run 12 minutes with nothing on Telegram. Run 397859
   survives an image that deletes .debs after `update` or after `dpkg`. `tests` runs daily on
   `main`, which keeps the shared cache from its 7-day expiry.
 
-**Next / limits**
-- Prove it on a runner: a cold run should save the cache and a warm one should download ~0 B.
-  The first run after merging is cold, so a crawling mirror still hurts that one run.
+**Proven on runners**
+- Branch, cold (run 39789743167): install **760 s**, the mirror still crawling; cache saved, 94.5 MB.
+- Branch, warm (run 39792458582), the same hour: restored, install **15 s**, "Need to get 0 B/99.2 MB".
+- `main`: the merge's push run (39793591290) found no cache and saved it at 14:13:51; by then the
+  mirror had recovered (99 MB in ~5 s). The run status API showed it "queued" minutes after it
+  had finished, which briefly made that cache look unexplained; the run's own log settles it.
+- The re-run of the Short (make-short 39793617178) started before that save, so it was cold too
+  (install 25 s on the recovered mirror). Its env carried `JOB_STARTED_AT: 1792678322` (14:12:02
+  UTC, the job's start). Its post-step save warned "another job may be creating this cache":
+  harmless, `main` already had the entry.
+
+**The Short, and the first live Claude script** (idea 548, https://www.youtube.com/shorts/YAIDWDKgN_A)
+- Setup 54 s · ideation to digest 30 s · operator's tap 12.4 min · grounded draft + Claude 18 s
+  (`claude-opus-5-5`, low: **$0.0393**, $0.22 of $4.00 this month) · fact-check 7 s · voice 15 s
+  (first link, Developer-API 3.1) · visuals 83 s (12 AI clips) · render + captions 76 s · upload
+  2.5 s. **Tap to live: 3 min 24 s.** Nothing in the pipeline itself is a bottleneck.
+- The gate passed (6 claims) and waived 2 issues, both samples agreeing: the script says "a
+  missile strike" on King Fahd International Airport, but authorities have not said missile or
+  drone (four drones were intercepted over the Eastern Province that night). Imprecision under
+  the 2026-08-07 policy, so it shipped; flagged to the operator.
+- `gemini-3.8-flash` 400s once per run on MINIMAL thinking, then uses LOW (`llm._generate_content`).
+  By design (keyed on the error, not a version table); costs ~1 s. Left as is.
+
+**Limits**
+- A run that finds no cache while the mirror crawls is still slow; the daily `tests` run keeps
+  the cache inside its 7-day expiry, so that should now be rare.
 - Bump the key's `-v1` if the runner image moves off 24.04 or the package set changes.
 
 ### 2026-10-22 — Claude writes every script (Anthropic API, $4/month cap)

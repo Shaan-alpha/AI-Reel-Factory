@@ -628,23 +628,24 @@ def test_gemini_tts_raises_when_every_attempt_fails(monkeypatch, tmp_path):
         voice._synthesize_gemini("hi there", str(tmp_path))
 
 
-def test_vertex_serves_the_same_voice_before_the_chain_leaves_gemini(monkeypatch):
-    """2026-09-15: the Developer API 503'd on BOTH TTS models and both reels shipped in Chirp's
-    voice. Vertex serves the same model with separate capacity, so it is tried next."""
+def test_with_vertex_set_up_the_channel_voice_skips_the_retiring_developer_api(monkeypatch):
+    """The Developer API shuts down gemini-3.1-flash-tts-preview and gemini-2.5-flash-preview-tts
+    on 2026-11-17. The operator chose 3.1 by ear on 2026-11-12 and asked for the move "now", so
+    with Vertex set up (both production workflows) neither model is asked of the Developer API:
+    Vertex 3.1 voices the reel, and Vertex's GA 2.5 model is the same-voice fallback."""
     monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
     monkeypatch.setenv("GCP_PROJECT", "p")
     assert voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", have_key=True) == [
-        ("dev", "gemini-3.1-flash-tts-preview"), ("vertex", "gemini-3.1-flash-tts-preview"),
-        ("dev", "gemini-2.5-flash-preview-tts"), ("vertex", "gemini-2.5-flash-tts")]
+        ("vertex", "gemini-3.1-flash-tts-preview"), ("vertex", "gemini-2.5-flash-tts")]
 
 
 def test_vertex_is_skipped_for_models_it_does_not_serve(monkeypatch):
-    """Vertex 404s gemini-3.8-flash-tts (measured 2026-09-27)."""
+    """A model outside the Vertex list (3.8 answered 404 there on 2026-09-27) still goes to the
+    Developer API, which keeps serving it; the retiring 2.5 preview is not asked for."""
     monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
     monkeypatch.setenv("GCP_PROJECT", "p")
     assert voice._gemini_tts_attempts("gemini-3.8-flash-tts", have_key=True) == [
-        ("dev", "gemini-3.8-flash-tts"), ("dev", "gemini-2.5-flash-preview-tts"),
-        ("vertex", "gemini-2.5-flash-tts")]
+        ("dev", "gemini-3.8-flash-tts"), ("vertex", "gemini-2.5-flash-tts")]
 
 
 def test_no_vertex_attempts_without_vertex_setup(monkeypatch):
