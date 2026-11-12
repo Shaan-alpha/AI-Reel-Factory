@@ -145,3 +145,68 @@ def test_the_real_youtube_title_is_backfilled_onto_old_scripts(monkeypatch):
     monkeypatch.setattr(analytics.db, "backfill_script_title", lambda sid, t: filled.append((sid, t)))
     analytics.collect_stats()
     assert filled == [(9, "Oil Export Wars")]
+
+
+# --- retention, audience and traffic per Short (design 10.1) ----------------------------------
+
+from datetime import date  # noqa: E402
+
+from googleapiclient.errors import HttpError  # noqa: E402
+
+
+class _FakeAnalytics:
+    """reports().query(**kw).execute() answers by the query's dimensions."""
+
+    def __init__(self, answers, fail_for=()):
+        self.answers, self.fail_for, self.queries = answers, set(fail_for), []
+
+    def reports(self):
+        return self
+
+    def query(self, **kw):
+        self.queries.append(kw)
+        self._kw = kw
+        return self
+
+    def execute(self):
+        if any(f"video=={v}" == self._kw.get("filters") for v in self.fail_for):
+            raise HttpError(type("Resp", (), {"status": 500, "reason": "boom"})(), b"{}")
+        return self.answers.get(self._kw.get("dimensions"), {})
+
+
+_FULL = {
+    None: {"rows": [[100, 40, 20, 71.5, 2]]},
+    "country": {"rows": [["IN", 60], ["US", 40]]},
+    "insightTrafficSourceType": {"rows": [["SHORTS", 90], ["YT_SEARCH", 10]]},
+    "elapsedVideoTimeRatio": {"rows": [[0.01, 1.2], [0.5, 0.6], [1.0, 0.3]]},
+}
+
+
+def test_video_metrics_parses_totals_countries_traffic_and_retention():
+    yta = _FakeAnalytics(_FULL)
+    m = analytics._video_metrics(yta, "V1", date(2026, 11, 1), date(2026, 11, 7))
+    assert m["views"] == 100 and m["engaged_views"] == 40 and m["avg_view_seconds"] == 20
+    assert m["avg_view_pct"] == 71.5 and m["subscribers_gained"] == 2
+    assert m["india_share"] == 0.6 and m["countries"] == {"IN": 60, "US": 40}
+    assert m["traffic"] == {"SHORTS": 90, "YT_SEARCH": 10}
+    assert m["retention"] == [[0.01, 1.2], [0.5, 0.6], [1.0, 0.3]]
+    assert all(q["filters"] == "video==V1" and q["startDate"] == "2026-11-01"
+               and q["endDate"] == "2026-11-07" for q in yta.queries)
+
+
+def test_video_metrics_with_no_rows_stores_zeros():
+    m = analytics._video_metrics(_FakeAnalytics({}), "V1", date(2026, 11, 1), date(2026, 11, 7))
+    assert m["views"] == 0 and m["india_share"] is None
+    assert m["countries"] == {} and m["traffic"] == {} and m["retention"] == []
+
+
+def test_collect_metrics_measures_each_post_once_and_survives_an_error(monkeypatch):
+    posts = [{"id": 1, "external_id": "BAD", "published_at": "2026-10-01T10:00:00+00:00"},
+             {"id": 2, "external_id": "V2", "published_at": "2026-10-02T10:00:00+00:00"}]
+    monkeypatch.setattr(analytics.db, "posts_needing_metrics", lambda **k: posts)
+    stored = []
+    monkeypatch.setattr(analytics.db, "upsert_post_metrics",
+                        lambda post_id, window_days, metrics: stored.append((post_id, window_days)))
+    monkeypatch.setattr(analytics, "_analytics_client", lambda: _FakeAnalytics(_FULL, {"BAD"}))
+    assert analytics.collect_metrics() == 1
+    assert stored == [(2, 7)]
