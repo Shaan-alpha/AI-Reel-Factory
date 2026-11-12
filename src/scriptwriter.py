@@ -218,21 +218,66 @@ def _build_prompt(idea: dict, template: str) -> str:
     return llm.today_line() + prompt
 
 
-_TITLE_MAX = 70
+# Design 9.4: one title, which is also the frame-1 banner. At 44 characters it always fits the
+# banner at full size (three lines of 16); titles of 7 words or fewer were picked up 15 of 23 times
+# against 3 of 17 since late July.
+_TITLE_MAX = 44
+_TITLE_MAX_WORDS = 7
+
+_SHORTEN_TITLE_PROMPT = """Shorten this YouTube Shorts title to at most {max_words} words and at \
+most {max_chars} characters. Put the searchable name first, and state the claim the video \
+delivers. Use only what the title or the narration already says: add no number, name or claim.
+
+TITLE: {title}
+NARRATION: {body}
+
+Return ONLY a JSON object: {{"title": "the shortened title"}}"""
 
 
-def _fit_title(title: str, limit: int = _TITLE_MAX) -> str:
-    """Hold the title to `limit` characters: the prompt asks, this makes it true. An 84-character
-    title ("...Last Minute—Why It Almost Crashed the System") overflowed even the smallest hook
-    banner. Cut at the first dash or colon when the head still reads as a title, else at a word."""
-    title = re.sub(r"\s+", " ", title or "").strip()
-    if len(title) <= limit:
-        return title
+def _title_fits(title: str) -> bool:
+    return len(title) <= _TITLE_MAX and len(title.split()) <= _TITLE_MAX_WORDS
+
+
+def _cut_title(title: str) -> str:
+    """The mechanical fit: the head before a dash or colon when it fits and still reads as a title
+    (an 84-character "...Last Minute—Why It Almost Crashed the System" overflowed the banner),
+    else the longest run of whole words from the start that fits."""
     for sep in ("—", " – ", " - ", ": "):
         head = title.split(sep)[0].strip()
-        if 20 <= len(head) <= limit:
+        if head != title and len(head) >= 20 and _title_fits(head):
             return head
-    return title[:limit].rsplit(" ", 1)[0].rstrip(" :,;-—")
+    words = title.split()[:_TITLE_MAX_WORDS]
+    while words and len(" ".join(words)) > _TITLE_MAX:
+        words.pop()
+    # A single word longer than the limit has no boundary to cut at.
+    return " ".join(words).rstrip(" :,;-—–") or title[:_TITLE_MAX].strip()
+
+
+def _shorten_title(title: str, body: str) -> str:
+    """Hold the title to 7 words and 44 characters: the prompt asks, this makes it true. Over
+    either limit the model is asked once to shorten it, and its answer is taken only within both
+    limits and with no number the title and the narration lack; else the title is cut at a word.
+    Never raises."""
+    title = re.sub(r"\s+", " ", title or "").strip()
+    if _title_fits(title):
+        return title
+    new = ""
+    try:
+        data = _parse_llm_json(llm.generate(
+            _SHORTEN_TITLE_PROMPT.format(max_words=_TITLE_MAX_WORDS, max_chars=_TITLE_MAX,
+                                         title=title, body=body),
+            json=True, max_tokens=512))
+        new = re.sub(r"\s+", " ", str(data.get("title") or "")).strip()
+    except Exception as e:  # noqa: BLE001 — the word cut below is the fallback
+        log.warning("scriptwriter: title shortening failed (%s)", e)
+    if new:
+        added = _added_facts({"title": new}, f"{title}\n{body}")
+        if _title_fits(new) and not added:
+            log.info("scriptwriter: title shortened to %r", new)
+            return new
+        log.warning("scriptwriter: shortened title refused (%s)",
+                    f"adds {added}" if added else f"{new!r} is still too long")
+    return _cut_title(title)
 
 
 def _max_words() -> int:
@@ -1011,7 +1056,9 @@ def write_script(idea: dict, template: str = "N") -> dict:
         raise ValueError(f"scriptwriter: empty script_body for idea {idea_id}.")
 
     # SEO extras (used by publish for title + tags; fall back to the idea title downstream).
-    title = _fit_title((data.get("title") or "").strip())
+    # With no title from the writer, the idea's own title is held to the same limits here, so the
+    # fact-check and the banner see the title that is published.
+    title = _shorten_title(str(data.get("title") or idea.get("title") or "").strip(), body)
 
     # Fit the cap BEFORE the punch-up: the punch-up only accepts a rewrite that is under the cap,
     # so on the 100-word drafts every run was producing it could not act (9 of 16 logged
@@ -1029,7 +1076,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # becomes the YouTube title and the frame-1 banner of a story about deaths.
     if config.get_bool("ENABLE_HOOK_JUDGE", True) and tone_for(idea, body) != "somber":
         title, body = _punch_up_hook(title, body)
-        title = _fit_title(title)  # the punch-up writes its own title, and nothing capped it
+        title = _shorten_title(title, body)  # the punch-up writes its own title
 
     hashtags = data.get("hashtags")
     if not isinstance(hashtags, list):

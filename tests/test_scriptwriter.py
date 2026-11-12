@@ -689,15 +689,22 @@ def test_the_script_prompt_carries_todays_date():
     assert scriptwriter._build_prompt(IDEA, "N").startswith("TODAY'S DATE: 20")
 
 
-def test_a_long_title_is_cut_at_its_dash():
-    t = "Nationwide Bank Strike Cancelled at the Last Minute—Why It Almost Crashed the System"
-    assert scriptwriter._fit_title(t) == "Nationwide Bank Strike Cancelled at the Last Minute"
-    assert len(scriptwriter._fit_title("word " * 30)) <= 70
-    assert scriptwriter._fit_title("Short title") == "Short title"
+def test_a_long_title_is_cut_at_its_dash_when_the_head_fits(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+    t = "Bank Strike Cancelled—Why It Almost Crashed the System"
+    assert scriptwriter._shorten_title(t, "") == "Bank Strike Cancelled"
+    cut = scriptwriter._shorten_title("word " * 30, "")
+    assert len(cut) <= 44 and len(cut.split()) <= 7
+    assert scriptwriter._shorten_title("Short title", "") == "Short title"
+
+
+def _no_model(*a, **k):
+    raise RuntimeError("model down")
 
 
 def test_a_punched_up_title_is_held_to_the_limit_too(monkeypatch):
-    """_fit_title ran on the writer's title only; the hook doctor's replacement went out as is."""
+    """The title fit ran on the writer's title only; the hook doctor's replacement went out as is."""
+    monkeypatch.setenv("ENABLE_HOOK_JUDGE", "true")
     reply = json.dumps({"title": "Short Title",
                         "script_body": "A clear analysis of why this matters for everyone. " * 6,
                         "caption": "hook line.", "hashtags": ["#Shorts"]})
@@ -705,8 +712,10 @@ def test_a_punched_up_title_is_held_to_the_limit_too(monkeypatch):
     long_title = ("Nationwide Bank Strike Cancelled at the Last Minute—Why It Almost Crashed "
                   "the System")
     monkeypatch.setattr(scriptwriter, "_punch_up_hook", lambda t, b: (long_title, b))
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
     out = scriptwriter.write_script(IDEA)
-    assert out["title"] == "Nationwide Bank Strike Cancelled at the Last Minute"
+    assert out["title"] == "Nationwide Bank Strike Cancelled at the Last"
+    assert len(out["title"]) <= 44 and len(out["title"].split()) <= 7
 
 
 # --- the opening check on every script (design 9.2; audit data 4, script 3, voice-audio 4) --------
@@ -834,3 +843,56 @@ def test_write_script_stores_the_writers_known_structure_else_the_chosen_one(mon
         captured = _patch(monkeypatch, json.dumps(reply))
         out = scriptwriter.write_script(IDEA)
         assert out["structure"] == stored and captured["structure"] == stored, said
+
+
+# --- stage 1b: one short title, which is also the banner (design 9.4) ------------------------
+
+_LONG_TITLE = "India has just banned 3 popular apps for every school student in the country"
+_TITLE_BODY = "India banned 3 apps for students on Monday. Here's why it matters for schools."
+
+
+def test_a_title_within_the_limits_is_kept(monkeypatch):
+    assert scriptwriter._TITLE_MAX == 44 and scriptwriter._TITLE_MAX_WORDS == 7
+    monkeypatch.setattr(scriptwriter.llm, "generate",
+                        lambda *a, **k: pytest.fail("no model call for a title that fits"))
+    title = "ISRO's new rocket can land itself"
+    assert scriptwriter._shorten_title(title, "body") == title
+
+
+def test_a_long_title_is_shortened_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: calls.append(a) or
+                        json.dumps({"title": "India bans 3 apps for students"}))
+    assert scriptwriter._shorten_title(_LONG_TITLE, _TITLE_BODY) == "India bans 3 apps for students"
+    assert len(calls) == 1
+
+
+def test_a_long_title_is_cut_at_a_word(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+    out = scriptwriter._shorten_title(_LONG_TITLE, _TITLE_BODY)
+    assert len(out) <= 44 and len(out.split()) <= 7
+    assert out.split() == _LONG_TITLE.split()[:len(out.split())]  # whole words, never mid-word
+    assert out == "India has just banned 3 popular apps"
+
+
+def test_a_shortened_title_that_adds_a_fact_is_refused(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate",
+                        lambda *a, **k: json.dumps({"title": "India bans 5 apps for students"}))
+    assert scriptwriter._shorten_title(_LONG_TITLE, _TITLE_BODY) == \
+        "India has just banned 3 popular apps"
+
+
+def test_a_shortened_title_still_too_long_is_refused(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: json.dumps(
+        {"title": "India has banned 3 popular apps for every student"}))
+    assert scriptwriter._shorten_title(_LONG_TITLE, _TITLE_BODY) == \
+        "India has just banned 3 popular apps"
+
+
+def test_a_missing_title_falls_back_to_the_idea_title_within_the_limits(monkeypatch):
+    """With no title from the writer, the idea's title went out unshortened and unchecked."""
+    captured = _patch(monkeypatch, json.dumps({"script_body": "ISRO's rocket landed itself. " * 3,
+                                               "caption": "c", "hashtags": []}))
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+    out = scriptwriter.write_script(IDEA)  # "ISRO's reusable rocket, explained - why it matters"
+    assert out["title"] == "ISRO's reusable rocket, explained" == captured["title"]
