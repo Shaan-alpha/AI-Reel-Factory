@@ -13,6 +13,22 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Added (2026-11-12: stage 2, Hinglish narration behind NARRATION_LANGUAGE; details: STATUS.md)
+- **Two-text lines** (`src/hinglish.py`): the fact-checked English script, line by line, as spoken
+  Hinglish, rendered by Claude (then Gemini, then Groq). Code checks the count, numbers, names,
+  scripts and length, a model from another provider checks the meaning, there is one retry, and
+  digits are read as English words.
+- **The Hindi route** (`voice`): Gemini with test 4's style prompt, then Chirp 3 HD's Hindi Charon;
+  never edge-tts or Kokoro; a length band of 0.75-1.30 times the English script; silence trimmed.
+- **English subtitles from the pauses** (`subtitles.burn_hinglish`): no speech recognition; sentence
+  ends assigned to pauses together; clause blocks in spoken order; plain white, two rows at most.
+- **The wiring** (`production`): audio language `hi`, `scripts.spoken`, and English narration with
+  an operator alert whenever the Hinglish fails. `llm.generate_with` pins one provider;
+  `llm.generate_claude` takes a schema and the server-side refusal fallback.
+- New settings: `NARRATION_LANGUAGE`, `HINGLISH_STRICT`, `HINGLISH_MIN_SECONDS`,
+  `HINGLISH_MAX_SECONDS`, `GOOGLE_TTS_VOICE_HI`. The code's voice defaults become Charon; the
+  workflows keep Zubenelgenubi until the relaunch.
+
 ### Changed (2026-11-12: stage 1b, script and packaging; details: STATUS.md)
 - **A plain explainer for Indian viewers** (`scriptwriter`, `voice`): the sarcastic, roasting
   voice is retired; sentence one carries the subject and the Indian stake, and the payoff says

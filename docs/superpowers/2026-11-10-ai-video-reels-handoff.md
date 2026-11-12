@@ -59,7 +59,14 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   - 9.1's warning for six or more words copied from a prompt example is not built;
   - "Today's Wordle solution" passes the puzzle filter.
 
-**Next:** stage 2 (Hinglish), then stages 3-4 and the relaunch (design section 14).
+- **Stage 1 is merged** (PR #18). **Stage 2 (Hinglish) is built** on `feat/stage-2-hinglish`, behind
+  `NARRATION_LANGUAGE=hinglish` (9 tasks; plan
+  `docs/superpowers/plans/2026-11-12-stage-2-hinglish.md`; live checks in STATUS.md). Deferred
+  from the design: the Gemini 3.8 TTS request shape (7.5), since the operator kept 3.1, which
+  Vertex serves.
+
+**Next:** stage 2's final review and fixes, push with the operator's go-ahead, then stages 3-4
+and the relaunch (design section 14).
 
 ## 1. What the operator wants
 
