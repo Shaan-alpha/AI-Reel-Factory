@@ -375,6 +375,12 @@ def _record_verdict(script: dict, check: dict, repaired: bool) -> None:
         db.set_script_factcheck(script["script_id"], verdict)
     except Exception as e:  # noqa: BLE001 — rule 14
         log.warning("produce: could not store the fact-check verdict (%s)", e)
+    # What grounding did for the draft and for the gate (design 9.7), beside the verdict.
+    grounding = {**(script.get("grounding") or {}), "gate_citations": check.get("citations")}
+    try:
+        db.set_script_grounding(script["script_id"], grounding)
+    except Exception as e:  # noqa: BLE001 — rule 14
+        log.warning("produce: could not store the grounding counts (%s)", e)
 
 
 # Claude problems already reported in this run, by kind. A revoked key, a bad setting, a missing

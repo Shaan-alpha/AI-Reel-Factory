@@ -415,11 +415,15 @@ def _idea_lines(prompt: str) -> str:
 _CLAUDE_ISSUE_KINDS = ("no-key", "config", "ledger", "budget", "misconfigured")
 
 
-def _claude_write(prompt: str, draft: dict) -> tuple[dict | None, dict | None]:
+def _claude_write(prompt: str, draft: dict,
+                  searched: bool = False) -> tuple[dict | None, dict | None]:
     """Claude's version of the script, or None to ship the grounded draft, plus the reason
     worth reporting when Claude could not write (None otherwise). Fail-soft (rule 11): no key, a
-    spent budget, an API error, an unusable reply or an added fact all return None."""
-    note = _CLAUDE_DRAFT_NOTE.format(searched=_DRAFT_SEARCHED,
+    spent budget, an API error, an unusable reply or an added fact all return None.
+
+    `searched` (the draft came back with search citations) decides whether Claude is told the
+    draft's facts were checked against current reporting."""
+    note = _CLAUDE_DRAFT_NOTE.format(searched=_DRAFT_SEARCHED if searched else _DRAFT_UNSEARCHED,
                                      draft=json.dumps(draft, ensure_ascii=False))
     try:
         data = _parse_llm_json(llm.generate_claude(prompt + note, purpose="script"))
@@ -467,9 +471,12 @@ def _generate_script_json(prompt: str) -> dict:
     ENABLE_CLAUDE_SCRIPT=false skips Claude, which is also what happens without
     ANTHROPIC_API_KEY or once the month's budget is spent (llm.generate_claude)."""
     draft = None
+    # What the draft's search did (design 9.7): the number of real citations behind it, so
+    # "the draft searched" is measured, and Claude is told it only when it is true.
+    meta: dict = {}
     if config.get_bool("ENABLE_GROUNDED_SCRIPT", True):
         try:
-            data = _parse_llm_json(llm.generate_grounded(prompt, max_tokens=2048))
+            data = _parse_llm_json(llm.generate_grounded(prompt, max_tokens=2048, meta=meta))
             if (data.get("script_body") or "").strip():
                 draft = data
         except Exception as e:  # noqa: BLE001 — grounded write is best-effort; fall back
@@ -479,13 +486,14 @@ def _generate_script_json(prompt: str) -> dict:
     if draft is None:
         log.info("scriptwriter: no grounded draft, so no Claude call; using ungrounded JSON mode.")
         return {**_parse_llm_json(llm.generate(prompt, json=True, max_tokens=2048)),
-                "writer": "gemini"}
+                "writer": "gemini", "grounding": {"draft_citations": None}}
+    grounding = {"draft_citations": meta.get("citations")}
     if not config.get_bool("ENABLE_CLAUDE_SCRIPT", True):
-        return {**draft, "writer": "gemini-grounded"}
-    written, issue = _claude_write(prompt, draft)
+        return {**draft, "writer": "gemini-grounded", "grounding": grounding}
+    written, issue = _claude_write(prompt, draft, searched=bool(meta.get("citations")))
     if written:
-        return {**written, "writer": "claude"}
-    return {**draft, "writer": "gemini-grounded", "claude_issue": issue}
+        return {**written, "writer": "claude", "grounding": grounding}
+    return {**draft, "writer": "gemini-grounded", "claude_issue": issue, "grounding": grounding}
 
 
 # A cheap free-API pass that scores the opening hook and, only if it's weak, sharpens the title +
@@ -1241,4 +1249,5 @@ def write_script(idea: dict, template: str = "N") -> dict:
     return {"script_id": script_id, "script_body": body, "caption": caption,
             "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points,
             "tone": tone_for(idea, body), "writer": data.get("writer"),
-            "claude_issue": data.get("claude_issue"), "structure": structure}
+            "claude_issue": data.get("claude_issue"), "structure": structure,
+            "grounding": data.get("grounding") or {"draft_citations": None}}

@@ -252,7 +252,8 @@ def _gen_gemini(prompt: str, *, json: bool, max_tokens: int) -> str:
 
 
 def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = None,
-                         api_key: str | None = None) -> str:
+                         api_key: str | None = None, thinking: str = "minimal",
+                         meta: dict | None = None) -> str:
     """Gemini with Google Search grounding — live web research with real sources.
 
     Note: the google_search tool can't combine with forced-JSON mime, so the caller must
@@ -268,9 +269,14 @@ def _gen_gemini_grounded(prompt: str, *, max_tokens: int, model: str | None = No
     so pointing a second grounded consumer at a different model would give it its OWN daily budget
     instead of competing for the shared 20/day bucket (rule 13) — but only among models that HAVE
     a grounded allowance, which today is just the default. See factcheck._model().
+
+    `meta`, when given, receives the number of real citations behind the reply (design 9.7).
     """
-    return _gen_gemini_grounded_full(prompt, max_tokens=max_tokens, model=model,
-                                     api_key=api_key)[0]
+    text, sources = _gen_gemini_grounded_full(prompt, max_tokens=max_tokens, model=model,
+                                              api_key=api_key, thinking=thinking)
+    if meta is not None:
+        meta["citations"] = len(sources)
+    return text
 
 
 def _text_parts(resp) -> dict[int, tuple[int, str]]:
@@ -372,11 +378,15 @@ def _grounded_sources(resp) -> list[dict]:
 
 
 def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None = None,
-                              api_key: str | None = None) -> tuple[str, list[dict]]:
+                              api_key: str | None = None,
+                              thinking: str = "minimal") -> tuple[str, list[dict]]:
     """One grounded call — returns (text, real citations). See `_grounded_sources`.
 
     Walks `_grounded_chain`: a model the backend no longer serves advances to the next one;
-    every other error propagates so `_call_with_retry` can judge it."""
+    every other error propagates so `_call_with_retry` can judge it.
+
+    `thinking="default"` sends no thinking config, so the model thinks as much as it normally
+    does (the fact-check gate, design 9.7); anything else asks for the least thinking."""
     from google.genai import types
 
     chain = _grounded_chain(model)
@@ -388,8 +398,9 @@ def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None
             # the newer SDK warn on every grounded call ("Direct use of AFC ... not recommended").
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             # Minimise "thinking" — it eats max_output_tokens and was truncating the grounded
-            # JSON reply mid-script, forcing the ungrounded fallback. Per-generation field.
-            thinking_config=_thinking_cfg(chosen),
+            # JSON reply mid-script, forcing the ungrounded fallback. Per-generation field. A
+            # caller that wants the model's own thinking passes "default" and a larger budget.
+            thinking_config=None if thinking == "default" else _thinking_cfg(chosen),
         )
         try:
             resp = _generate_content(_gemini_client(api_key), model=chosen, contents=prompt,
@@ -406,7 +417,8 @@ def _gen_gemini_grounded_full(prompt: str, *, max_tokens: int, model: str | None
 
 
 def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None = None,
-                      api_key: str | None = None) -> str:
+                      api_key: str | None = None, thinking: str = "minimal",
+                      meta: dict | None = None) -> str:
     """Generate with live web research (Gemini Google Search grounding). Raises on failure so
     callers can fall back to plain generate(). Gemini-only — Groq has no grounding.
 
@@ -421,9 +433,13 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
     grounding) and its failure is silent: `factcheck.verify` treats a checker outage as
     fail-open under the default FACTCHECK_STRICT=false, so a 503 here does not block a reel —
     it publishes one with the accuracy gate quietly absent.
+
+    `thinking="default"` lets the model think as it normally does (minimal otherwise); `meta`
+    receives `citations`, the number of real search citations behind the reply (design 9.7).
     """
     def _attempt(p, *, json=False, max_tokens=max_tokens):  # noqa: ARG001 — _call_with_retry's shape
-        return _gen_gemini_grounded(p, max_tokens=max_tokens, model=model, api_key=api_key)
+        return _gen_gemini_grounded(p, max_tokens=max_tokens, model=model, api_key=api_key,
+                                    thinking=thinking, meta=meta)
 
     text = _call_with_retry("gemini-grounded", _attempt, prompt, json=False, max_tokens=max_tokens)
     if not text or not text.strip():
@@ -432,8 +448,8 @@ def generate_grounded(prompt: str, *, max_tokens: int = 4096, model: str | None 
 
 
 def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
-                                   model: str | None = None,
-                                   api_key: str | None = None) -> tuple[str, list[dict]]:
+                                   model: str | None = None, api_key: str | None = None,
+                                   thinking: str = "minimal") -> tuple[str, list[dict]]:
     """Like `generate_grounded`, but also returns the search's REAL citation URLs.
 
     Use this wherever the reply is supposed to be SOURCED. Asking the model to write the URLs
@@ -442,7 +458,7 @@ def generate_grounded_with_sources(prompt: str, *, max_tokens: int = 4096,
     """
     def _attempt(p, *, json=False, max_tokens=max_tokens):  # noqa: ARG001 — _call_with_retry's shape
         return _gen_gemini_grounded_full(p, max_tokens=max_tokens, model=model,
-                                         api_key=api_key)
+                                         api_key=api_key, thinking=thinking)
 
     text, sources = _call_with_retry("gemini-grounded", _attempt, prompt,
                                      json=False, max_tokens=max_tokens)

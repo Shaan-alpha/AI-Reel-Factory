@@ -1060,3 +1060,26 @@ def test_the_repair_may_fix_the_title(monkeypatch):
     out = scriptwriter.repair_script(_REPAIR_BODY, findings, topic="tariffs",
                                      title="US tariff law passes")
     assert out["title"] == "US tariff law passes"
+
+
+# --- stage 1b: the draft's grounding is counted, and Claude is told only what is true (9.7) ---
+
+def test_the_draft_reports_its_citations(monkeypatch):
+    draft = json.dumps({"title": "ISRO rocket lands itself", "caption": "c", "hashtags": [],
+                        "script_body": "ISRO's rocket landed itself on Tuesday. Here's why it "
+                                       "matters: launches get cheaper."})
+    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a, **k: 1)
+    for n, wording in ((3, scriptwriter._DRAFT_SEARCHED), (0, scriptwriter._DRAFT_UNSEARCHED)):
+        notes = []
+
+        def _grounded(prompt, meta=None, n=n, **k):
+            if meta is not None:
+                meta["citations"] = n
+            return draft
+
+        monkeypatch.setattr(scriptwriter.llm, "generate_grounded", _grounded)
+        monkeypatch.setattr(scriptwriter.llm, "generate_claude",
+                            lambda p, **k: notes.append(p) or draft)
+        out = scriptwriter.write_script(IDEA)
+        assert out["grounding"] == {"draft_citations": n}
+        assert wording in notes[-1], n

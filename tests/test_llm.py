@@ -46,13 +46,13 @@ def test_raises_when_all_providers_fail(monkeypatch):
 
 def test_generate_grounded_returns_text(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded",
-                        lambda prompt, *, max_tokens, model=None, api_key=None: "grounded")
+                        lambda prompt, *, max_tokens, model=None, api_key=None, **_: "grounded")
     assert llm.generate_grounded("x") == "grounded"
 
 
 def test_generate_grounded_raises_on_empty(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded",
-                        lambda prompt, *, max_tokens, model=None, api_key=None: "   ")
+                        lambda prompt, *, max_tokens, model=None, api_key=None, **_: "   ")
     with pytest.raises(RuntimeError, match="empty"):
         llm.generate_grounded("x")
 
@@ -178,7 +178,7 @@ def test_generate_grounded_passes_a_model_override(monkeypatch):
     call at a specific one."""
     seen = {}
     monkeypatch.setattr(llm, "_gen_gemini_grounded",
-                        lambda prompt, *, max_tokens, model=None, api_key=None: seen.update(model=model) or "ok")
+                        lambda prompt, *, max_tokens, model=None, api_key=None, **_: seen.update(model=model) or "ok")
     llm.generate_grounded("x", model="gemini-2.5-pro")
     assert seen["model"] == "gemini-2.5-pro"
     llm.generate_grounded("x")
@@ -537,7 +537,7 @@ def test_generate_grounded_retries_a_transient_error(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda s: None)
     calls = []
 
-    def _flaky(prompt, *, max_tokens, model=None, api_key=None):
+    def _flaky(prompt, *, max_tokens, model=None, api_key=None, **_):
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("503 UNAVAILABLE. high demand")
@@ -552,7 +552,7 @@ def test_generate_grounded_does_not_retry_a_permanent_error(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda s: pytest.fail("must not sleep on a 400"))
     calls = []
 
-    def _bad(prompt, *, max_tokens, model=None, api_key=None):
+    def _bad(prompt, *, max_tokens, model=None, api_key=None, **_):
         calls.append(1)
         raise RuntimeError("400 INVALID_ARGUMENT")
 
@@ -706,7 +706,7 @@ def test_a_malformed_support_costs_only_itself():
 def test_generate_grounded_with_sources_returns_text_and_citations(monkeypatch):
     monkeypatch.setattr(
         llm, "_gen_gemini_grounded_full",
-        lambda prompt, *, max_tokens, model=None, api_key=None: ("body", [{"uri": "https://r/a",
+        lambda prompt, *, max_tokens, model=None, api_key=None, **_: ("body", [{"uri": "https://r/a",
                                                              "domain": "bbc.com", "spans": []}]))
     text, sources = llm.generate_grounded_with_sources("x")
     assert text == "body"
@@ -715,7 +715,7 @@ def test_generate_grounded_with_sources_returns_text_and_citations(monkeypatch):
 
 def test_generate_grounded_with_sources_raises_on_empty(monkeypatch):
     monkeypatch.setattr(llm, "_gen_gemini_grounded_full",
-                        lambda prompt, *, max_tokens, model=None, api_key=None: ("  ", []))
+                        lambda prompt, *, max_tokens, model=None, api_key=None, **_: ("  ", []))
     with pytest.raises(RuntimeError):
         llm.generate_grounded_with_sources("x")
 
@@ -747,7 +747,7 @@ def test_gemini_client_is_cached_per_api_key(monkeypatch):
 def test_generate_grounded_threads_an_api_key_through(monkeypatch):
     seen = {}
 
-    def _fake(prompt, *, max_tokens, model=None, api_key=None):
+    def _fake(prompt, *, max_tokens, model=None, api_key=None, **_):
         seen["api_key"] = api_key
         return ("body", [])
 
@@ -923,3 +923,34 @@ def test_a_list_of_objects_and_an_empty_list_still_parse():
 def test_a_retired_model_is_recognised_however_it_is_worded(message, gone):
     """gemini-2.5-flash retires on Vertex on 2026-10-20; the chain must move on unattended."""
     assert llm._is_model_gone(RuntimeError(message)) is gone
+
+
+# --- stage 1b: the gate thinks at the model's default; grounding is counted (design 9.7) ------
+
+def test_default_thinking_sends_no_thinking_config(monkeypatch):
+    seen = []
+
+    class _Resp:
+        text = "ok"
+        candidates = []
+
+    class _Models:
+        @staticmethod
+        def generate_content(*, model, contents, config):
+            seen.append(config.thinking_config)
+            return _Resp()
+
+    monkeypatch.setattr(llm, "_gemini_client",
+                        lambda api_key=None: type("C", (), {"models": _Models})())
+    llm.generate_grounded("x", model="gemini-3.5-flash", thinking="default")
+    assert seen == [None]
+    llm.generate_grounded("x", model="gemini-3.5-flash")
+    assert seen[-1] is not None  # minimal thinking stays the default for every other caller
+
+
+def test_generate_grounded_reports_its_citations_in_meta(monkeypatch):
+    monkeypatch.setattr(llm, "_gen_gemini_grounded_full",
+                        lambda p, **k: ("body", [{"uri": "https://a"}, {"uri": "https://b"}]))
+    meta = {}
+    assert llm.generate_grounded("x", meta=meta) == "body"
+    assert meta == {"citations": 2}

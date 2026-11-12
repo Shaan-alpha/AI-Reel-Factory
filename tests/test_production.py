@@ -64,6 +64,7 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     produced = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: produced.append((i, s)))
     monkeypatch.setattr(production.db, "set_script_factcheck", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "set_script_grounding", lambda *a, **k: None)
     # The repair pass is a grounded rewrite: left real, a blocked reel made live model calls.
     monkeypatch.setattr(production.scriptwriter, "repair_script", lambda *a, **k: None)
     monkeypatch.setattr(production.db, "update_script_body", lambda *a, **k: None)
@@ -995,3 +996,16 @@ def test_the_recheck_sees_the_repaired_title(monkeypatch, tmp_path):
     production.produce_one(IDEA, str(tmp_path))
     assert titles[1] == "Fixed title" and stored == ["Fixed title"]
     assert published == ["Fixed title"]
+
+
+def test_the_grounding_is_stored_next_to_the_verdict(monkeypatch, tmp_path):
+    """Design 9.7: what grounding did for the draft and the gate is kept on the script row."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "grounding": {"draft_citations": 3}})
+    monkeypatch.setattr(production.factcheck, "verify",
+                        lambda *a, **k: {**_OK, "citations": [5, 4]})
+    stored = []
+    monkeypatch.setattr(production.db, "set_script_grounding", lambda sid, g: stored.append((sid, g)))
+    production.produce_one(IDEA, str(tmp_path))
+    assert stored == [(SCRIPT["script_id"], {"draft_citations": 3, "gate_citations": [5, 4]})]

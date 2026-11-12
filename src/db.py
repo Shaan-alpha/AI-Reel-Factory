@@ -246,6 +246,19 @@ def set_post_status(post_id: int, status: str) -> None:
     get_client().table("posts").update({"status": status}).eq("id", post_id).execute()
 
 
+def set_script_grounding(script_id: int, grounding: dict) -> None:
+    """Store what grounding did for the draft and the gate (scripts.grounding, jsonb; design
+    9.7), so "the draft searched" is measured. A missing column costs the record, never a reel."""
+    try:
+        get_client().table("scripts").update({"grounding": grounding}).eq("id", script_id) \
+            .execute()
+    except Exception as e:  # noqa: BLE001 — only a missing column is tolerated
+        if not _missing_schema(e):
+            raise
+        _warn_once("scripts.grounding", "scripts.grounding is missing (run the SQL in docs/03); "
+                                        "grounding counts are not stored")
+
+
 def set_script_factcheck(script_id: int, verdict: dict) -> None:
     """Store the fact-check verdict on its script (column scripts.factcheck, jsonb).
 
