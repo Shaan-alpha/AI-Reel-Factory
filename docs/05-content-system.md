@@ -6,8 +6,10 @@ explainer (*what happened → why it matters → impact*). **Editorial policy:**
 neutrality (operator, 2026-07-27; CLAUDE.md rule 6): the channel may reach a verdict and name
 who is responsible where the evidence supports it, and politics, government action and court
 rulings are in scope. The old soft/positive lean is retired; the sensitivity filter is not
-(docs/08 §5). **Voice:** dry, sarcastic wit about the absurdity of the news, facts kept
-straight; a calm, serious read for stories about deaths or serious harm.
+(docs/08 §5). **Viewer:** Indians aged about 18-34 on a phone (since 2026-11-12). **Voice:** a
+clear, curious, confident explainer; no sarcasm, no mockery, no jokes at anyone's expense (the
+dry, sarcastic voice was retired on 2026-11-12); a calm, serious read for stories about deaths or
+serious harm.
 
 **Rule:** Do NOT let the AI summarize the news like a wire service. YouTube's 2026
 *Inauthentic Content* policy demonetizes mass-produced AI summaries. **Every reel must add
@@ -19,14 +21,13 @@ original analysis / perspective** ("why this matters", "what it means for you").
 ## Templates
 
 ### Template N — News Impact Explainer ⭐ the template in use
-`Disorienting hook (one surprising true fact) → What happened (own words, with a dry aside) →
-Retention bridge + WHY IT MATTERS (the original analysis) → Punchy close that loops back to the
-hook (CTA optional)`
+`Sentence one: the newest or most extreme true fact, with the Indian stake → one of three
+structures (what happened · the number · the belief) → WHY IT MATTERS: what changes for a person
+in India (the original analysis)`
 This is the monetization-safe structure: the *analysis* is the original value, not the facts.
 It is the only template the scriptwriter runs. The prompt lives in `src/scriptwriter.py` and
-mirrors [templates/template-N-news-impact.md](../templates/template-N-news-impact.md).
-*Example:* "India just did something no country has tried → [what] → here's why it could
-change [X] → what it means for you."
+mirrors [templates/template-N-news-impact.md](../templates/template-N-news-impact.md); it
+describes moves and carries no example phrases to copy.
 
 ### Template A — Hook → Problem → Solution → Twist → CTA
 General-purpose teaching/value content (use for evergreen explainers).
@@ -62,11 +63,11 @@ Narrative; strong for "how this unfolded" backstories.
 - **Truth over neutrality:** a verdict only where the evidence supports it; the sharper the
   verdict, the more certain its facts. No sensationalism or unverified claims. Every finished
   script is fact-checked before it is voiced (docs/08 §5).
-- **Delivery tags:** 1–3 per script (`[pause]`, `[sarcastic]`, `[serious]`, …). If a script
-  comes back without a tone tag, code puts `[serious]` on the "why it matters" turn.
-- **Somber tone** for deaths or serious harm: no sarcasm or jokes, only `[serious]`/`[pause]`, a
-  plain "Here's why it matters", and no hook rewrite.
-- One development per reel. A 2–3 word CTA is optional.
+- **Delivery tags:** at most two, from `[pause]`, `[serious]` and `[curious]`. If a script
+  comes back without a tone tag, code puts `[serious]` on the "why it matters" sentence.
+- **Somber tone** for deaths or serious harm: calm and respectful, only `[serious]`/`[pause]`,
+  the "why it matters" sentence still required, and no hook rewrite.
+- One development per reel. No call to action.
 - **Sources are cited by code, not the model:** the description gets one "Sources:" block from
   the idea's fetched sources, and the reel shows "Source: <publisher>" for its first ~3 s.
 - `#Shorts` and the **AI-disclosure** line are added in code (see playbook).

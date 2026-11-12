@@ -255,14 +255,14 @@ def test_key_points_default_empty_when_absent(monkeypatch):
     assert out["key_points"] == []
 
 
-def test_prompt_targets_25_30s_sarcastic():
+def test_prompt_sets_the_length_in_seconds_and_a_plain_voice():
+    """Design 9.1 and 9.5: a plain explainer, its length stated in seconds and in words."""
     prompt = scriptwriter._build_prompt(IDEA, "N").lower()
-    assert "25-30 second" in prompt          # explicit length
-    assert "55-70 words" in prompt           # word budget for ~25-30s
-    assert "never more than 80" in prompt    # the cap itself is stated (it never was)
+    assert "about 27 seconds" in prompt and "about 59 words" in prompt
+    assert f"never more than {scriptwriter._max_words()}" in prompt  # the cap itself is stated
     assert "don't end early" not in prompt and "do not cut it short" not in prompt
-    assert "sarcastic" in prompt             # tone
-    assert "12-20 second" not in prompt      # old short-form target gone
+    assert "no sarcasm" in prompt and "sarcastic" not in prompt
+    assert "12-20 second" not in prompt and "55-70 words" not in prompt
 
 
 def test_prompt_json_example_escapes_newlines():
@@ -312,19 +312,22 @@ def test_truncate_noop_when_under_cap_even_with_tags():
     assert scriptwriter._truncate_to_words(body, 50) == body
 
 
-def test_prompt_teaches_pause_and_style_tags():
+def test_prompt_teaches_three_tags_at_most_two():
+    """Design 9.1: the tags shrink to [pause], [serious] and [curious], at most two."""
     prompt = scriptwriter._build_prompt(IDEA, "N")
-    assert "[pause]" in prompt
-    assert "[sarcastic]" in prompt
+    for tag in ("[pause]", "[serious]", "[curious]"):
+        assert tag in prompt, tag
+    for gone in ("[sarcastic]", "[deadpan]", "[dry]", "[mischievously]", "[whispers]"):
+        assert gone not in prompt, gone
     assert "..." in prompt          # ellipses work on engines with no tag support
-    assert "3" in prompt            # the explicit cap
+    assert "at most two delivery tags" in prompt
 
 
-def test_prompt_requires_a_tag_on_the_payoff():
-    """The cap used to be the only instruction, and 'AT MOST 3' permits zero."""
+def test_prompt_puts_serious_on_the_payoff():
+    """The tag floor in code (_ensure_delivery_tag) puts [serious] on the payoff when the writer
+    adds no tag; the prompt names the same place."""
     prompt = scriptwriter._build_prompt(IDEA, "N")
-    assert "AT LEAST 1" in prompt
-    assert "[serious]" in prompt
+    assert "[serious] belongs on the payoff" in prompt
 
 
 # --- delivery-tag floor (2026-08-07) ---------------------------------------------------------
@@ -615,13 +618,14 @@ def test_a_repair_with_a_corrected_opening_is_accepted(monkeypatch):
     assert out and out.startswith("The US House passed")
 
 
-def test_a_story_about_deaths_drops_the_sarcasm():
-    """The audit found the fixed sarcastic voice on war strikes and a child-abuse story."""
+def test_a_story_about_deaths_gets_the_somber_note():
+    """The audit found the old fixed sarcastic voice on war strikes and a child-abuse story."""
     idea = {"id": 1, "title": "South Africa Mass Shootings: 27 Dead", "hook": "h", "angle": "a"}
     assert scriptwriter.tone_for(idea) == "somber"
-    assert "TONE OVERRIDE" in scriptwriter._build_prompt(idea, "N")
+    assert scriptwriter._SOMBER_NOTE in scriptwriter._build_prompt(idea, "N")
+    assert scriptwriter._SOMBER_NOTE not in scriptwriter._build_prompt(IDEA, "N")
     assert scriptwriter.tone_for({"title": "Rupee hits a record low", "hook": "", "angle": ""}) \
-        == "sarcastic"
+        == "plain"
 
 
 def test_the_base_and_ing_forms_of_harm_are_somber():
@@ -637,11 +641,11 @@ def test_everyday_strikes_and_crashes_keep_the_channel_voice():
     for title in ("Bank employees strike today", "Stock market crash wipes out Rs 10 lakh crore",
                   "Attack on press freedom", "Rupee collapses to a record low",
                   "India missing its climate targets"):
-        assert scriptwriter.tone_for({"title": title}) == "sarcastic", title
+        assert scriptwriter.tone_for({"title": title}) == "plain", title
 
 
 def test_the_finished_script_can_make_a_story_somber():
-    """Idea 211's pitch read as sarcastic while its script said 'killed a woman'."""
+    """Idea 211's pitch read as not somber while its script said 'killed a woman'."""
     idea = {"title": "India's Aston Martin Crash Covered Up?"}
     assert scriptwriter.tone_for(idea, "An MP's son reportedly killed a woman.") == "somber"
 
@@ -669,7 +673,7 @@ def test_the_disclosure_is_not_skipped_by_a_mention_of_ai(monkeypatch):
 
 def test_somber_tone_can_be_switched_off(monkeypatch):
     monkeypatch.setenv("ENABLE_SOMBER_TONE", "false")
-    assert scriptwriter.tone_for({"title": "27 killed", "hook": "", "angle": ""}) == "sarcastic"
+    assert scriptwriter.tone_for({"title": "27 killed", "hook": "", "angle": ""}) == "plain"
 
 
 def test_copying_the_angle_is_detected():
@@ -780,3 +784,17 @@ def test_a_punch_up_that_reopens_on_a_wind_up_is_refused(monkeypatch):
 def test_the_payoff_tag_lands_on_the_payoff_after_a_us_sentence():
     out = scriptwriter._ensure_delivery_tag("Prices rose in the U.S. Here's why it matters to you.")
     assert out == "Prices rose in the U.S. [serious] Here's why it matters to you."
+
+
+# --- stage 1b: the writer's brief (design 9.1) -----------------------------------------------
+
+def test_the_brief_names_the_viewer_and_drops_the_roast():
+    p = scriptwriter._PROMPT_N
+    assert "Indians aged about 18-34" in p and "what changes for a person in India" in p
+    for gone in ("SARCASTIC", "roast", "Here's the catch", "Wait, it gets weirder",
+                 "Comment below", "💬", "[sarcastic]", "[deadpan]"):
+        assert gone not in p, gone
+
+
+def test_the_somber_note_needs_no_bridge_phrase():
+    assert "Here's why it matters" not in scriptwriter._SOMBER_NOTE

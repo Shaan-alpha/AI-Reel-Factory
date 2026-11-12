@@ -43,13 +43,12 @@ DISCLOSURE_LINE_AI = "AI-generated narration, images and music."
 # Only Template N is in the Phase-1 MVP (rule 9 / YAGNI). The others exist as docs.
 _SUPPORTED_TEMPLATES = ("N",)
 
-_PROMPT_N = """You are the lead viral scriptwriter for "But It Matters" — sharp **25-30 SECOND** YouTube \
-Shorts with a SARCASTIC, dryly funny, roasted, but DEAD-SERIOUS voice (think Daily Show / Phil DeFranco \
-meets clever friend). You explain real news with razor-sharp wit and a knowing eye-roll at the \
-absurdity, then land a genuinely useful, HONEST "why it matters" point. Funny in the DELIVERY, \
-never in the facts. Your voice is NATURAL and conversational with real edge — energetic, gripping, \
-never a stiff news-anchor. The hook is strong but TRUE: the title and opening must sit honestly \
-on what the video actually delivers — a click-then-bounce from an over-claim gets the channel suppressed.
+_PROMPT_N = """You write the narration for "But It Matters", 25-35 second explainer Shorts for \
+Indian viewers: Indians aged about 18-34 watching on a phone, at home in Hindi and English, who \
+care about what changes their money, jobs, exams, safety, gadgets and the country's standing. You \
+are a clear, curious, confident explainer, like a well-read friend: no sarcasm, no mockery, no \
+jokes at anyone's expense. The title and the opening sit honestly on what the video delivers: a \
+click-then-bounce from an over-claim gets the channel suppressed.
 
 IDEA: {title}
 HOOK: {hook}
@@ -57,46 +56,24 @@ ANGLE (the take to develop): {angle}
 SOURCES:
 {sources}
 
-WHAT WINS ON THIS CHANNEL: a disorienting curiosity gap the video actually CLOSES. Lead with the single \
-most surprising, absurd, or high-tension TRUE fact. Follow up immediately with a retention bridge \
-("Here's the catch...", "Wait, it gets weirder...") to keep viewers hooked before the payoff. \
-Promise == payoff.
+SENTENCE ONE states the story's newest or most extreme true fact, with its subject and the \
+Indian stake in its first clause. It never opens on a wind-up word, a date, a day or a greeting.
 
-Write a **25-30 SECOND** narration — about **55-70 words**, and NEVER more than {max_words} \
-(count them before you answer: at ~2.5 words a second, 70 words already fills 28 seconds). \
-Sarcastic, witty, and roasting, but the facts stay straight. Structure it:
-1. DISORIENTING HOOK (first ~2s): the single most surprising or absurd TRUE fact, stated instantly \
-with a dry edge. No "in this video", no throat-clearing, no fake hype.
-2. THE ABSURDITY (2-3 crisp sentences): exactly what happened, in your own words, accurate — with a \
-sarcastic aside on the absurdity (never changing a fact).
-3. RETENTION BRIDGE & THE POINT (1-2 sentences): "Here's why it actually matters..." — the real \
-consequence or "so what", said straight and honest.
-4. PUNCHY CLOSE: a witty last line that loops naturally back to the opening hook (a 2-3 word \
-CTA is optional).
-Every sentence has to earn its place: a tight 25-second read beats a padded 30. Read it aloud to \
-check the comedic timing.
+THEN THIS STRUCTURE:
+{structure}
 
-WRITE FOR THE EAR: short punchy sentences, contractions, natural rhythm, dry comic timing. Sound \
-like a sharp, sarcastic friend who finds the absurdity in the news but means the serious parts — \
-not an essay. No hateful or personal attacks; roast situations and irony, not people \
-(harassment = demonetization). Plain text only: no markdown, no *asterisks* for emphasis (the \
-voice cannot hear them) — use "..." and the delivery tags below.
+THE PAYOFF (the "why it matters" sentence) says what changes for a person in India: a price, a \
+rule, a date, a risk, a job, taken from the sources. When the story has no Indian stake, it says \
+what changes for anyone, just as concretely. It is your own analysis, never the angle's words.
 
-DELIVERY DIRECTION (this is how it will be READ ALOUD):
-Write for the ear first. Short punchy sentences, contractions, natural rhythm. Use "..." for a \
-deliberate beat or hesitation — it changes the timing on every voice engine.
-Then add AT LEAST 1 and AT MOST 3 delivery tags. The one that is REQUIRED is a tone tag on the \
-"why it matters" turn — that line is the whole point of the video, and read in the same dry \
-register as the joke before it, it lands as one more punchline. The rest are optional:
-- [pause] or [pause long] for a comic beat before a punchline or the "why it matters" turn.
-- [sarcastic], [deadpan] or [dry] immediately before the line whose TONE flips.
-- [serious] for the "why it matters" turn when the subject deserves it — this is the one that \
-tells the audience you actually mean it.
-- [curious] on an opening question, [whispers] on a conspiratorial aside, [tired] on \
-institutional absurdity, [mischievously] before a setup you are about to puncture.
-Tags are stage direction, never narration — never write a tag the sentence already says out \
-loud, and never open the script with one. Fewer is better: a tag on every line reads as noise. \
-The failure mode is a narrator who ANNOUNCES the joke; restraint reads as confidence.
+LENGTH: about {target_seconds} seconds read aloud, about {target_words} words, never more than \
+{max_words}. No intro, no sign-off, no call to action. Every sentence earns its place.
+
+WRITE FOR THE EAR: short sentences, contractions, a natural rhythm. Plain text only: no markdown \
+and no *asterisks* for emphasis (the voice cannot hear them). Use "..." for a deliberate beat. Add \
+at most two delivery tags, chosen from [pause], [serious] and [curious]; [serious] belongs on the \
+payoff when the subject deserves it. Tags are stage direction, never narration, and never open \
+the script.
 
 ACCURACY (THE ONE HARD LINE): VERIFY the development actually \
 happened (use the sources + web search). State ONLY facts you can support. NEVER invent product \
@@ -111,28 +88,35 @@ something a viewer could check. Opinion is earned by evidence, never asserted wi
 independent fact-check runs on this script before it is voiced, and unsupported claims kill the \
 reel — so do not reach for a punchier claim than your sources can carry.
 
-ALSO produce, for the feed + discoverability:
-- "title": a clear, curiosity-driven YouTube title that is TRUE to the video, front-loading the most interesting REAL word. Short wins on this channel: aim for 40-55 characters, never more than 70.
-- "caption": an ATTRACTIVE, high-retention YouTube description structured cleanly:
-  Line 1: A gripping curiosity hook with a relevant emoji (YouTube shows ~2 lines in-feed to make viewers click 'more').
-  Line 2: A 1-2 sentence compelling summary of why this matters + a comment trigger question (e.g., "💬 What's your take on this? Comment below!").
-  NO links and no "Sources" line: the real, fetched sources are attached automatically, and a \
-remembered URL is usually a dead one.
-- "tags": 12-15 specific high-traffic search terms & long-tail phrases people type on YouTube (topic, key figures, orgs, category, and close search intent synonyms). No '#'.
-- "key_points": 2-3 ULTRA-SHORT on-screen text cards (<=4 words each) — punchiest facts or numbers.
+ALSO produce, for the feed and for search:
+- "title": in English, at most 7 words and 44 characters, the searchable name first, stating the \
+claim the reel delivers. It is also the banner on the first frame, so it must be short.
+- "caption": two lines. Line 1 restates the claim with its main keyword. Line 2 is one sentence on \
+why it matters. No links and no "Sources" line (the fetched sources are attached in code, and a \
+remembered URL is usually a dead one), and no question to the viewer.
+- "hashtags": at most two, each naming the story's subject or event.
+- "tags": at most six search terms: the names in the story and their alternate spellings (Hindi \
+spellings allowed). No '#'.
+- "key_points": 2-3 very short on-screen text cards (4 words or fewer each), the plainest facts or \
+numbers.
+- "payoff_index": the 0-based index of the "why it matters" sentence in script_body.
+- "optional": the 0-based indices of the sentences that could be cut without losing the story \
+(never sentence one or the payoff).
+- "structure": the structure you followed: what-happened, number or belief.
 
 Return ONLY a JSON object, no markdown fences. Write every line break inside a string as the \
 two-character escape \\n — a raw newline inside a JSON string is invalid JSON. Inside a string, \
 put any quoted word in SINGLE quotes ('like this'): a raw double quote ends the string.
-{{"title": "the honest, gripping title", "script_body": "the spoken narration", "caption": "emoji hook line first\\n\\nwhy it matters summary + 💬 comment question", "hashtags": ["#keyword", "#Shorts"], "tags": ["high traffic search term", "long tail phrase"], "key_points": ["short card", "another"]}}
+{{"title": "the title", "script_body": "the spoken narration", "caption": "line one\\nline two", "hashtags": ["#subject"], "tags": ["a name", "another spelling"], "key_points": ["card", "card"], "payoff_index": 3, "optional": [2], "structure": "what-happened"}}
 """
 
 
-# Stories where the channel's sarcasm would read as mocking victims (docs/08 excludes graphic
-# tragedy exploitation). The audit found the fixed sarcastic voice applied to war strikes and a
-# child-abuse story. Matched on the idea's own words, so the tone is decided before writing.
+# Stories that take the calm, respectful read (docs/08 excludes graphic tragedy exploitation).
+# The audit found the old fixed sarcastic voice applied to war strikes and a child-abuse story;
+# the voice is plain since 2026-11-12, and a story about deaths still gets the somber note and
+# the somber voice. Matched on the idea's own words, so the tone is decided before writing.
 # Widened 2026-10-09: 'Russian missiles kill 3', an air crash and a terror attack all read as
-# 'sarcastic' because the base and -ing forms were missing (ideas 178, 180, 211). Words that
+# not somber because the base and -ing forms were missing (ideas 178, 180, 211). Words that
 # also name everyday news (strike, crash, attack, collapse, missing, shot) count only in their
 # tragedy phrasing, so a bank strike or a market crash keeps the channel voice. Over-matching
 # costs only a calm read; under-matching is the docs/08 exclusion.
@@ -153,22 +137,22 @@ _SOMBER_RE = re.compile(
 
 _SOMBER_NOTE = """
 
-TONE OVERRIDE — this story involves loss of life or serious harm to people. Drop the sarcasm and
-the jokes entirely: calm, respectful and direct, with no irony about the people affected. Use
-only [serious] or [pause] as delivery tags. The "why it matters" turn is still required:
-open it plainly with "Here's why it matters" (live 2026-09-27, a somber draft dropped it)."""
+TONE — this story involves loss of life or serious harm to people. Calm, respectful and direct,
+with no irony about the people affected, and only [serious] or [pause] as delivery tags. The
+"why it matters" sentence is still required, stated plainly (live 2026-09-27, a somber draft
+dropped it), and payoff_index still marks it."""
 
 
 def tone_for(idea: dict, body: str = "") -> str:
-    """'somber' for stories about deaths or serious harm, else 'sarcastic' (the channel voice).
+    """'somber' for stories about deaths or serious harm, else 'plain' (the channel voice).
     Off with ENABLE_SOMBER_TONE=false.
 
     `body` (the finished narration) catches what the idea's own words did not: idea 211's
-    pitch read as sarcastic while its script said 'killed a woman'."""
+    pitch read as not somber while its script said 'killed a woman'."""
     if not config.get_bool("ENABLE_SOMBER_TONE", True):
-        return "sarcastic"
+        return "plain"
     text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle")) + " " + body
-    return "somber" if _SOMBER_RE.search(text) else "sarcastic"
+    return "somber" if _SOMBER_RE.search(text) else "plain"
 
 
 def _copies_the_angle(body: str, angle: str, run: int = 8) -> bool:
@@ -179,6 +163,10 @@ def _copies_the_angle(body: str, angle: str, run: int = 8) -> bool:
     a = re.findall(r"[a-z0-9']+", (angle or "").lower())
     b = " " + " ".join(re.findall(r"[a-z0-9']+", (body or "").lower())) + " "
     return any(f" {' '.join(a[i:i + run])} " in b for i in range(max(0, len(a) - run + 1)))
+
+
+_WHAT_HAPPENED = ("After sentence one: how it happened, then why it matters, then what is scheduled "
+                  "next, only when the sources record a scheduled step.")
 
 
 def _build_prompt(idea: dict, template: str) -> str:
@@ -194,6 +182,9 @@ def _build_prompt(idea: dict, template: str) -> str:
         hook=idea.get("hook", ""),
         angle=idea.get("angle", ""),
         sources=sources_block,
+        structure=_WHAT_HAPPENED,
+        target_seconds=27,
+        target_words=59,
         max_words=_max_words(),
     )
     # The human "why it matters" take is the originality + anti-"AI-slop" signal (2026 policy).
@@ -246,13 +237,16 @@ def _parse_llm_json(raw: str) -> dict:
 # fact base; everything that is craft rather than fact is Claude's to redo.
 _CLAUDE_DRAFT_NOTE = """
 
-RESEARCH DRAFT — written by a model that searched the live web for this story while writing it, \
-so its facts were checked against current reporting. You have no web access, so ignore the \
-instruction above to use web search: this draft and the SOURCES are your fact base. Every name, \
-number, date, quote and claim you state must already be in one of them, unchanged, and you add \
-none. Everything else is yours to rewrite: the hook, the wording, the rhythm, the jokes, the \
-title, the caption and the tags. Write the best script you can, in the JSON format above.
+RESEARCH DRAFT — {searched}. You have no web access, so ignore the instruction above to use web \
+search: this draft and the SOURCES are your fact base. Every name, number, date, quote and claim \
+you state must already be in one of them, unchanged, and you add none. Everything else is yours \
+to rewrite: the opening, the wording, the rhythm, the title, the caption and the tags. Write the \
+best script you can, in the JSON format above.
 {draft}"""
+_DRAFT_SEARCHED = ("written by a model that searched the live web for this story while writing it, "
+                   "so its facts were checked against current reporting")
+_DRAFT_UNSEARCHED = ("a draft whose search could not be confirmed, so its facts are no stronger "
+                     "than the SOURCES")
 
 # --- Claude adds no facts: checked in code, not only asked for ---------------------------------
 # The fact-check gate waives a claim it cannot confirm when nothing contradicts it, and Claude
@@ -342,7 +336,8 @@ def _claude_write(prompt: str, draft: dict) -> tuple[dict | None, dict | None]:
     """Claude's version of the script, or None to ship the grounded draft, plus the reason
     worth reporting when Claude could not write (None otherwise). Fail-soft (rule 11): no key, a
     spent budget, an API error, an unusable reply or an added fact all return None."""
-    note = _CLAUDE_DRAFT_NOTE.format(draft=json.dumps(draft, ensure_ascii=False))
+    note = _CLAUDE_DRAFT_NOTE.format(searched=_DRAFT_SEARCHED,
+                                     draft=json.dumps(draft, ensure_ascii=False))
     try:
         data = _parse_llm_json(llm.generate_claude(prompt + note, purpose="script"))
     except llm.ClaudeUnavailable as e:

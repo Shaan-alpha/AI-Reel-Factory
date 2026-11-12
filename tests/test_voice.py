@@ -1099,3 +1099,10 @@ def test_synthesize_passes_the_tone_to_gemini(monkeypatch, tmp_path):
     voice.synthesize("Twenty-seven people died. [serious] It matters.", str(tmp_path),
                      tone="somber")
     assert voice._SOMBER_STYLE_PROMPT in cap["contents"]
+
+
+def test_the_english_style_prompt_is_informative():
+    """The script is a plain explainer from stage 1b (design 9.1); a sarcastic read of it would
+    contradict the script. Test 3's approved narrator, with an Indian English accent."""
+    p = voice._DEFAULT_STYLE_PROMPT
+    assert "informative" in p and "Indian English accent" in p and "unimpressed" not in p

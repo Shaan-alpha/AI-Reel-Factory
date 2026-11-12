@@ -104,16 +104,15 @@ def _is_transient(exc: Exception) -> bool:
     text = f"{type(exc).__name__} {exc}".lower()
     return any(m in text for m in _TRANSIENT_MARKERS)
 # Structured per Google's own style-prompt guidance: an audio profile, then director's notes on
-# pacing and inflection, then paralinguistic detail. Their docs are explicit that naming an
-# emotion ("sarcastic") underperforms describing what it SOUNDS like -- and for this channel the
-# failure mode is a narrator who announces the joke, so most of this prompt is restraint.
+# pacing and inflection. The plain-explainer voice of the Indian-viewer format (design 9.1): the
+# narrator prompt the operator approved by ear on 2026-11-12 (test 3), with a neutral Indian
+# English accent in place of the General American one. It voices English reels until the
+# Hinglish relaunch.
 _DEFAULT_STYLE_PROMPT = (
-    "You are a sharp, faintly unimpressed news explainer talking to one friend, not an audience. "
-    "Read at a brisk clip with crisp consonants and very little warmth. "
-    "Deliver the setup flat and factual; let the dry amusement sit UNDER the words rather than on "
-    "top of them, and never announce the joke. Understate the punchline instead of leaning into "
-    "it, with a slight downward inflection at the end of each sentence. "
-    "Read the final line completely straight, as though it plainly matters."
+    "You are a confident science documentary narrator recording a short explainer for social "
+    "media. Speak in a clear, informative, engaging tone with a neutral Indian English accent, at "
+    "a brisk, steady pace with no long pauses between sentences. Give the numbers crisp emphasis, "
+    "and let the final line land with quiet weight."
 )
 
 
