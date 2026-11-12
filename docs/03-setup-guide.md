@@ -251,6 +251,41 @@ alter table claude_spend     enable row level security;
 -- `record_factcheck_verdict_and_voice` (applied to the live project):
 --   alter table public.scripts add column if not exists factcheck jsonb;
 --   alter table public.posts   add column if not exists voice text;
+
+-- 2026-11-12, measuring (AI-video design, stage 0; safe to run twice). The pipeline runs
+-- without these: until they exist, the records are skipped and each run logs it once.
+alter table posts add column if not exists format jsonb;           -- how the reel was made
+alter table posts add column if not exists youtube_readback jsonb; -- what YouTube recorded
+
+create table if not exists post_metrics (  -- YouTube Analytics, one row per post and window
+  id bigint generated always as identity primary key,
+  post_id bigint not null references posts (id),
+  pulled_at timestamptz not null default now(),
+  window_days int not null,                -- 7: the Short's first week
+  views int, engaged_views int,
+  avg_view_seconds numeric, avg_view_pct numeric,
+  subscribers_gained int,
+  india_share numeric,                     -- a lower bound: small countries are withheld
+  countries jsonb, traffic jsonb,
+  retention jsonb,                         -- [[elapsed ratio, audienceWatchRatio], ...]
+  unique (post_id, window_days)
+);
+alter table post_metrics enable row level security;
+
+create table if not exists reel_attempts ( -- one row per produce_one call
+  id bigint generated always as identity primary key,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  idea_id bigint not null references ideas (id),
+  script_id bigint references scripts (id),
+  outcome text,                            -- published | blocked | failed | out-of-time
+  stage text,                              -- script | factcheck | voice | visuals | assembly
+                                           -- | subtitles | upload | queue
+  reason text,
+  spend_usd numeric(10, 4),
+  downgrades text[]                        -- fallback-voice | stock-video | ...
+);
+alter table reel_attempts enable row level security;
 ```
 
 ---

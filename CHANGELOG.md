@@ -13,6 +13,24 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Added (2026-11-12: stage 0 of the AI-video design, safety and measuring; details: STATUS.md)
+- **Measuring** (`analytics`, `db`, `production`, `publish_youtube`): every post is stamped with
+  its format (`posts.format`); every attempt leaves a `reel_attempts` row with the stage it ended
+  at; the analytics job pulls each Short's first week from the YouTube Analytics API (engaged
+  views, average percentage viewed, India share, traffic sources, the retention curve) into
+  `post_metrics`, backfilling the old Shorts; the upload's read-back is stored
+  (`posts.youtube_readback`). All of it runs without the new SQL, skipping those records.
+- **The opening check on every script** (`scriptwriter`): a wind-up opener ("So,", "Imagine",
+  "Did you know") is rewritten once or cut, and a date-first opener is rewritten; hedges stay.
+
+### Fixed (2026-11-12, stage 0)
+- One sentence splitter (`src/text.py`) for the scriptwriter, voice and subtitles: "U.S.", "Dr.",
+  decimals and "..." no longer end a sentence; the Hindi full stop does.
+- Every FFmpeg call has a timeout; a stalled render used to wait for the job's kill.
+- The upload declares audio by what was voiced; one setting used to declare both languages.
+- "✅ Published" is sent as each reel goes live, from both entry points.
+- The bot: `/makeshort 2 isro docking` makes 2 ideas, not 5.
+
 ### Changed (2026-11-12: the voice moves to Vertex ahead of 2026-11-17; details: STATUS.md)
 - **The channel voice comes from Vertex** (`voice`): the Developer API shuts down
   `gemini-3.1-flash-tts-preview` and `gemini-2.5-flash-preview-tts` on 2026-11-17, and the

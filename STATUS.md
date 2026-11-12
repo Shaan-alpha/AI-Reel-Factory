@@ -62,8 +62,11 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - **New format:** AI-video shots, Hinglish narration, English subtitles, Indian viewers. The
   audit is checked and the design rewritten (2026-11-12,
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
-  next, the build plan, then the build in stages. State and decisions are in
+  **stage 0 is built** on `feat/stage-0-safety-measuring` (see the 2026-11-12 log). Next: merge it,
+  then plan and build stage 1 (stories and script). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
+- ⚠️ **Operator, for stage 0:** run the new SQL at the end of docs/03 §4 in Supabase (two columns
+  on `posts`, tables `post_metrics` and `reel_attempts`); approve the bot deploy.
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
   - ~~before 2026-11-17: ear-test the 3.8 TTS models~~ Done 2026-11-12: the operator kept
     `gemini-3.1-flash-tts-preview` (Charon, Hinglish) over both 3.8 models, and the voice moved
@@ -154,7 +157,25 @@ rate is about 5%, not 2%; titles of 7 words or fewer mattered even when the bann
 
 **The design, rewritten** on the checked audit, the India research and the review's 21 confirmed
 findings: [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md).
-Next: a builder's read of it, then the build plan.
+A fresh builder read it; the operator then chose **up to $1.10 a reel** so a typical reel is video
+throughout (6 clips). The disclosure flag does not come back from the API (design 9.9, 18.9).
+
+**Stage 0 built** (branch `feat/stage-0-safety-measuring`,
+[plan](docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md)), English reels unchanged
+in look and sound:
+- one sentence splitter (`src/text.py`) for the scriptwriter, voice and subtitles: "U.S.",
+  decimals and "..." no longer end a sentence; the Hindi full stop does;
+- the opening check on every script (wind-ups rewritten once or cut; hedges kept);
+- a timeout on every FFmpeg call;
+- each post stamped with its format (`posts.format`), one `reel_attempts` row per attempt with the
+  stage it ended at, "✅ Published" sent as each reel goes live (from both entry points);
+- the upload declares audio by what was voiced and stores YouTube's read-back;
+- the analytics job pulls each Short's first week from the Analytics API (engaged views, average
+  percentage viewed, India share, traffic, the retention curve), backfilling the old Shorts as the
+  baseline; checked live on one Short;
+- the bot reads the leading number of `/makeshort`.
+775 pass, 5 skipped locally. **Waiting for the operator:** push and merge; the SQL in docs/03
+(the code runs without it, skipping those records); `vercel deploy --prod` for the bot.
 
 ### 2026-11-10 — A new format chosen; design, research and a reach audit in progress (no code changed)
 
