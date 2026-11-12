@@ -28,7 +28,8 @@ import subprocess
 from functools import lru_cache
 
 from src import config
-from src.assembly import BT709_TAGS, _ffmpeg, x264_args
+from src.assembly import BT709_TAGS, RENDER_TIMEOUT_SECONDS, _ffmpeg, x264_args
+from src.text import ends_clause
 
 log = logging.getLogger(__name__)
 
@@ -282,7 +283,6 @@ _LIBASS_WIDTH = 0.632
 _KARAOKE_PX = 104
 # 1080 minus MarginL 90 and MarginR 150: the right-hand 120 px is the Shorts action rail.
 _MAX_CAPTION_PX = 840
-_SENTENCE_END = re.compile(r"[.!?:;…]['\")\]]*$")
 
 
 @lru_cache(maxsize=1)
@@ -319,7 +319,7 @@ def _caption_groups(words: list[tuple[float, float, str]],
             groups.append(cur)
             cur = []
         cur.append(w)
-        if _SENTENCE_END.search(w[2].strip()):
+        if ends_clause(w[2]):
             groups.append(cur)
             cur = []
     if cur:
@@ -553,7 +553,12 @@ def _burn(video_path: str, ass_path: str, out_path: str,
         "-movflags", "+faststart",
         os.path.abspath(out_path),
     ]
-    proc = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True,
+                              timeout=RENDER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"subtitles: ffmpeg burn timed out after {RENDER_TIMEOUT_SECONDS} s") from e
     if proc.returncode != 0:
         raise RuntimeError(f"subtitles: ffmpeg burn failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
 

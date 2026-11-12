@@ -46,11 +46,9 @@ from functools import lru_cache
 import requests
 
 from src import config
+from src.text import split_sentences
 
 log = logging.getLogger(__name__)
-
-# Split on sentence enders (incl. ellipsis) so dramatic pacing can put a beat between sentences.
-_SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 
 # edge-tts (fallback engine)
 # The channel has ONE narrator. Every link in the chain must sound like the same person, or a
@@ -171,8 +169,9 @@ def _kokoro_voice() -> str:
 
 
 def _split_sentences(text: str) -> list[str]:
-    """Split narration into sentences for dramatic pacing. Always ≥1 item for non-empty input."""
-    return [s.strip() for s in _SENTENCE_RE.split(text.strip()) if s.strip()]
+    """Split narration into sentences for dramatic pacing. Always ≥1 item for non-empty input.
+    The shared splitter (src/text.py) keeps "U.S." and "..." inside their sentence."""
+    return split_sentences(text)
 
 
 def _synthesize_kokoro(text: str, out_path: str) -> float:

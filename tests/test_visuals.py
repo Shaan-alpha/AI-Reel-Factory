@@ -413,3 +413,16 @@ def test_shots_are_generated_in_parallel_and_kept_in_order(monkeypatch, tmp_path
                         lambda img, clip, secs, index=0: open(clip, "wb").close())
     clips = visuals._fetch_image_broll(["a", "b"], 20, str(tmp_path), "ai")
     assert [os.path.basename(c) for c in clips] == [f"imgclip_{i:02d}.mp4" for i in range(6)]
+
+
+def test_fetch_broll_reports_the_source_it_used(monkeypatch, tmp_path):
+    """The format stamp (design 10.1) records the visuals a reel really used, so a reel that fell
+    from AI images to stock video is not counted as an AI reel."""
+    monkeypatch.setenv("VISUAL_SOURCE", "ai")
+    monkeypatch.setattr(visuals, "_fetch_image", lambda *a, **k: False)  # no images at all
+    cands = [{"url": "http://x/0.mp4", "duration": 8.0}, {"url": "http://x/1.mp4", "duration": 8.0}]
+    monkeypatch.setattr(visuals, "_gather_candidates", lambda kws: cands)
+    _fake_download(monkeypatch)
+    meta: dict = {}
+    paths = visuals.fetch_broll(["a"], target_seconds=12, out_dir=str(tmp_path), meta=meta)
+    assert meta == {"source": "video", "clips": len(paths)}

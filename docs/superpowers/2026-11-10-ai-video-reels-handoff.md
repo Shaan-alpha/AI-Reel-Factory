@@ -20,7 +20,26 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   better than others". From 2026-11-17 it runs on Vertex. The STATUS item "ear-test 3.8 before
   2026-11-17" is closed by this.
 
-Next: finish the design (sections 11-20), have it read by a fresh builder, write the plan, build.
+- The voice change shipped (PR #16, merged): Vertex voices the channel; CI's `verify-tts` passed.
+- The design is complete; a fresh builder read it and its two questions were answered (the operator
+  chose up to **$1.10 a reel**, all video; the judging rule was corrected).
+- The disclosure flag does not come back from the API on the channel's uploads (design 9.9, 18.9).
+- **The Stage 0 plan is written:** `docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md`.
+  One plan per stage, each written just before it is built.
+
+- **Stage 0 is built** on branch `feat/stage-0-safety-measuring` (11 commits; 786 pass, 5 skipped
+  locally), including the fixes from a fresh final review. Calls made while building it, each
+  with its cost if wrong (none): two old tests were updated where the behaviour moved (an "ok ..."
+  fixture now opens on a subject; `make_on_demand` no longer re-sends "Published"); an India share
+  of 0 for fully withheld countries was treated as a real defect, not polish; two stale docs lines
+  were fixed under rule 1. **Deferred minors:** an idempotent rerun re-sends "✅ Published"; a video
+  whose Analytics query always fails is retried every run; the opening rewrite's 20-word limit is
+  asked for, not enforced; `reel_attempts.spend_usd` waits for stage 3, and a job kill leaves a
+  NULL outcome (read it as "killed").
+
+**Next:** ask the operator to push and merge Stage 0, run its SQL (end of
+docs/03 §4) and approve the bot deploy; then write and build the Stage 1 plan, and so on through
+the stages in design section 14.
 
 ## 1. What the operator wants
 

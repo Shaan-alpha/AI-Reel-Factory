@@ -169,8 +169,48 @@ def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True)
     return {"title": title, "description": _with_footer(script.get("caption", "")), "tags": tags}
 
 
+# How reels are made, stamped on every post (posts.format) so the relaunch can be judged on the
+# reels that really used the new format (design 10.1). The AI-video design's stage 1 raises it.
+FORMAT_VERSION = 1
+
+
+def _format(language: str, visual_meta: dict) -> dict:
+    """The post's format stamp, from what the chain actually did."""
+    return {"version": FORMAT_VERSION, "language": language,
+            "visuals": visual_meta.get("source"), "video_shots": 0,
+            "shots": visual_meta.get("clips"), "structure": None}
+
+
+def _downgrades(voice_meta: dict, visual_meta: dict) -> list[str]:
+    """What fell back on this reel: another voice than the channel's, or stock video under an
+    image source."""
+    out = []
+    if voice_meta.get("engine") and voice_meta.get("engine") != "gemini":
+        out.append("fallback-voice")
+    wanted = str(config.get("VISUAL_SOURCE", "photos")).lower()
+    if visual_meta.get("source") == "video" and wanted in ("ai", "photos"):
+        out.append("stock-video")
+    return out
+
+
+def _finish_attempt(attempt: int | None, outcome: str, progress: dict,
+                    error: Exception | None = None) -> None:
+    """Close the attempt row; bookkeeping never costs a reel (rule 14)."""
+    try:
+        db.finish_attempt(attempt, outcome=outcome, stage=progress["stage"],
+                          reason=None if error is None else _redact(f"{type(error).__name__}: "
+                                                                    f"{error}"),
+                          script_id=progress.get("script_id"),
+                          downgrades=progress.get("downgrades"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("produce: could not record the attempt (%s)", e)
+
+
 def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
-    """Run the full chain for one approved idea. Returns (video_id, url). Idempotent."""
+    """Run the full chain for one approved idea. Returns (video_id, url). Idempotent.
+
+    Every call past the idempotency check leaves one reel_attempts row: published, blocked or
+    failed, with the stage it ended at. Failed attempts used to leave no record at all."""
     idea_id = idea["id"]
 
     # Idea-level idempotency (rule 12): if this idea already shipped, don't re-render/re-upload.
@@ -182,7 +222,29 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
                  idea_id, existing["external_id"])
         return existing["external_id"], existing.get("url") or ""
 
+    try:
+        attempt = db.start_attempt(idea_id)
+    except Exception as e:  # noqa: BLE001 — bookkeeping never costs a reel (rule 14)
+        log.warning("produce: could not open an attempt row (%s)", e)
+        attempt = None
+    progress = {"stage": "script"}
+    try:
+        result = _produce_chain(idea, work_root, progress)
+    except FactCheckFailed as e:
+        _finish_attempt(attempt, "blocked", progress, e)
+        raise
+    except Exception as e:
+        _finish_attempt(attempt, "failed", progress, e)
+        raise
+    _finish_attempt(attempt, "published", progress)
+    return result
+
+
+def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str]:
+    """The chain after the idempotency check; `progress["stage"]` names the step in flight."""
+    idea_id = idea["id"]
     script = scriptwriter.write_script(idea)
+    progress.update(stage="factcheck", script_id=script.get("script_id"))
     _report_claude(idea, script)
 
     # Independent fact-check BEFORE any render work: this is the cheapest possible place to
@@ -241,6 +303,7 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     os.makedirs(work, exist_ok=True)
     try:
         spoke: dict = {}
+        progress["stage"] = "voice"
         audio, duration = voice.synthesize(script["script_body"], work, meta=spoke,
                                            tone=script.get("tone"))
         log.info("produce: idea %s voiced by %s", idea_id, spoke.get("voice"))
@@ -251,20 +314,30 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
             _notify(f"🎙️ Idea {idea_id} ({idea.get('title')!r}) was voiced by the "
                     f"{spoke.get('voice')} fallback, not the channel voice: every Gemini "
                     f"attempt failed. It will sound different from the other Shorts.")
+        progress["stage"] = "visuals"
         keywords = visuals.extract_keywords(script["script_body"])
         story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+        shown: dict = {}
         clips = visuals.fetch_broll(keywords, duration, work,
-                                    setting="India" if _INDIA_RE.search(story) else None)
+                                    setting="India" if _INDIA_RE.search(story) else None,
+                                    meta=shown)
+        progress["downgrades"] = _downgrades(spoke, shown)
+        progress["stage"] = "assembly"
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
         # Pass the punchy title so subtitles burn it as a frame-1 hook banner (the first frame
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
         hook = script.get("title") or idea.get("title")
+        progress["stage"] = "subtitles"
         final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
                                         hook_text=hook, key_points=script.get("key_points"),
                                         source_label=_source_domain(idea.get("sources")),
                                         script_text=script["script_body"])
         metadata = _build_metadata(idea, script)
         metadata["voice"] = spoke.get("voice")
+        # Every reel is narrated in English until the Hinglish stage ships (design 9.9).
+        metadata["audio_language"] = "en"
+        metadata["format"] = _format("en", shown)
+        progress["stage"] = "upload"
         video_id, url = publish_youtube.publish(final, metadata, script["script_id"])
         _mark_produced(idea_id, url)
         return video_id, url
@@ -432,6 +505,11 @@ def run_production(limit: int | None = None, only_ids: list[int] | None = None) 
                         "%d approved idea(s) go back to the digest: %s", left, len(rest), ids)
             for i in rest:
                 _release_failed_idea(i.get("id"), RuntimeError("out of time"))
+                try:  # bookkeeping: the funnel counts these too (design 10.1)
+                    db.finish_attempt(db.start_attempt(i.get("id")), outcome="out-of-time",
+                                      stage="queue", reason=f"{left:.0f} s left in the job")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("production: could not record an out-of-time attempt (%s)", e)
             failed.extend({"idea_id": i, "error": "out of time"} for i in ids)
             _notify(f"⏱️ Out of time for {len(rest)} approved idea(s) before the job's limit; "
                     f"they go back to the next digest.")
@@ -440,6 +518,9 @@ def run_production(limit: int | None = None, only_ids: list[int] | None = None) 
             video_id, url = produce_one(idea, work_root)
             published.append({"idea_id": idea["id"], "video_id": video_id, "url": url})
             log.info("production: published idea %s -> %s", idea["id"], url)
+            # Announced as it goes live, from both entry points: the batch's end used to be the
+            # only moment, and run() never announced at all.
+            _notify(f"✅ Published: {url}")
         except Exception as e:  # noqa: BLE001 — fail soft per reel; keep the batch alive
             log.exception("production: idea %s failed", idea.get("id"))
             failed.append({"idea_id": idea.get("id"), "error": f"{type(e).__name__}: {e}"})
@@ -601,8 +682,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
 
     summary = run_production(only_ids=offered)
     if summary["published"]:
-        for p in summary["published"]:
-            _notify(f"✅ Published: {p['url']}")
+        pass  # each reel was announced as it went live (run_production)
     elif summary["failed"]:  # each failure (or the time limit) was already reported
         _notify("No Short published this time.")
     else:

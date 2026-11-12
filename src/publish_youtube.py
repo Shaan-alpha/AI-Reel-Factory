@@ -132,17 +132,79 @@ def _build_body(metadata: dict) -> dict:
     disclose = config.get_bool("AI_DISCLOSURE", True)
 
     return {
-        # Language set explicitly: left to detection, 79 of 88 videos had none and one English
-        # reel (59Mmuej_mes) was tagged Hindi.
+        # Languages set explicitly: left to detection, 79 of 88 videos had none and one English
+        # reel (59Mmuej_mes) was tagged Hindi. The title and description are English; the audio
+        # is whatever the reel was narrated in (design 9.9). One setting used to declare both,
+        # which would have labelled Hinglish narration English.
         "snippet": {"title": title, "description": desc, "tags": tags, "categoryId": category,
-                    "defaultLanguage": config.get("YOUTUBE_LANGUAGE", "en"),
-                    "defaultAudioLanguage": config.get("YOUTUBE_LANGUAGE", "en")},
+                    "defaultLanguage": "en",
+                    "defaultAudioLanguage": metadata.get("audio_language") or "en"},
         "status": {
             "privacyStatus": privacy,
             "selfDeclaredMadeForKids": False,
             "containsSyntheticMedia": disclose,  # AI-disclosure flag (docs/08 §2)
         },
     }
+
+
+def _reader_client():
+    """A read-only YouTube client: the upload client holds only the youtube.upload scope."""
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    creds = Credentials(
+        token=None,
+        refresh_token=config.require("YOUTUBE_REFRESH_TOKEN"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=config.require("YOUTUBE_CLIENT_ID"),
+        client_secret=config.require("YOUTUBE_CLIENT_SECRET"),
+        scopes=["https://www.googleapis.com/auth/youtube.readonly"],
+    )
+    return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def _read_back(video_id: str) -> dict | None:
+    """What YouTube recorded for an upload: the synthetic-media flag and both languages. None on
+    any failure: the upload is irreversible, the read-back is bookkeeping.
+
+    On 2026-11-12 the flag was absent on every recent upload although each sends `true`, so
+    "absent" means unknown, not false (design 9.9)."""
+    try:
+        resp = _reader_client().videos().list(part="status,snippet", id=video_id).execute()
+        item = (resp.get("items") or [None])[0]
+        if not item:
+            return None
+        status, snippet = item.get("status") or {}, item.get("snippet") or {}
+        return {"containsSyntheticMedia": status.get("containsSyntheticMedia"),
+                "defaultLanguage": snippet.get("defaultLanguage"),
+                "defaultAudioLanguage": snippet.get("defaultAudioLanguage")}
+    except Exception as e:  # noqa: BLE001 — never fail a publish that already happened
+        log.warning("publish: could not read back %s (%s)", video_id, e)
+        return None
+
+
+# Uploads whose disclosure flag came back explicitly false, reported once a run.
+_FLAG_ALERTED: set[str] = set()
+
+
+def _check_read_back(post_id: int | None, video_id: str, url: str) -> None:
+    """Store the read-back; alert once a run if YouTube says the flag is off."""
+    readback = _read_back(video_id)
+    if readback is None:
+        return
+    if post_id is not None:
+        db.set_post_readback(post_id, readback)
+    if (readback.get("containsSyntheticMedia") is False and config.get_bool("AI_DISCLOSURE", True)
+            and not _FLAG_ALERTED):
+        _FLAG_ALERTED.add(video_id)
+        try:
+            from src import approval
+
+            approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
+                          text=f"⚠️ YouTube shows the AI-disclosure flag OFF on {url}, although "
+                               f"the upload set it. Check its 'Altered content' setting.")
+        except Exception:  # noqa: BLE001
+            log.warning("publish: the disclosure alert could not be sent.")
 
 
 def _upload(youtube, body: dict, video_path: str) -> dict:
@@ -210,9 +272,10 @@ def publish(video_path: str, metadata: dict, script_id: int) -> tuple[str, str]:
     # run uploads the same reel again — because BOTH idempotency guards (find_post and
     # get_published_post_for_idea) key off the row that was never written. A missing analytics
     # row is far cheaper than a duplicate public video, so swallow it and shout (rule 14).
+    post_id = None
     try:
-        db.insert_post(script_id, _PLATFORM, video_id, url, "published",
-                       voice=metadata.get("voice"))
+        post_id = db.insert_post(script_id, _PLATFORM, video_id, url, "published",
+                                 voice=metadata.get("voice"), format=metadata.get("format"))
     except Exception as e:  # noqa: BLE001 — never turn a recorded upload into a repeated one
         log.error("publish: video %s IS LIVE at %s but its post row could not be written (%s). "
                   "Reconcile manually — analytics will miss it, and the idempotency guard for "
@@ -225,6 +288,8 @@ def publish(video_path: str, metadata: dict, script_id: int) -> tuple[str, str]:
                                f"not be saved. Add it by hand, and don't approve the idea again.")
         except Exception:  # noqa: BLE001
             log.warning("publish: the missing-row alert could not be sent either.")
+
+    _check_read_back(post_id, video_id, url)
 
     # Asset policy (rule 15): the upload is the source of truth now — drop the local render.
     try:

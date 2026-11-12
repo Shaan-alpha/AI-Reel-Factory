@@ -15,6 +15,7 @@ Idempotent-friendly: each run inserts a fresh snapshot row (time series), never 
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 
 from src import config, db
 
@@ -60,6 +61,7 @@ def _fetch_stats(youtube, video_ids: list[str]) -> dict[str, dict]:
                 "likes": int(s.get("likeCount", 0)) if "likeCount" in s else None,
                 "comments": int(s.get("commentCount", 0)) if "commentCount" in s else None,
                 "title": (item.get("snippet") or {}).get("title"),
+                "published_at": (item.get("snippet") or {}).get("publishedAt"),
             }
     return out
 
@@ -120,6 +122,13 @@ def collect_stats() -> int:
                 db.backfill_script_title(post["script_id"], st["title"])
             except Exception as e:  # noqa: BLE001
                 log.warning("analytics: title backfill failed for %s (%s)", vid, e)
+        # 75 of 96 posts were recorded with no published_at (STATUS 2026-08-25), and the metrics
+        # pull dates each Short's first week from it. YouTube knows the real time.
+        if not post.get("published_at") and st.get("published_at"):
+            try:
+                db.backfill_post_published_at(post["id"], st["published_at"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("analytics: publish-date backfill failed for %s (%s)", vid, e)
     log.info("analytics: recorded %d snapshots.", recorded)
 
     # Retention is a no-op unless ANALYTICS_KEEP_PER_POST is set (see db.prune_analytics), but it
@@ -134,7 +143,98 @@ def collect_stats() -> int:
     return recorded
 
 
+# --- retention, audience and traffic per Short (design 10.1) ----------------------------------
+# The public view count cannot say whether viewers left at frame 1 or second 5, or whether they
+# were in India. The YouTube Analytics API can. It was enabled on the OAuth client's Google Cloud
+# project on 2026-11-12, and today's refresh token then read these reports with no new consent.
+
+_TOTALS = "views,engagedViews,averageViewDuration,averageViewPercentage,subscribersGained"
+_WINDOW_DAYS = 7
+
+
+def _analytics_client():
+    """YouTube Analytics v2 from the pipeline's refresh token, with the token's own grants."""
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    creds = Credentials(
+        token=None,
+        refresh_token=config.require("YOUTUBE_REFRESH_TOKEN"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=config.require("YOUTUBE_CLIENT_ID"),
+        client_secret=config.require("YOUTUBE_CLIENT_SECRET"),
+        scopes=None,
+    )
+    return build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False)
+
+
+def _rows(yta, video_id: str, start: date, end: date, metrics: str,
+          dimensions: str | None = None, **extra) -> list:
+    kw = {"ids": "channel==MINE", "startDate": start.isoformat(), "endDate": end.isoformat(),
+          "metrics": metrics, "filters": f"video=={video_id}", **extra}
+    if dimensions:
+        kw["dimensions"] = dimensions
+    return yta.reports().query(**kw).execute().get("rows") or []
+
+
+def _video_metrics(yta, video_id: str, start: date, end: date) -> dict:
+    """One Short's window: totals, the India share, top countries, traffic sources, and the
+    retention curve. A video with no data comes back as zeros and empties, never an error.
+
+    The country report leaves out countries below YouTube's privacy threshold (live on
+    2026-11-12: 88 of a Short's 372 views were attributed), so `india_share` is a lower bound."""
+    totals = (list((_rows(yta, video_id, start, end, _TOTALS) or [[]])[0]) + [0] * 5)[:5]
+    views, engaged, avg_seconds, avg_pct, subs = (x or 0 for x in totals)
+    countries = {r[0]: int(r[1]) for r in _rows(yta, video_id, start, end, "views", "country",
+                                               sort="-views", maxResults=10)}
+    traffic = {r[0]: int(r[1]) for r in _rows(yta, video_id, start, end, "views",
+                                             "insightTrafficSourceType")}
+    try:
+        retention = [[float(r[0]), float(r[1])] for r in
+                     _rows(yta, video_id, start, end, "audienceWatchRatio", "elapsedVideoTimeRatio")]
+    except Exception as e:  # noqa: BLE001 — the curve is the most likely report to be refused
+        log.warning("analytics: no retention curve for %s (%s)", video_id, e)
+        retention = None
+    views = int(views)
+    return {"views": views, "engaged_views": int(engaged), "avg_view_seconds": float(avg_seconds),
+            "avg_view_pct": float(avg_pct), "subscribers_gained": int(subs),
+            # No country rows means every country was withheld: unknown, not "no Indian viewers".
+            "india_share": round(countries.get("IN", 0) / views, 4) if views and countries else None,
+            "countries": countries, "traffic": traffic, "retention": retention}
+
+
+def collect_metrics(min_age_days: int = 9, limit: int = 120) -> int:
+    """Pull the first-week window for every Short old enough to have it (7 days, plus 2 of
+    reporting lag) and not measured yet. The first runs backfill the old Shorts: that is the
+    baseline the relaunch is judged against. At most `limit` posts a run. Returns posts measured."""
+    posts = db.posts_needing_metrics(min_age_days=min_age_days)[:limit]
+    if not posts:
+        log.info("analytics: no Shorts waiting for metrics.")
+        return 0
+    yta = _analytics_client()
+    measured = 0
+    for post in posts:
+        published = db._parse_time(post.get("published_at"))
+        if not published or not post.get("external_id"):
+            continue
+        start = published.date()
+        try:
+            metrics = _video_metrics(yta, post["external_id"], start,
+                                     start + timedelta(days=_WINDOW_DAYS - 1))
+        except Exception as e:  # noqa: BLE001 — one video never stops the rest
+            log.warning("analytics: metrics failed for %s (%s)", post.get("external_id"), e)
+            continue
+        db.upsert_post_metrics(post["id"], _WINDOW_DAYS, metrics)
+        measured += 1
+    log.info("analytics: measured %d Short(s) from the Analytics API.", measured)
+    return measured
+
+
 if __name__ == "__main__":
     import logging as _l
     _l.basicConfig(level=_l.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     collect_stats()
+    try:  # never at the cost of the view snapshots, which are already stored (rule 14)
+        collect_metrics()
+    except Exception as e:  # noqa: BLE001
+        log.warning("analytics: the metrics pull failed (%s)", e)

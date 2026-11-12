@@ -26,6 +26,7 @@ import hmac
 import html
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -322,7 +323,10 @@ def dispatch(cmd: str, arg: str) -> str:
         return HELP
 
     if cmd == "makeshort":
-        n = max(1, min(8, int(arg))) if arg.isdigit() else 5
+        # The leading number counts and the rest is ignored: "/makeshort 2 isro docking"
+        # used to start a 5-idea run, because any non-numeric argument meant the default.
+        m = re.match(r"\s*(\d+)", arg or "")
+        n = max(1, min(8, int(m.group(1)))) if m else 5
         ok = gh_dispatch_make_short(n)
         return (f"🎬 Starting a batch of <b>{n}</b> ideas — the approval digest lands in ~1–2 min. "
                 "Tap ✅ Approve on the ones you want."

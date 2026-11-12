@@ -65,6 +65,14 @@ def _no_live_youtube_preflight(request, monkeypatch):
 
     monkeypatch.setattr(publish_youtube, "preflight", lambda: None)
 
+    # The read-back after an upload builds its own read-only client (design 9.9). Unstubbed, a
+    # publish test would refresh the operator's real token against Google; the read-back fails
+    # soft, so the guard costs a test nothing and tests that need it stub _reader_client.
+    def _no_reader():
+        raise RuntimeError("a test tried to reach YouTube; stub publish_youtube._reader_client")
+
+    monkeypatch.setattr(publish_youtube, "_reader_client", _no_reader)
+
 
 @pytest.fixture(autouse=True)
 def _no_live_models(request, monkeypatch):

@@ -397,11 +397,14 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
         "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
         + BT709_TAGS
     )
-    proc = subprocess.run(
-        [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
-         "-vf", vf, *x264_args(), "-r", "30", dest],
-        capture_output=True, text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
+             "-vf", vf, *x264_args(), "-r", "30", dest],
+            capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("ken burns timed out after 120 s") from e
     if proc.returncode != 0:
         raise RuntimeError(f"ken burns failed ({proc.returncode}): {proc.stderr[-400:]}")
 
@@ -452,10 +455,13 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
 
 
 def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str,
-                setting: str | None = None) -> list[str]:
+                setting: str | None = None, meta: dict | None = None) -> list[str]:
     """Return vertical clip paths covering target_seconds. VISUAL_SOURCE picks the strategy:
     'photos' (default, Pexels stock photos + Ken Burns), 'ai' (Cloudflare Flux + Ken Burns),
     or 'video' (Pexels/Pixabay stock video). Image sources fall back to stock video on failure.
+
+    `meta`, when given, receives the path that produced the clips (`source`: photos, ai or
+    video) and how many (`clips`), for the post's format stamp (design 10.1).
 
     Raises RuntimeError if no clip could be obtained — the orchestrator skips that reel (rule 14).
     """
@@ -469,13 +475,19 @@ def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str,
             # The work dir is per-idea (production names it idea_<id>), so it is a stable,
             # already-available identifier for "which reel is this" — no new parameter needed
             # at the call site, and identical across a retry of the same reel.
-            return _fetch_image_broll(keywords, target_seconds, out_dir, source,
-                                      variant=os.path.basename(os.path.normpath(out_dir)),
-                                      setting=setting)
+            clips = _fetch_image_broll(keywords, target_seconds, out_dir, source,
+                                       variant=os.path.basename(os.path.normpath(out_dir)),
+                                       setting=setting)
+            if meta is not None:
+                meta.update(source=source, clips=len(clips))
+            return clips
         except Exception as e:  # noqa: BLE001 — fall back to stock video (rule 11)
             log.warning("visuals: %s source failed (%s); falling back to stock video", source, e)
 
-    return _fetch_video_broll(keywords, target_seconds, out_dir)
+    clips = _fetch_video_broll(keywords, target_seconds, out_dir)
+    if meta is not None:
+        meta.update(source="video", clips=len(clips))
+    return clips
 
 
 def _fetch_video_broll(keywords: list[str], target_seconds: float, out_dir: str) -> list[str]:

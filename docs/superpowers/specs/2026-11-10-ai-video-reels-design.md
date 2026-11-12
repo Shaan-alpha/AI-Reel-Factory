@@ -773,11 +773,13 @@ it (today the main ranking key, `share_score`, is never stored).
   (`YOUTUBE_LANGUAGE`, default `en`) feeds both; a fixed `hi` would mislabel the English fallback.
 - **Category** from the idea's stored category: 28 (Science & Technology) for science, space and
   technology, else 25 (News & Politics). Expect nothing from it in reach.
-- **Read back after upload:** one `videos.list` (part `status,snippet`) on the new video logs and
-  stores what YouTube recorded for `containsSyntheticMedia` and the two languages. Google's reference
-  says the property is returned when set, so this confirms the disclosure in code instead of asking
-  the operator to look in Studio (review finding 11; open since 2026-06-09). If the flag does not come
-  back `true`, the operator is told once.
+- **Read back after upload:** one `videos.list` (part `status,snippet`) on the new video stores what
+  YouTube recorded for `containsSyntheticMedia` and the two languages. Checked on 2026-11-12 on the
+  three newest uploads with the owner's read-only token: the languages come back (`en`/`en`), but
+  `containsSyntheticMedia` is **absent**, although every upload sends `true` and the API's schema
+  lists the field. So either the flag is not landing, or the API hides it from a read-only token;
+  the API cannot tell which (review finding 11; open since 2026-06-09). The read-back stores what
+  comes back and alerts only on an explicit `false`. Settling it is decision 18.9.
 
 ## 10. Part E: measuring
 
@@ -994,6 +996,7 @@ create table if not exists post_metrics (
   india_share numeric,                      -- share of views from IN
   countries jsonb,                          -- top countries with their views
   traffic jsonb,                            -- views by traffic source
+  retention jsonb,                          -- [[elapsed ratio, audienceWatchRatio], ...]
   unique (post_id, window_days)
 );
 alter table post_metrics enable row level security;
@@ -1111,6 +1114,11 @@ None blocks the build; each has the default stated.
 7. **Automatic dubbing** for the first 20 reels: leave it (default) or set "Publish manually"
    (section 15, step 6).
 8. ~~**The Gemini 3.8 voice.**~~ Decided 2026-11-12: today's model (sample A) over both 3.8 models.
+9. **The disclosure flag** (9.9): the API does not show it on the channel's uploads. Either one look
+   at any recent Short's "Altered content" setting in Studio, or a one-time re-consent giving the
+   pipeline's token the full YouTube scope (`tools/get_youtube_token.py` with `youtube` added), which
+   would also let the pipeline read the flag and unlist the two Shorts STATUS lists as never gated.
+   Default: neither, and the description's disclosure line carries the disclosure.
 
 ## 19. Follow-ups, not in this build
 
