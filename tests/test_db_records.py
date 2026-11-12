@@ -124,3 +124,12 @@ def test_backfill_post_published_at_only_fills_an_empty_date(monkeypatch):
     db.backfill_post_published_at(4, "2026-07-01T10:00:00Z")
     op, table, args, _ = fake.calls[0]
     assert (op, table) == ("update", "posts") and args[0] == {"published_at": "2026-07-01T10:00:00Z"}
+
+
+def test_ideas_insert_retries_without_the_new_columns(monkeypatch):
+    fake = _use(monkeypatch, _Fake(errors=[{"code": "PGRST204",
+                                            "message": "Could not find the 'rank_score' column"}]))
+    db.insert_ideas([{"title": "T", "niche": "tech", "rank_score": 0.8, "demand": []}])
+    inserts = [c for c in fake.calls if c[0] == "insert"]
+    assert len(inserts) == 2
+    assert "rank_score" not in inserts[1][2][0][0] and "demand" not in inserts[1][2][0][0]

@@ -90,3 +90,14 @@ def _no_live_models(request, monkeypatch):
     monkeypatch.setattr(llm, "_groq_client", _blocked)
     # Claude is billed per call: with the operator's key in .env, one unstubbed test is real money.
     monkeypatch.setattr(llm, "_anthropic_client", _blocked)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_demand(request, monkeypatch):
+    """Ideation reads two public feeds for demand (src/demand.py, design 8.3). Unit tests never
+    fetch them; tests/test_demand.py tests the readers on hand-built responses."""
+    if request.node.path.name == "test_demand.py" or request.node.name.startswith("test_live"):
+        return
+    from src import demand
+
+    monkeypatch.setattr(demand, "demand_lines", lambda: [])

@@ -94,10 +94,22 @@ def get_client() -> Client:
 # --- ideas ----------------------------------------------------------------------------
 
 def insert_ideas(ideas: list[dict]) -> list[dict]:
-    """Insert ideation rows (status defaults to 'pending'). Returns the inserted rows."""
+    """Insert ideation rows (status defaults to 'pending'). Returns the inserted rows.
+
+    `rank_score` and `demand` (design section 13) are dropped and the insert retried if those
+    columns do not exist yet: ideas are the run's backbone, so a missing column costs the
+    record, never the digest. PostgREST refused the first insert, so nothing is duplicated."""
     if not ideas:
         return []
-    return get_client().table("ideas").insert(ideas).execute().data
+    try:
+        return get_client().table("ideas").insert(ideas).execute().data
+    except Exception as e:  # noqa: BLE001 — only a missing column is retried
+        if not _missing_schema(e):
+            raise
+        _warn_once("ideas.rank_score", "ideas.rank_score / ideas.demand are missing (run the SQL "
+                                       "in docs/03); ideas are stored without them")
+        bare = [{k: v for k, v in i.items() if k not in ("rank_score", "demand")} for i in ideas]
+        return get_client().table("ideas").insert(bare).execute().data
 
 
 def get_pending_ideas() -> list[dict]:
@@ -390,17 +402,23 @@ def insert_analytics(post_id: int, views: int, likes: int | None = None,
     ).execute()
 
 
-def _ranked_recent_posts() -> list[dict]:
+def _ranked_recent_posts(since: str | None = None) -> list[dict]:
     """The newest WINNERS_WINDOW_POSTS published Shorts with their current views and title,
     best first: [{title, views}]. Shared by the winners and the low performers.
 
     Recency matters: ranked on lifetime views the list had not changed since 2026-08-26, while
-    the channel's topics and style moved on. Views now come from each post's newest snapshot."""
+    the channel's topics and style moved on. Views now come from each post's newest snapshot.
+
+    `since` (WINNERS_SINCE, the relaunch date) keeps only posts published on or after it and at
+    least 72 hours ago, when a Short's views have settled (design 8.4)."""
     client = get_client()
     window = max(5, int(_cfg("WINNERS_WINDOW_POSTS", "40")))
-    posts = (client.table("posts").select("id").eq("platform", "youtube")
-             .not_.is_("external_id", "null").neq("status", "removed")
-             .order("id", desc=True).limit(window).execute().data) or []
+    query = (client.table("posts").select("id").eq("platform", "youtube")
+             .not_.is_("external_id", "null").neq("status", "removed"))
+    if since:
+        settled = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+        query = query.gte("published_at", since).lte("published_at", settled)
+    posts = query.order("id", desc=True).limit(window).execute().data or []
     ids = [p["id"] for p in posts]
     if not ids:
         return []
@@ -437,7 +455,7 @@ def _topic_words(title: str) -> set[str]:
     return {t for t in _re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOP and len(t) > 2}
 
 
-def top_performing_titles(limit: int = 8) -> list[str]:
+def top_performing_titles(limit: int = 8, since: str | None = None) -> list[str]:
     """Best-viewed Shorts as "PUBLISHED TITLE — N views" (analytics → posts → scripts → ideas).
 
     Returns the PUBLISHED YouTube title (the punchy one viewers tapped) with its view count,
@@ -461,7 +479,7 @@ def top_performing_titles(limit: int = 8) -> list[str]:
     out: list[str] = []
     chosen: list[set[str]] = []
     seen: set[str] = set()
-    for r in _ranked_recent_posts():
+    for r in _ranked_recent_posts(since):
         title, words = r["title"], _topic_words(r["title"])
         if not title or title.lower() in seen:
             continue

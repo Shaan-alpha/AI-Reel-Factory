@@ -71,8 +71,8 @@ def test_inserts_valid_ideas(monkeypatch):
     captured = _patch(monkeypatch, ideas)
     n = fb.run_fallback_ideation()
     assert n == 6
-    assert all(set(r) == {"niche", "title", "hook", "angle", "est_score", "sources"}
-               for r in captured["rows"])
+    assert all(set(r) == {"niche", "title", "hook", "angle", "est_score", "sources",
+                          "rank_score", "demand"} for r in captured["rows"])
 
 
 def test_drops_ideas_with_too_few_sources(monkeypatch):
@@ -277,7 +277,7 @@ def test_produce_ideas_runs_two_stages(monkeypatch):
     monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [{"title": "Real headline - PTI", "url": "https://feed.example/a", "source": "PTI"}])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
     calls = {"select": 0}
-    def _sel(target, headlines, trending, winners):
+    def _sel(target, headlines, trending, winners, demand_lines=None):
         calls["select"] += 1
         return [{"story": "Story X", "category": "world", "why_shareworthy": "stakes"}]
     monkeypatch.setattr(fb, "_select_stories", _sel)
@@ -383,8 +383,9 @@ def test_validate_share_score_coerced_and_clamped():
 def test_to_rows_projects_to_db_columns_only():
     ideas = fb._validate_and_clean([_idea("A", share_score=0.9)])
     rows = fb._to_rows(ideas)
-    assert set(rows[0]) == {"niche", "title", "hook", "angle", "est_score", "sources"}
-    assert "share_score" not in rows[0]
+    assert set(rows[0]) == {"niche", "title", "hook", "angle", "est_score", "sources",
+                            "rank_score", "demand"}
+    assert "share_score" not in rows[0] and rows[0]["rank_score"] == 0.9
 
 
 # --- de-hyped ideation framing ---------------------------------------------------------
@@ -1034,3 +1035,59 @@ def test_ideas_written_from_research_take_their_own_storys_sources(monkeypatch):
     ideas = {i["title"]: i["sources"] for i in fb._produce_ideas(2)}
     assert ideas["RBI Cuts Repo Rate Again"] == ["https://b.com/rbi-cuts-repo-rate"]
     assert ideas["Starship Reaches Orbit"] == ["https://a.com/starship-reaches-orbit"]
+
+
+# --- stage 1a: picking for Indian viewers (design 8.1, 8.3, 8.4) ------------------------------
+
+def test_both_prompts_name_the_viewer_and_the_rubric():
+    for prompt in (fb._STAGE1_PROMPT, fb._PROMPT):
+        assert "Indians aged about 18-34" in prompt
+        assert "a named Indian or Indian-origin person" in prompt
+        assert "routine launches" in prompt
+        assert "at least half" not in prompt
+
+
+def _capture_picker(monkeypatch):
+    seen = {}
+
+    def _pick(target, headlines, trending, winners, demand_lines=None):
+        seen.update(headlines=headlines, winners=winners, demand=demand_lines)
+        return []
+
+    monkeypatch.setattr(fb, "_select_stories", _pick)
+    return seen
+
+
+def test_the_winners_block_is_off_until_winners_since(monkeypatch):
+    _patch(monkeypatch, [_idea("A story about India")])
+    monkeypatch.delenv("WINNERS_SINCE", raising=False)
+    called = []
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: called.append(1) or ["x"])
+    monkeypatch.setattr(fb.db, "low_performing_titles", lambda *a, **k: called.append(2) or ["y"])
+    seen = _capture_picker(monkeypatch)
+    fb._produce_ideas(2)
+    assert called == [] and seen["winners"] == []
+
+
+def test_headlines_show_their_age(monkeypatch):
+    _patch(monkeypatch, [_idea("A story about India")])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [
+        {"title": "A - P", "url": "https://a", "source": "P", "age_hours": 5.2}])
+    seen = _capture_picker(monkeypatch)
+    fb._produce_ideas(2)
+    assert "(5h) A - P" in seen["headlines"]
+
+
+def test_an_unknown_category_is_mapped_to_a_known_one():
+    assert fb._category("Geopolitics") == "world"
+    assert fb._category("Science & Space") == "space"
+    assert fb._category("India politics") == "india-politics"
+    assert fb._category("tech") == "tech"
+    assert fb._category("") == "world"
+
+
+def test_each_idea_stores_its_category_and_rank():
+    row = fb._to_rows([{**_idea("T"), "niche": "tech", "share_score": 0.8,
+                        "demand": ["India on Wikipedia yesterday: \"T\""]}])[0]
+    assert row["niche"] == "tech" and row["rank_score"] == 0.8
+    assert row["demand"] == ["India on Wikipedia yesterday: \"T\""]
