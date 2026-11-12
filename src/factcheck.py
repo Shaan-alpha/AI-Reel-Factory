@@ -269,19 +269,21 @@ def _is_misconfigured(exc: Exception) -> bool:
     return any(m in text for m in _MISCONFIGURED)
 
 
-# Design 9.7: the gate thinks at the model's default instead of the minimum, and its thinking
-# counts against max_output_tokens, so it gets room for that and the JSON verdict after it.
-_CHECK_TOKENS = 8192
+# Design 9.7: the gate thinks at the model's default instead of the minimum. Gemini 3's default
+# is high, and its thinking counts against max_output_tokens: a reply cut off there cannot be
+# parsed. Unused budget costs nothing, so the budget is generous, and an unreadable reply is
+# asked for once more at minimal thinking (`_check_once`), the setting the gate ran on before.
+_CHECK_TOKENS = 32768
 
 
-def _ask_checker(prompt: str, meta: dict | None = None) -> str:
+def _ask_checker(prompt: str, meta: dict | None = None, thinking: str = "default") -> str:
     """Run the grounded check on the dedicated key, falling back to the shared one if that
     key is misconfigured (never if it is merely exhausted — see `_is_misconfigured`). `meta`
     receives the number of search citations behind the reply."""
     key = _api_key()
     try:
         return llm.generate_grounded(prompt, max_tokens=_CHECK_TOKENS, model=_model(),
-                                     api_key=key, thinking="default", meta=meta)
+                                     api_key=key, thinking=thinking, meta=meta)
     except Exception as e:  # noqa: BLE001 — decide fall-back-vs-propagate from the error
         if key is None or not _is_misconfigured(e):
             raise
@@ -289,7 +291,7 @@ def _ask_checker(prompt: str, meta: dict | None = None) -> str:
                     "the shared GEMINI_API_KEY. That key has no grounded search — a key from a "
                     "NEW Google Cloud project does not get one.", str(e)[:160])
         return llm.generate_grounded(prompt, max_tokens=_CHECK_TOKENS, model=_model(),
-                                     api_key=None, thinking="default", meta=meta)
+                                     api_key=None, thinking=thinking, meta=meta)
 
 
 def _samples() -> int:
@@ -326,10 +328,15 @@ _CONTRADICTION = re.compile(
 # same goes for a ruling or law, and for blame or a cause pinned on someone. A statistic the
 # checker merely could not confirm stays waived (the operator's line, 2026-08-07), and 'report'
 # is not on the list: "no report was found" is how plain non-confirmation is worded.
+# Since 2026-11-12 (design 9.7) a forecast or consequence for India must be stated by a source
+# too: the payoff says what changes for a person in India, and an unsourced one is an invented
+# claim. The checker reports a missing source for it as non-confirmation.
 _FABRICATION_SUBJECT = re.compile(
     r"(?i)\bquot(?:e|es|ed|ation)\b|\bsaid\b|\bsaying\b|\bstatements?\b|\bruling\b|\bcourt\b|"
     r"\blaws?\b|\bblam\w*|\bcaus(?:e|es|ed|ing)\b|\bresponsib\w*|\battribut\w*|"
-    r"\bno record\b|\bappears nowhere\b")
+    r"\bno record\b|\bappears nowhere\b|"
+    r"\bforecast\w*|\bpredict\w*|\bprojection\w*|\bconsequences?\b|\bwill\b|\bgoing to\b|"
+    r"\bexpected to\b|\blikely to\b")
 
 
 def _only_unconfirmed(finding: str) -> bool:
@@ -377,9 +384,11 @@ def _check_once(prompt: str, meta: dict | None = None) -> tuple[dict, str]:
         # failed to parse. Falling open on it shipped idea 291 unverified (2026-09-12) with a
         # claim the gate blocks 6 times out of 6. One more ask is cheap (one grounded call,
         # inside Vertex's free Gemini 3 allowance) and far cheaper than a public false claim.
-        log.warning("factcheck: could not parse the checker's reply (%s); asking once more. "
-                    "Raw reply: %s", e, raw.strip()[:1500])
-        raw = _ask_checker(prompt, meta)
+        # The second ask uses minimal thinking: a reply cut off by the token limit at default
+        # thinking would most likely be cut off again (final review, 2026-11-12).
+        log.warning("factcheck: could not parse the checker's reply (%s); asking once more at "
+                    "minimal thinking. Raw reply: %s", e, raw.strip()[:1500])
+        raw = _ask_checker(prompt, meta, thinking="minimal")
         return _parse(raw), raw
 
 

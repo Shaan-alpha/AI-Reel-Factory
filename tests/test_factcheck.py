@@ -484,7 +484,7 @@ def _capture_prompt(monkeypatch, replies):
     seen = []
     it = iter(replies)
     monkeypatch.setattr(factcheck, "_ask_checker",
-                        lambda p, meta=None: seen.append(p) or next(it))
+                        lambda p, meta=None, **_: seen.append(p) or next(it))
     return seen
 
 
@@ -591,7 +591,7 @@ def test_an_extra_sample_that_cannot_run_does_not_undo_the_first(monkeypatch):
     monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
     calls = []
 
-    def _ask(p, meta=None):
+    def _ask(p, meta=None, **_):
         calls.append(p)
         if len(calls) > 1:
             raise RuntimeError("503 UNAVAILABLE")
@@ -641,3 +641,36 @@ def test_the_gate_reports_its_citations(monkeypatch):
     monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
     out = factcheck.verify("ISRO's rocket landed itself on Tuesday.", ["https://example.com/a"])
     assert out["ok"] and out["citations"] == [4, 4]  # one count per sample
+
+
+# --- final review of stage 1 (2026-11-12) -----------------------------------------------------
+
+def test_the_waiver_never_reaches_an_unsourced_forecast():
+    """Design 9.7: a forecast for India must be stated by a source. The checker words a missing
+    one as non-confirmation, which the waiver used to move to minor (3 of 4 phrasings)."""
+    for finding in (
+        "Could not verify the forecast that EMIs in India will fall next month; no source states it.",
+        "No source was found to confirm the prediction that petrol prices in India will rise.",
+        "Unable to confirm the claimed consequence for Indian students; nothing supports it.",
+        "Could not confirm that fares are expected to double for Indian travellers.",
+    ):
+        assert not factcheck._only_unconfirmed(finding), finding
+    # A plain unconfirmed figure is still waived.
+    assert factcheck._only_unconfirmed("Could not independently confirm the 40% figure.")
+
+
+def test_an_unreadable_gate_reply_is_asked_again_at_minimal_thinking(monkeypatch):
+    """At default thinking a reply cut off by the token limit cannot be parsed; asking again
+    the same way would fail the same way, so the second ask uses minimal thinking."""
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "1")
+    calls = []
+
+    def _fake(prompt, **k):
+        calls.append(k.get("thinking"))
+        return '{"checked": 3, "blocking": ["the 40' if len(calls) == 1 else _PASS
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    out = factcheck.verify("ISRO's rocket landed itself on Tuesday.", ["https://example.com/a"])
+    assert out["ok"] and factcheck.gate_ran(out)
+    assert calls == ["default", "minimal"]
+    assert factcheck._CHECK_TOKENS >= 32768
