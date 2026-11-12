@@ -13,6 +13,14 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Changed (2026-11-12: the voice moves to Vertex ahead of 2026-11-17; details: STATUS.md)
+- **The channel voice comes from Vertex** (`voice`): the Developer API shuts down
+  `gemini-3.1-flash-tts-preview` and `gemini-2.5-flash-preview-tts` on 2026-11-17, and the
+  operator kept 3.1 over both 3.8 models by ear and asked for the move at once. Wherever Vertex is
+  set up (both production workflows) those two models are no longer asked of the Developer API;
+  the same voice comes from Vertex 3.1, then Vertex's 2.5 GA model, then Chirp. Billed at cents a
+  reel. `tools/verify_gemini_tts.py` skips the Developer API for those models.
+
 ### Added (2026-10-22: Claude writes the script; details: STATUS.md)
 - **Claude as the scriptwriter** (`scriptwriter`, `llm`): Gemini's grounded write becomes a
   draft, and Claude (`claude-opus-5-5`, effort `low`, about $0.037 a script) writes the final
