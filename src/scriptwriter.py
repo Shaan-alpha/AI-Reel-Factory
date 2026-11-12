@@ -17,6 +17,7 @@ keep the two in sync.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -165,8 +166,28 @@ def _copies_the_angle(body: str, angle: str, run: int = 8) -> bool:
     return any(f" {' '.join(a[i:i + run])} " in b for i in range(max(0, len(a) - run + 1)))
 
 
-_WHAT_HAPPENED = ("After sentence one: how it happened, then why it matters, then what is scheduled "
-                  "next, only when the sources record a scheduled step.")
+# Design 9.3: the true surprising fact is always sentence one; a structure is what follows it.
+# Each block describes moves, never phrases to copy.
+_FALL_BACK = (" If the sources do not support this, follow what-happened instead and say so in "
+              "\"structure\".")
+STRUCTURES = {
+    "what-happened": ("After sentence one: how it happened, then why it matters, then what is "
+                      "scheduled next, only when the sources record a scheduled step."),
+    "number": ("Sentence one's fact is a number. After it: what the number measures, what it "
+               "compares with, then why it matters." + _FALL_BACK),
+    "belief": ("After sentence one: the common belief this fact overturns, stated as a belief and "
+               "only when a source records that belief; then the evidence; then why it matters."
+               + _FALL_BACK),
+}
+
+
+def structure_for(idea: dict) -> str:
+    """This idea's structure: a hash of its id, so a rerun gets the same one and a digest's size
+    cannot lock the choice; a somber story always takes what-happened (design 9.3)."""
+    if tone_for(idea) == "somber":
+        return "what-happened"
+    names = list(STRUCTURES)
+    return names[int(hashlib.sha1(str(idea.get("id")).encode()).hexdigest(), 16) % len(names)]
 
 
 def _build_prompt(idea: dict, template: str) -> str:
@@ -182,7 +203,7 @@ def _build_prompt(idea: dict, template: str) -> str:
         hook=idea.get("hook", ""),
         angle=idea.get("angle", ""),
         sources=sources_block,
-        structure=_WHAT_HAPPENED,
+        structure=STRUCTURES[structure_for(idea)],
         target_seconds=27,
         target_words=59,
         max_words=_max_words(),
@@ -1051,10 +1072,15 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # words (_visible_words ignores them), so this cannot push the script over the cap.
     body = _ensure_delivery_tag(body)
 
+    # The writer may fall back to what-happened and says so; anything else keeps the chosen one.
+    said = str(data.get("structure") or "").strip().lower()
+    structure = said if said in STRUCTURES else structure_for(idea)
+
     # Persist the published title too, so the analytics loop can learn which title STYLE wins
     # (db.top_performing_titles) — the dry idea title is a poor proxy for what viewers tapped.
-    script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None)
+    script_id = db.insert_script(idea_id, template, body, caption, hashtags, title or None,
+                                 structure=structure)
     return {"script_id": script_id, "script_body": body, "caption": caption,
             "hashtags": hashtags, "title": title, "tags": tags, "key_points": key_points,
             "tone": tone_for(idea, body), "writer": data.get("writer"),
-            "claude_issue": data.get("claude_issue")}
+            "claude_issue": data.get("claude_issue"), "structure": structure}

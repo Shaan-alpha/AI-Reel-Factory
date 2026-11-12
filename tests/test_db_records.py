@@ -159,3 +159,14 @@ def test_expired_ideas_are_not_recent(monkeypatch):
     monkeypatch.setattr(db, "get_client", lambda: _Q())
     db.recent_ideas(10)
     assert ("neq", "status", "expired") in filters
+
+
+def test_insert_script_stores_the_structure_and_survives_a_missing_column(monkeypatch):
+    fake = _use(monkeypatch, _Fake())
+    db.insert_script(1, "N", "body", "cap", [], title="T", structure="belief")
+    assert fake.calls[0][2][0]["structure"] == "belief"
+    fake = _use(monkeypatch, _Fake(errors=[_NO_COLUMN]))
+    script_id = db.insert_script(1, "N", "body", "cap", [], title="T", structure="belief")
+    inserts = [c for c in fake.calls if c[0] == "insert"]
+    assert len(inserts) == 2 and "structure" not in inserts[1][2][0]
+    assert inserts[1][2][0]["title"] == "T" and script_id == 11

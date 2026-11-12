@@ -45,9 +45,9 @@ def _patch(monkeypatch, reply: str):
     monkeypatch.setattr(scriptwriter.llm, "generate_grounded", lambda *a, **k: reply)  # primary
     monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: reply)            # fallback
 
-    def fake_insert(idea_id, template, body, caption, hashtags, title=None):
+    def fake_insert(idea_id, template, body, caption, hashtags, title=None, structure=None):
         captured.update(idea_id=idea_id, template=template, body=body,
-                        caption=caption, hashtags=hashtags, title=title)
+                        caption=caption, hashtags=hashtags, title=title, structure=structure)
         return 7
 
     monkeypatch.setattr(scriptwriter.db, "insert_script", fake_insert)
@@ -62,7 +62,7 @@ def test_grounded_failure_falls_back_to_ungrounded(monkeypatch):
                         "caption": "cap https://example.com/isro https://example.org/space",
                         "hashtags": ["#Shorts"]})
     monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: reply)
-    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a: 7)
+    monkeypatch.setattr(scriptwriter.db, "insert_script", lambda *a, **k: 7)
     out = scriptwriter.write_script(IDEA)
     assert out["script_id"] == 7 and out["script_body"].strip()
 
@@ -798,3 +798,39 @@ def test_the_brief_names_the_viewer_and_drops_the_roast():
 
 def test_the_somber_note_needs_no_bridge_phrase():
     assert "Here's why it matters" not in scriptwriter._SOMBER_NOTE
+
+
+# --- stage 1b: three structures (design 9.3) -------------------------------------------------
+
+def test_the_structure_is_stable_per_idea_and_somber_takes_the_first():
+    assert set(scriptwriter.STRUCTURES) == {"what-happened", "number", "belief"}
+    idea = {"id": 42, "title": "Rupee hits a record low", "hook": "", "angle": ""}
+    assert scriptwriter.structure_for(idea) == scriptwriter.structure_for(dict(idea))
+    seen = {scriptwriter.structure_for({"id": i, "title": "Rupee hits a record low"})
+            for i in range(1, 61)}
+    assert seen == set(scriptwriter.STRUCTURES)
+    somber = {"title": "Bridge collapse kills 12 in Gujarat", "hook": "", "angle": ""}
+    assert {scriptwriter.structure_for({**somber, "id": i}) for i in range(1, 61)} \
+        == {"what-happened"}
+
+
+def test_the_structure_block_reaches_the_prompt():
+    idea = next({**IDEA, "id": i} for i in range(1, 300)
+                if scriptwriter.structure_for({**IDEA, "id": i}) == "number")
+    prompt = scriptwriter._build_prompt(idea, "N")
+    assert scriptwriter.STRUCTURES["number"] in prompt
+    assert scriptwriter.STRUCTURES["belief"] not in prompt
+    assert scriptwriter.STRUCTURES["what-happened"] not in prompt
+
+
+def test_write_script_stores_the_writers_known_structure_else_the_chosen_one(monkeypatch):
+    chosen = scriptwriter.structure_for(IDEA)
+    other = next(s for s in scriptwriter.STRUCTURES if s != chosen)
+    body = "ISRO's rocket landed itself on Tuesday. " * 3
+    for said, stored in ((other, other), ("a listicle", chosen), (None, chosen)):
+        reply = {"script_body": body, "caption": "c", "hashtags": []}
+        if said:
+            reply["structure"] = said
+        captured = _patch(monkeypatch, json.dumps(reply))
+        out = scriptwriter.write_script(IDEA)
+        assert out["structure"] == stored and captured["structure"] == stored, said

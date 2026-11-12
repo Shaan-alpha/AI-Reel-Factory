@@ -206,18 +206,33 @@ def update_script_body(script_id: int, body: str) -> None:
 
 
 def insert_script(idea_id: int, template: str, body: str, caption: str,
-                  hashtags: list[str], title: str | None = None) -> int:
+                  hashtags: list[str], title: str | None = None,
+                  structure: str | None = None) -> int:
     """Persist a generated script; return its id.
 
     `title` is the punchy PUBLISHED YouTube title — stored so the analytics loop can learn
     which title STYLE wins (the dry idea title is a poor proxy; the published one is what
     viewers actually saw and tapped). Optional for back-compat with older callers/tests.
+
+    `structure` (scripts.structure, design 9.3) records which structure the script followed. If
+    the column does not exist yet, the script is stored without it (PostgREST refused the first
+    insert, so the retry cannot duplicate the row).
     """
     row = {"idea_id": idea_id, "template": template, "body": body,
            "caption": caption, "hashtags": hashtags}
     if title:
         row["title"] = title
-    return get_client().table("scripts").insert(row).execute().data[0]["id"]
+    if structure:
+        row["structure"] = structure
+    try:
+        return get_client().table("scripts").insert(row).execute().data[0]["id"]
+    except Exception as e:  # noqa: BLE001 — only a missing column is retried
+        if not (structure and _missing_schema(e)):
+            raise
+        _warn_once("scripts.structure", "scripts.structure is missing (run the SQL in docs/03); "
+                                        "scripts are stored without their structure")
+        row.pop("structure")
+        return get_client().table("scripts").insert(row).execute().data[0]["id"]
 
 
 def set_post_status(post_id: int, status: str) -> None:
