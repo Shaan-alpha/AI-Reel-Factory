@@ -195,8 +195,9 @@ def test_punch_up_fail_soft_on_llm_error(monkeypatch):
 
 def test_hook_judge_can_be_disabled(monkeypatch):
     monkeypatch.setenv("ENABLE_HOOK_JUDGE", "0")
-    # generate would raise if the judge ran; reply only feeds the script JSON path via _patch
-    reply = json.dumps({"title": "T", "script_body": "ok body " * 20,
+    # generate would raise if the judge ran; reply only feeds the script JSON path via _patch.
+    # The body opens on a subject: an "ok ..." opener rightly costs one opening-rewrite call.
+    reply = json.dumps({"title": "T", "script_body": "Rocket body " * 20,
                         "caption": "cap https://example.com/isro https://example.org/space",
                         "hashtags": ["#Shorts"]})
     captured = _patch(monkeypatch, reply)
@@ -702,3 +703,43 @@ def test_a_punched_up_title_is_held_to_the_limit_too(monkeypatch):
     monkeypatch.setattr(scriptwriter, "_punch_up_hook", lambda t, b: (long_title, b))
     out = scriptwriter.write_script(IDEA)
     assert out["title"] == "Nationwide Bank Strike Cancelled at the Last Minute"
+
+
+# --- the opening check on every script (design 9.2; audit data 4, script 3, voice-audio 4) --------
+
+def _raiser(exc):
+    def _fn(*_args, **_kwargs):
+        raise exc
+
+    return _fn
+
+
+def test_opening_problem_flags_wind_ups_dates_and_short_openers():
+    assert "wind-up" in scriptwriter.opening_problem("So, India just banned an app used by students.")
+    assert "date" in scriptwriter.opening_problem("On November 18, Voyager 1 reaches one light-day.")
+    assert "five words" in scriptwriter.opening_problem("Big news. India banned it today.")
+    assert scriptwriter.opening_problem("India just banned the app millions of students use daily.") is None
+
+
+def test_hedges_are_not_wind_ups():
+    """Cutting 'Apparently,' would turn a hedged claim into a flat one before the fact-check."""
+    assert scriptwriter.opening_problem("Apparently, India's new rule ends free UPI for big shops.") is None
+
+
+def test_an_abbreviation_in_sentence_one_is_not_a_short_opener():
+    assert scriptwriter.opening_problem("The U.S. Fed cut rates by 0.25 points today.") is None
+
+
+def test_a_wind_up_is_cut_when_the_rewrite_fails(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate", _raiser(RuntimeError("down")))
+    fixed = scriptwriter._fix_opening("So, India banned the app students use daily. More here.",
+                                      "opens on the wind-up 'so'", "India banned the app")
+    assert fixed.startswith("India banned the app students use daily.")
+
+
+def test_a_rewrite_that_adds_a_number_is_refused(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k:
+                        '{"first_sentence": "India banned 3 apps used by 40 crore people."}')
+    fixed = scriptwriter._fix_opening("So, India banned the app students use daily. More here.",
+                                      "opens on the wind-up 'so'", "India banned the app")
+    assert "40" not in fixed and fixed.startswith("India banned the app")
