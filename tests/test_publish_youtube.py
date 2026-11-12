@@ -82,7 +82,7 @@ def test_publish_uploads_records_and_deletes(monkeypatch, tmp_path):
 
     recorded = {}
     monkeypatch.setattr(pub.db, "insert_post",
-                        lambda sid, plat, ext, url, status, voice=None: recorded.update(
+                        lambda sid, plat, ext, url, status, voice=None, format=None: recorded.update(
                             sid=sid, plat=plat, ext=ext, url=url, status=status) or 1)
 
     vid, url = pub.publish(str(video), {"title": "My Short", "description": "d"}, script_id=9)
@@ -247,3 +247,79 @@ def test_preflight_does_not_stop_a_run_on_a_network_blip(monkeypatch):
     monkeypatch.setattr(credentials.Credentials, "refresh",
                         lambda self, req: (_ for _ in ()).throw(TransportError("dns")))
     pub.preflight()  # logged, not raised
+
+
+# --- audio language from the narration; the read-back (design 9.9) ---------------------------
+
+class _FakeReader:
+    """A read-only YouTube client whose videos().list returns one canned item."""
+
+    def __init__(self, status: dict):
+        self._status = status
+
+    def videos(self):
+        return self
+
+    def list(self, **_kw):
+        return self
+
+    def execute(self):
+        return {"items": [{"status": self._status,
+                           "snippet": {"defaultLanguage": "en", "defaultAudioLanguage": "hi"}}]}
+
+
+def _wire_upload(monkeypatch, tmp_path, status=None):
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"\x00" * 100)
+    monkeypatch.setattr(pub.db, "find_post", lambda sid, plat: None)
+    monkeypatch.setattr(pub, "_youtube_client", lambda: object())
+    monkeypatch.setattr(pub, "_upload", lambda yt, body, path: {"id": "V1"})
+    seen = {"insert": None, "readback": None, "alerts": 0}
+    monkeypatch.setattr(pub.db, "insert_post", lambda *a, **k: seen.update(insert=k) or 5)
+    monkeypatch.setattr(pub.db, "set_post_readback",
+                        lambda post_id, readback: seen.update(readback=(post_id, readback)))
+    if status is not None:
+        monkeypatch.setattr(pub, "_reader_client", lambda: _FakeReader(status))
+    from src import approval
+    monkeypatch.setattr(approval, "_api",
+                        lambda method, **p: seen.update(alerts=seen["alerts"] + 1))
+    monkeypatch.setattr(pub, "_FLAG_ALERTED", set())
+    return video, seen
+
+
+def test_audio_language_follows_the_narration(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_LANGUAGE", "fr")  # retired: no longer read
+    body = pub._build_body({"title": "T", "description": "d", "audio_language": "hi"})
+    assert body["snippet"]["defaultLanguage"] == "en"
+    assert body["snippet"]["defaultAudioLanguage"] == "hi"
+    body = pub._build_body({"title": "T", "description": "d"})
+    assert body["snippet"]["defaultAudioLanguage"] == "en"
+
+
+def test_publish_passes_the_format_and_stores_the_read_back(monkeypatch, tmp_path):
+    video, seen = _wire_upload(monkeypatch, tmp_path, status={"privacyStatus": "public"})
+    pub.publish(str(video), {"title": "T", "description": "d", "format": {"version": 1}}, 9)
+    assert seen["insert"]["format"] == {"version": 1}
+    post_id, readback = seen["readback"]
+    assert post_id == 5 and readback["containsSyntheticMedia"] is None
+    assert readback["defaultAudioLanguage"] == "hi"
+    assert seen["alerts"] == 0  # absent is not false: the API hides the flag (design 9.9)
+
+
+def test_an_explicit_false_flag_alerts_once(monkeypatch, tmp_path):
+    video, seen = _wire_upload(monkeypatch, tmp_path, status={"containsSyntheticMedia": False})
+    pub.publish(str(video), {"title": "T", "description": "d"}, 9)
+    video.write_bytes(b"\x00" * 100)
+    pub.publish(str(video), {"title": "T", "description": "d"}, 10)
+    assert seen["alerts"] == 1
+
+
+def test_read_back_failure_never_fails_the_publish(monkeypatch, tmp_path):
+    video, seen = _wire_upload(monkeypatch, tmp_path)
+
+    def _down():
+        raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr(pub, "_reader_client", _down)
+    vid, url = pub.publish(str(video), {"title": "T", "description": "d"}, 9)
+    assert vid == "V1" and url.endswith("V1") and seen["readback"] is None
