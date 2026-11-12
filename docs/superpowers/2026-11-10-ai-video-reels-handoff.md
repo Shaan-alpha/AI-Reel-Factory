@@ -37,8 +37,12 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   asked for, not enforced; `reel_attempts.spend_usd` waits for stage 3, and a job kill leaves a
   NULL outcome (read it as "killed").
 
-**Next:** write and build the Stage 1 plan (stories and script, design Parts C and D) on branch
-`feat/stage-1-stories-script`, then stages 2-4 and the relaunch (design section 14).
+- **Stage 1a (stories for Indian viewers) is built** on `feat/stage-1-stories-script` (7 tasks, 811
+  pass); **stage 1b's plan is written** (`docs/superpowers/plans/2026-11-12-stage-1b-script-and-packaging.md`).
+  Each plan's ledger is under `.superpowers/sdd/<plan name>/progress.md` (git-ignored).
+
+**Next:** build stage 1b task by task on the same branch, then one final review of stage 1, then ask
+the operator before pushing; then stages 2-4 and the relaunch (design section 14).
 
 ## 1. What the operator wants
 
