@@ -286,6 +286,12 @@ create table if not exists reel_attempts ( -- one row per produce_one call
   downgrades text[]                        -- fallback-voice | stock-video | ...
 );
 alter table reel_attempts enable row level security;
+
+-- 2026-11-12, stories for Indian viewers (AI-video design, stage 1a; safe to run twice).
+-- ideas.niche now holds the story's category (india-politics, india, money, world, science,
+-- space, tech, health, sport, culture), and ideas.status gains 'expired' (offered, not tapped).
+alter table ideas add column if not exists demand jsonb;       -- demand signals it matched
+alter table ideas add column if not exists rank_score numeric; -- the score that ordered it
 ```
 
 ---

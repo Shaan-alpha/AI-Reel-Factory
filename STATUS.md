@@ -178,6 +178,19 @@ A fresh final review found 5 issues worth fixing (the wind-up cut could garble a
 redeployed the same day (`dpl_ABnQptCFzrEPdKBxQtXm3satobmb`, account shaan-alpha). **Waiting for
 the operator:** the SQL at the end of docs/03 §4 (the code runs without it, skipping those records).
 
+**Stage 1a built (stories for Indian viewers)** on branch `feat/stage-1-stories-script`
+([plan](docs/superpowers/plans/2026-11-12-stage-1a-stories-for-indian-viewers.md)): a 60-story pool with each
+story's age and Google News searches for an Indian stake (puzzle items dropped); two free demand
+signals in `src/demand.py`, Wikipedia's India list (yesterday's views over the article's own week,
+checked live: Jensen Huang 42x, Nvidia 13.6x) and comparable Hindi channels' Shorts pacing ahead of
+their norm; both ideation prompts name the Indian viewer and the rubric, with no science quota;
+each idea stores its category (`ideas.niche`), the score that ranked it and the signals it matched;
+the topic mix is enforced in code (one india-politics idea, two per category, one somber story);
+de-duplication runs before research, ignores "vs" and template words, and lets a sourced
+follow-up through; untapped ideas end `expired`, not banned; election matter is dropped inside an
+`ELECTION_SILENCE` window. The winners block is off until `WINNERS_SINCE` is set. 811 pass,
+5 skipped. SQL for it is at the end of docs/03 §4 (two `ideas` columns; the code runs without them).
+
 ### 2026-11-10 — A new format chosen; design, research and a reach audit in progress (no code changed)
 
 The operator compared four test videos and chose the direction for every reel from now on.

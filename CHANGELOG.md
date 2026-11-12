@@ -13,6 +13,15 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Added (2026-11-12: stage 1a, stories for Indian viewers; details: STATUS.md)
+- **Demand signals** (`src/demand.py`): Wikipedia's India list scored against each article's own
+  week, and comparable Hindi channels' Shorts pacing ahead of their norm, as lines for the picker.
+- **Ideation for Indian viewers** (`ideation_fallback`, `news`): the viewer and the rubric in both
+  prompts, no science quota; a 60-story pool with ages and India-stake searches; the category,
+  rank score and matched signals stored per idea; the topic mix enforced in code; de-duplication
+  before research, with sourced follow-ups allowed; untapped ideas `expired`; an election-silence
+  rule. The winners block waits for `WINNERS_SINCE`.
+
 ### Added (2026-11-12: stage 0 of the AI-video design, safety and measuring; details: STATUS.md)
 - **Measuring** (`analytics`, `db`, `production`, `publish_youtube`): every post is stamped with
   its format (`posts.format`); every attempt leaves a `reel_attempts` row with the stage it ended
