@@ -89,7 +89,11 @@ _STOPWORDS = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "wit
               # "vs" and the hook template's stock words matched unrelated stories: 3-5 of 20
               # replayed flags were SpaceX v Blue Origin against Korean football (design 8.5).
               "vs", "v", "versus", "race", "heats", "showdown", "clash", "battle", "shock",
-              "shocking"}
+              "shocking",
+              # The channel is for Indian viewers (design 8.1), so 'India' is in most titles and
+              # in the default searches: shared, it says nothing about the story (final review,
+              # 2026-11-12: an LPG price hike matched a petrol price hike on india+price+hike).
+              "india", "indian"}
 
 
 def _fold(token: str) -> str:
@@ -924,7 +928,10 @@ def _produce_ideas(target: int) -> list[dict]:
     log.info("ideation: grounded pass yielded %d of %d; topping up ungrounded.", len(clean), target)
     try:
         raw = llm.generate(prompt, json=True, max_tokens=4096)
-        parsed = _attach_real_sources(_parse_ideas(raw), raw, [], feed_stories)
+        # Tagged like the other passes, or its ideas keep the model's own niche (final review,
+        # 2026-11-12: the mix cap and the YouTube category both read it).
+        parsed = _attach_real_sources(_tag_from_stories(_parse_ideas(raw), stories), raw, [],
+                                      feed_stories)
         clean = clean + _validate_and_clean(parsed, existing=clean)
     except Exception as e:  # noqa: BLE001 — the top-up is a bonus; keep what we already have
         log.warning("ideation: ungrounded top-up failed (%s); keeping %d idea(s)", e, len(clean))
@@ -935,15 +942,25 @@ _ELECTION_WORDS = re.compile(r"(?i)\b(?:elections?|polls?|polling|votes?|voting|
                              r"candidates?|exit polls?)\b")
 
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _today_ist(now: datetime | None = None) -> date:
+    """Today's date in India, where polling days are counted."""
+    return (now or datetime.now(timezone.utc)).astimezone(_IST).date()
+
+
 def _in_election_silence(idea: dict, today: date | None = None) -> bool:
     """True when the idea is election matter for a state inside the 48 hours before its polling
     closes (design 8.7; section 126 of the Representation of the People Act, whose reach over an
     independent channel is untested). ELECTION_SILENCE lists `State:YYYY-MM-DD` pairs and is
-    kept by hand; the window is the polling date and the day before."""
+    kept by hand. Polls close in the evening, so the 48 hours start two days before polling day:
+    the window is the polling date and the two days before, in Indian dates (it used to start
+    the day before in UTC dates, leaving the evening campaigning ends uncovered)."""
     raw = config.get("ELECTION_SILENCE") or ""
     if not raw.strip():
         return False
-    today = today or datetime.now(timezone.utc).date()
+    today = today or _today_ist()
     text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
     if not _ELECTION_WORDS.search(text):
         return False
@@ -955,7 +972,7 @@ def _in_election_silence(idea: dict, today: date | None = None) -> bool:
             log.warning("ideation: ELECTION_SILENCE entry %r is not State:YYYY-MM-DD", pair)
             continue
         if (state.strip() and re.search(rf"(?i)\b{re.escape(state.strip())}\b", text)
-                and polling - timedelta(days=1) <= today <= polling):
+                and polling - timedelta(days=2) <= today <= polling):
             return True
     return False
 
@@ -1063,8 +1080,12 @@ def _repeats_recent_story(idea: dict, recent: list[dict]) -> bool:
         same_words = (mine and theirs and len(shared) >= _STORY_MATCH_MIN_TOKENS + 1
                       and len(shared) / min(len(mine), len(theirs)) >= _STORY_MATCH_RATIO)
         # A follow-up the picker marked as a new, dated development may come back inside the
-        # window when it cites none of the old sources (design 8.5).
-        if same_words and not shared_src and idea.get("followup"):
+        # window when it cites none of the old sources (design 8.5), and only after a story that
+        # was published: the picker never sees the last 10 days, so its flag only says "this
+        # story continues", and a story that never shipped has nothing to follow up. Inside a
+        # batch (no status) two flagged ideas on one story stay one story.
+        if (same_words and not shared_src and idea.get("followup")
+                and old.get("status") == "produced"):
             log.info("ideation: %r follows up recent idea %s with new sources; kept.",
                      idea.get("title"), old.get("id"))
             continue
