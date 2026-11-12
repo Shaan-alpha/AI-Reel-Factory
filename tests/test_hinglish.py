@@ -1,0 +1,130 @@
+"""Hinglish narration (design 7): the two-text lines, their checks, and the spoken numbers.
+
+The pairs are test 4's (research_notes/Spikes 2026-11-10/code/spike4.py), which the operator
+approved by ear, with the digits restored in the Hindi (design 7.2: numbers stay digits; code
+turns them into words) and the two Hindi number words written as the English had them.
+"""
+from __future__ import annotations
+
+import pytest
+
+from src import hinglish
+
+EN = [
+    "On November 18, Voyager 1 becomes the first human-made object one full light-day from Earth.",
+    "That's 25.9 billion kilometres.",
+    "Send it a message, and the reply takes two days.",
+    "It runs on decaying plutonium, losing about four watts a year.",
+    "Here's why it matters:",
+    "The only machines in interstellar space launched in 1977, and they're still talking to us.",
+]
+HI = [
+    "18 November को Voyager 1, Earth से पूरे एक light-day दूर पहुँचने वाली, इंसान की बनाई पहली "
+    "चीज़ बन जाएगा।",
+    "यानी 25.9 billion kilometres।",
+    "इसे message भेजो, तो reply आने में two दिन लगते हैं।",
+    "ये decaying plutonium पर चलता है, और हर साल करीब four watts खो रहा है।",
+    "और ये matter क्यों करता है?",
+    "Interstellar space तक पहुँची इकलौती machines 1977 में launch हुई थीं, और आज भी हमसे बात कर "
+    "रही हैं।",
+]
+
+
+def _lines(hi=None):
+    return [{"i": i, "hi": h, "parts": []} for i, h in enumerate(hi or HI, 1)]
+
+
+def _with(n, text):
+    hi = list(HI)
+    hi[n - 1] = text
+    return _lines(hi)
+
+
+# --- the English side ------------------------------------------------------------------------
+
+def test_english_lines_are_the_sentences_without_tags():
+    body = "ISRO's rocket landed in the U.S. today. [serious] Here's why it matters: costs fall."
+    assert hinglish.english_lines(body) == ["ISRO's rocket landed in the U.S. today.",
+                                            "Here's why it matters: costs fall."]
+
+
+# --- the checks (design 7.3) -----------------------------------------------------------------
+
+def test_test_4s_lines_pass():
+    assert hinglish.check(EN, _lines()) == []
+
+
+def test_a_missing_or_repeated_line_fails():
+    assert hinglish.check(EN, _lines()[:5])
+    repeated = _lines()
+    repeated[1]["i"] = 1
+    assert hinglish.check(EN, repeated)
+    extra = _lines()
+    extra[5]["i"] = 7
+    assert hinglish.check(EN, extra)
+
+
+def test_hindi_number_words_and_changed_digits_fail():
+    assert any("दो" in f for f in hinglish.check(EN, _with(3, HI[2].replace("two", "दो"))))
+    assert hinglish.check(EN, _with(2, HI[1].replace("25.9", "26.9")))
+    assert hinglish.check(EN, _with(4, HI[3] + " 3 बार।"))
+    # एक is also the article "a": it is not counted as a number word.
+    assert hinglish.check(EN, _lines()) == []
+
+
+def test_a_name_must_stay_in_latin():
+    failures = hinglish.check(EN, _with(1, HI[0].replace("Voyager", "वॉयेजर")))
+    assert any("Voyager" in f for f in failures)
+
+
+def test_a_capital_after_a_colon_is_not_a_name():
+    en = ["Here's why it matters: Prices will rise for Indian buyers this month."]
+    hi = ["ये क्यों matter करता है: Indian buyers के लिए इसी महीने prices बढ़ेंगी।"]
+    failures = hinglish.check(en, [{"i": 1, "hi": hi[0], "parts": []}], min_seconds=0)
+    assert not any("Prices" in f for f in failures)
+
+
+def test_scripts_are_checked():
+    assert hinglish.check(EN, _with(2, "That is 25.9 billion kilometres."))  # no Devanagari
+    assert hinglish.check(EN, _with(2, "यानी 25.9 billion kilometres। Ж"))
+    assert hinglish.check(EN, _with(2, "यानी 25.9 billion kilometres। 🚀"))
+    joined = _with(2, "यानी 25.9 billion kilo‍metres‌।")
+    assert not any("character" in f for f in hinglish.check(EN, joined))
+
+
+def test_the_spoken_length_must_fit(monkeypatch):
+    for k in ("HINGLISH_MIN_SECONDS", "HINGLISH_MAX_SECONDS"):
+        monkeypatch.delenv(k, raising=False)
+    short = [{"i": 1, "hi": "यह " * 40 + "।", "parts": []}]
+    assert any("seconds" in f for f in hinglish.check(["A short line."], short))
+    assert hinglish.spoken_seconds(" ".join(["word"] * 29)) == pytest.approx(10.0)
+    assert hinglish.check(EN, _lines()) == []
+
+
+# --- spoken numbers (design 7.3) -------------------------------------------------------------
+
+@pytest.mark.parametrize("text, said", [
+    ("1977 में", "nineteen seventy-seven में"),
+    ("2005 में", "two thousand five में"),
+    ("2026 में", "twenty twenty-six में"),
+    ("1905 में", "nineteen oh five में"),
+    ("25.9 billion kilometres", "twenty-five point nine billion kilometres"),
+    ("40% लोग", "forty percent लोग"),
+    ("₹500 का", "five hundred rupees का"),
+    ("$2 billion", "two billion dollars"),
+    ("₹5 crore", "five crore rupees"),
+    ("18th November", "eighteenth November"),
+    ("1,250 jobs", "one thousand two hundred fifty jobs"),
+    ("1,25,000 students", "one lakh twenty-five thousand students"),
+    ("1500 crore", "one thousand five hundred crore"),
+    ("2000 crore", "two thousand crore"),
+    ("Voyager 1 से", "Voyager one से"),
+    ("COVID-19 के बाद", "COVID-nineteen के बाद"),
+    ("3.14", "three point one four"),
+])
+def test_say_numbers(text, said):
+    assert hinglish.say_numbers(text) == said
+
+
+def test_say_numbers_leaves_words_alone():
+    assert hinglish.say_numbers("G20 और ISRO") == "G20 और ISRO"

@@ -1,0 +1,269 @@
+"""Module 3b: Hinglish narration (design 7, Part B).
+
+Contract:
+    what it does : turns the fact-checked English script into two-text lines: `en`, the English
+                   sentence the gate checked and the subtitles show, and `hi`, the same sentence as
+                   spoken Hinglish, which the narrator says.
+    how to use   : `to_hinglish(body, title, tone)` -> (spoken record | None, reason).
+    depends on   : src.llm (Claude first, then Gemini, then Groq), src.text, src.config.
+
+Behind NARRATION_LANGUAGE=hinglish. Every check here is code, not a model's word: the line count,
+the numbers, the names, the scripts and the spoken length (7.3); a second model from another
+provider then checks the meaning (7.4). Any failure is retried once with the failures listed; a
+second failure ends Hinglish for the reel, which is then narrated in English (7.6). Numbers stay
+digits in `hi` and code turns them into English words for the voice, so every spoken number is
+the checked one.
+"""
+from __future__ import annotations
+
+import logging
+import re
+import unicodedata
+
+from src import config
+from src.text import split_sentences
+
+log = logging.getLogger(__name__)
+
+# Measured on test 4: 78 Hinglish words in 27.0 s (design 7.3).
+_HINGLISH_WORDS_PER_SECOND = 2.9
+
+_TAG_RE = re.compile(r"\[[^\]]{0,24}\]")
+
+
+def english_lines(body: str) -> list[str]:
+    """The fact-checked script's sentences, delivery tags removed: one Hinglish line each."""
+    out = []
+    for sentence in split_sentences(body or ""):
+        clean = re.sub(r"\s+", " ", _TAG_RE.sub(" ", sentence)).strip()
+        if clean:
+            out.append(clean)
+    return out
+
+
+# --- spoken numbers (design 7.3) -------------------------------------------------------------
+
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+         "eighteen", "nineteen")
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+_ORDINAL_WORDS = {"one": "first", "two": "second", "three": "third", "five": "fifth",
+                  "eight": "eighth", "nine": "ninth", "twelve": "twelfth"}
+_CURRENCY = {"₹": ("rupee", "rupees"), "$": ("dollar", "dollars"), "€": ("euro", "euros"),
+             "£": ("pound", "pounds")}
+_SCALE_WORDS = ("lakh", "crore", "thousand", "million", "billion", "trillion")
+# A four-digit number before one of these is an amount, not a year.
+_UNIT_WORDS = _SCALE_WORDS + ("rupees", "dollars", "people", "jobs", "students", "km",
+                              "kilometres", "kilometers", "kg", "tonnes", "tons", "units", "mw",
+                              "gw", "crores", "lakhs")
+
+_NUMBER_RE = re.compile(
+    r"(?<![\w.,])(?P<cur>[₹$€£])?\s?(?P<num>\d{1,3}(?:,\d{2,3})+|\d+)(?P<dec>\.\d+)?"
+    r"(?:(?P<ord>st|nd|rd|th)\b|(?P<pct>%))?"
+    r"(?P<scale>\s+(?:" + "|".join(_SCALE_WORDS) + r")\b)?")
+_INDIAN_GROUPS = re.compile(r"\d{1,2}(?:,\d{2})+,\d{3}")
+
+
+def _below_100(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    tens, ones = divmod(n, 10)
+    return _TENS[tens] + (f"-{_ONES[ones]}" if ones else "")
+
+
+def _below_1000(n: int) -> str:
+    hundreds, rest = divmod(n, 100)
+    words = [f"{_ONES[hundreds]} hundred"] if hundreds else []
+    if rest or not hundreds:
+        words.append(_below_100(rest))
+    return " ".join(words)
+
+
+def _cardinal(n: int, indian: bool = False) -> str:
+    if n < 1000:
+        return _below_1000(n)
+    scales = (((10 ** 7, "crore"), (10 ** 5, "lakh"), (10 ** 3, "thousand")) if indian else
+              ((10 ** 12, "trillion"), (10 ** 9, "billion"), (10 ** 6, "million"),
+               (10 ** 3, "thousand")))
+    for value, name in scales:
+        if n >= value:
+            count, rest = divmod(n, value)
+            head = f"{_cardinal(count, indian)} {name}"
+            return head if not rest else f"{head} {_cardinal(rest, indian)}"
+    return _below_1000(n)
+
+
+def _year(n: int) -> str:
+    if 2000 <= n <= 2009:
+        return "two thousand" + (f" {_ONES[n % 10]}" if n % 10 else "")
+    high, low = divmod(n, 100)
+    if not low:
+        return f"{_below_100(high)} hundred"
+    if low < 10:
+        return f"{_below_100(high)} oh {_ONES[low]}"
+    return f"{_below_100(high)} {_below_100(low)}"
+
+
+def _ordinal(n: int) -> str:
+    pieces = re.split(r"([ -])", _cardinal(n))
+    last = pieces[-1]
+    if last in _ORDINAL_WORDS:
+        last = _ORDINAL_WORDS[last]
+    elif last.endswith("y"):
+        last = last[:-1] + "ieth"
+    else:
+        last += "th"
+    return "".join(pieces[:-1]) + last
+
+
+def _say(m: re.Match, text: str) -> str:
+    raw, dec, cur = m.group("num"), m.group("dec"), m.group("cur")
+    value = int(raw.replace(",", ""))
+    scale = (m.group("scale") or "").strip()
+    after = text[m.end():]
+    if m.group("ord"):
+        words = _ordinal(value)
+    elif (re.fullmatch(r"\d{4}", raw) and 1800 <= value <= 2099 and not dec and not cur
+          and not m.group("pct") and not scale
+          and not re.match(r"\s+(?:" + "|".join(_UNIT_WORDS) + r")\b", after, re.I)):
+        words = _year(value)
+    else:
+        words = _cardinal(value, indian=bool(_INDIAN_GROUPS.fullmatch(raw)))
+        if dec:
+            words += " point " + " ".join(_ONES[int(d)] for d in dec[1:])
+    if scale:
+        words += f" {scale}"
+    if m.group("pct"):
+        words += " percent"
+    if cur:
+        one, many = _CURRENCY[cur]
+        words += f" {one if value == 1 and not dec and not scale else many}"
+    return words
+
+
+def say_numbers(text: str) -> str:
+    """Every number in `text` as English words, for the voice (design 7.3): years in pairs,
+    decimals with "point", Indian grouping in lakh and crore, `%` as percent, currencies after
+    the amount, ordinals. A number glued to a word ("G20") is left for the voice to read."""
+    return _NUMBER_RE.sub(lambda m: _say(m, m.string), text or "")
+
+
+def spoken_seconds(said: str) -> float:
+    """The estimated length of spoken Hinglish, at the measured 2.9 words a second."""
+    return len((said or "").split()) / _HINGLISH_WORDS_PER_SECOND
+
+
+# --- the checks (design 7.3) -----------------------------------------------------------------
+
+# Hindi number words: the number guard cannot see them, so `hi` may not carry any. एक is exempt,
+# being also the article "a".
+_HINDI_NUMBER_WORDS = frozenset(unicodedata.normalize("NFD", w) for w in (
+    "दो तीन चार पाँच पांच छह छः छे सात आठ नौ दस ग्यारह बारह तेरह चौदह पंद्रह पन्द्रह सोलह सत्रह "
+    "अठारह उन्नीस बीस इक्कीस बाईस तेईस चौबीस पच्चीस छब्बीस सत्ताईस अट्ठाईस उनतीस तीस चालीस पचास "
+    "साठ सत्तर अस्सी नब्बे सौ हज़ार हजार लाख करोड़ करोड अरब").split())
+_HI_TOKEN_SPLIT = re.compile(r"[\s,.;:!?।॥()\"'’‘“”—–\-]+")
+_CHECK_NUMBER_RE = re.compile(r"(?<![\w.,])[₹$€£]?\s?(\d{1,3}(?:,\d{2,3})+|\d+)(\.\d+)?")
+_DEVANAGARI_LETTER = re.compile(r"[ऀ-ॣॱ-ॿ]")
+_PUNCTUATION = frozenset(".,;:!?'\"()-–—…।॥’‘“”/&")
+_SYMBOLS = frozenset("₹$€£%")
+_JOINERS = frozenset("‌‍")  # ZWNJ and ZWJ: part of how Devanagari is written
+# Capitalised words that start a clause, not names.
+_NOT_NAMES = frozenset((
+    "I The A An This That These Those It Its Here There But And So Now Why How What When Where "
+    "Who If As At In On For With By From To Of Or Yet Still Even Just Then They We You He She "
+    "Our Your Their His Her My").split())
+
+
+def _numbers(text: str) -> set[str]:
+    return {m.group(1).replace(",", "") + (m.group(2) or "")
+            for m in _CHECK_NUMBER_RE.finditer(text or "")}
+
+
+def _names(en: str) -> list[str]:
+    """Capitalised words that do not start the sentence or a clause after a colon."""
+    tokens = list(re.finditer(r"[A-Za-z][A-Za-z'’\-]*", en))
+    names = []
+    for k, m in enumerate(tokens):
+        if k == 0 or ":" in en[tokens[k - 1].end():m.start()]:
+            continue
+        for piece in m.group(0).split("-"):
+            piece = re.sub(r"['’]s$", "", piece)
+            if piece and piece[0].isupper() and piece not in _NOT_NAMES:
+                names.append(piece)
+    return names
+
+
+def _bad_characters(hi: str) -> list[str]:
+    bad = []
+    for c in hi:
+        if (c.isspace() or c.isdigit() and c.isascii() or c in _PUNCTUATION or c in _SYMBOLS
+                or c in _JOINERS or "ऀ" <= c <= "ॿ"
+                or c.isalpha() and unicodedata.name(c, "").startswith("LATIN")):
+            continue
+        bad.append(c)
+    return bad
+
+
+def _band(name: str, default: float) -> float:
+    try:
+        return float(config.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def check(en_lines: list[str], lines: list[dict], min_seconds: float | None = None,
+          max_seconds: float | None = None) -> list[str]:
+    """What is wrong with a rendering, as messages for the retry; [] when it passes.
+
+    One line per English sentence, numbered as sent; every number of `en` in `hi` and none
+    added, and no Hindi number word; every name of `en` in `hi` in Latin script; Devanagari
+    present and no character outside Devanagari, Latin, digits and ordinary punctuation; the
+    spoken length inside HINGLISH_MIN_SECONDS-HINGLISH_MAX_SECONDS (24-36 s)."""
+    failures: list[str] = []
+    numbered = {}
+    for line in lines or []:
+        try:
+            i = int(line.get("i"))
+        except (TypeError, ValueError, AttributeError):
+            failures.append(f"a line has no usable number: {line!r:.80}")
+            continue
+        if i in numbered:
+            failures.append(f"line {i} appears twice")
+        numbered[i] = str(line.get("hi") or "").strip()
+    wanted = set(range(1, len(en_lines) + 1))
+    if missing := sorted(wanted - set(numbered)):
+        failures.append(f"lines {missing} are missing ({len(numbered)} returned for "
+                        f"{len(en_lines)} sentences)")
+    if extra := sorted(set(numbered) - wanted):
+        failures.append(f"lines {extra} do not exist (there are {len(en_lines)} sentences)")
+
+    for i, en in enumerate(en_lines, 1):
+        hi = numbered.get(i)
+        if not hi:
+            continue
+        for n in sorted(_numbers(en) - _numbers(hi)):
+            failures.append(f"line {i}: the number {n} is missing; keep it as digits")
+        for n in sorted(_numbers(hi) - _numbers(en)):
+            failures.append(f"line {i}: the number {n} is not in the English")
+        tokens = _HI_TOKEN_SPLIT.split(unicodedata.normalize("NFD", hi))
+        for word in sorted({t for t in tokens if t in _HINDI_NUMBER_WORDS}):
+            failures.append(f"line {i}: the Hindi number word "
+                            f"{unicodedata.normalize('NFC', word)!r}; write the number as the "
+                            f"English has it")
+        for name in _names(en):
+            if not re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", hi):
+                failures.append(f"line {i}: the name {name!r} must appear in Latin script")
+        if not _DEVANAGARI_LETTER.search(hi):
+            failures.append(f"line {i}: no Devanagari; write the Hindi words in Devanagari")
+        if bad := _bad_characters(hi):
+            failures.append(f"line {i}: the character(s) {''.join(sorted(set(bad)))!r} are "
+                            f"not allowed")
+
+    said = " ".join(say_numbers(numbered[i]) for i in sorted(numbered) if i in wanted)
+    low = _band("HINGLISH_MIN_SECONDS", 24) if min_seconds is None else min_seconds
+    high = _band("HINGLISH_MAX_SECONDS", 36) if max_seconds is None else max_seconds
+    seconds = spoken_seconds(said)
+    if not low <= seconds <= high:
+        failures.append(f"the spoken length is about {seconds:.1f} seconds, outside "
+                        f"{low:g}-{high:g} seconds")
+    return failures
