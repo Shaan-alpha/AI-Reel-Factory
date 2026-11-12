@@ -281,6 +281,9 @@ def _wire_upload(monkeypatch, tmp_path, status=None):
     if status is not None:
         monkeypatch.setattr(pub, "_reader_client", lambda: _FakeReader(status))
     from src import approval
+    # Set here, not read from the local .env: CI's test job has no chat id, and without one the
+    # alert fails soft and sends nothing (the CI failure on PR #17).
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
     monkeypatch.setattr(approval, "_api",
                         lambda method, **p: seen.update(alerts=seen["alerts"] + 1))
     monkeypatch.setattr(pub, "_FLAG_ALERTED", set())
