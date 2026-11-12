@@ -38,11 +38,13 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   NULL outcome (read it as "killed").
 
 - **Stage 1a (stories for Indian viewers) is built** on `feat/stage-1-stories-script` (7 tasks, 811
-  pass); **stage 1b's plan is written** (`docs/superpowers/plans/2026-11-12-stage-1b-script-and-packaging.md`).
-  Each plan's ledger is under `.superpowers/sdd/<plan name>/progress.md` (git-ignored).
+  pass); **stage 1b (script and packaging) is built** on the same branch (8 tasks, 852 pass; plan
+  `docs/superpowers/plans/2026-11-12-stage-1b-script-and-packaging.md`). The calls made while
+  building 1b are listed in STATUS.md's 2026-11-12 log and the ledger. Each plan's ledger is under
+  `.superpowers/sdd/<plan name>/progress.md` (git-ignored).
 
-**Next:** build stage 1b task by task on the same branch, then one final review of stage 1, then ask
-the operator before pushing; then stages 2-4 and the relaunch (design section 14).
+**Next:** one final review of stage 1 (1a and 1b), its fix pass, then ask the operator before
+pushing; then stages 2-4 and the relaunch (design section 14).
 
 ## 1. What the operator wants
 

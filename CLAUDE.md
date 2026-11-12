@@ -188,12 +188,14 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
   operator kept 3.1 over both `gemini-3.8-flash-tts` models by ear and asked for the move at once,
   so wherever Vertex is set up the voice comes from Vertex (billed, cents a reel) and the
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
-- **In progress since 2026-11-10, nothing built yet.** The operator chose a new format: AI-video
+- **In progress since 2026-11-10: stage 0 merged (PR #17), stage 1 built on
+  `feat/stage-1-stories-script`.** The operator chose a new format: AI-video
   shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
   for Indian viewers. Higgsfield is approved by the operator as a billed service for this
   (about $1 a reel, about 20 reels a month, **no spend cap in code by the operator's choice**),
   so it is not a rule-2 stop-and-flag; the rules above get their new wording when the format
   is built. Research and a full audit are done, the audit was checked against the code and the
-  design rewritten (2026-11-12); the build plan is next. Start at
+  design rewritten (2026-11-12); stage 1 retired the sarcastic script voice for a plain explainer
+  for Indian viewers. Start at
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.
