@@ -128,3 +128,69 @@ def test_say_numbers(text, said):
 
 def test_say_numbers_leaves_words_alone():
     assert hinglish.say_numbers("G20 और ISRO") == "G20 और ISRO"
+
+
+# --- rendering (design 7.2) ------------------------------------------------------------------
+
+import json  # noqa: E402
+
+from src import llm  # noqa: E402
+
+_REPLY = json.dumps({"lines": [{"i": i, "hi": h, "parts": [{"hi": h, "en": e}]}
+                               for i, (h, e) in enumerate(zip(HI, EN), 1)]})
+
+
+def test_claude_renders_with_the_schema_and_purpose(monkeypatch):
+    seen = {}
+
+    def _claude(prompt, **k):
+        seen.update(k, prompt=prompt)
+        return _REPLY
+
+    monkeypatch.setattr(hinglish.llm, "generate_claude", _claude)
+    lines, renderer = hinglish.render(EN, "Voyager 1 nears a light-day", "plain")
+    assert renderer == "claude" and len(lines) == 6 and lines[1]["hi"] == HI[1]
+    assert seen["purpose"] == "hinglish" and seen["fallbacks"] is True
+    item = seen["schema"]["properties"]["lines"]["items"]
+    assert set(item["required"]) == {"i", "hi", "parts"} and "en" not in item["properties"]
+    prompt = seen["prompt"]
+    assert "1. " + EN[0] in prompt and "6. " + EN[5] in prompt
+    assert "Voyager 1 nears a light-day" in prompt and "plain" in prompt
+    for rule in ("Devanagari", "Latin script", "digits", "Hindi number word", "12 words", "।",
+                 "parts"):
+        assert rule in prompt, rule
+
+
+def test_gemini_then_groq_render_when_claude_cannot(monkeypatch):
+    order = []
+
+    def _claude(prompt, **k):
+        order.append("claude")
+        raise llm.ClaudeUnavailable("no key", "no-key")
+
+    def _with(provider, prompt, **k):
+        order.append(provider)
+        if provider == "gemini":
+            raise RuntimeError("gemini down")
+        return _REPLY
+
+    monkeypatch.setattr(hinglish.llm, "generate_claude", _claude)
+    monkeypatch.setattr(hinglish.llm, "generate_with", _with)
+    lines, renderer = hinglish.render(EN, "t", "plain")
+    assert order == ["claude", "gemini", "groq"] and renderer == "groq" and len(lines) == 6
+
+
+def test_no_renderer_raises(monkeypatch):
+    monkeypatch.setattr(hinglish.llm, "generate_claude",
+                        lambda p, **k: (_ for _ in ()).throw(RuntimeError("refusal")))
+    monkeypatch.setattr(hinglish.llm, "generate_with", lambda provider, p, **k: "not json")
+    with pytest.raises(RuntimeError, match="no renderer"):
+        hinglish.render(EN, "t", "plain")
+
+
+def test_a_retry_carries_the_failures(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(hinglish.llm, "generate_claude",
+                        lambda prompt, **k: seen.update(prompt=prompt) or _REPLY)
+    hinglish.render(EN, "t", "plain", failures=["line 2: the number 25.9 is missing"])
+    assert "line 2: the number 25.9 is missing" in seen["prompt"]

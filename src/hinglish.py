@@ -20,7 +20,7 @@ import logging
 import re
 import unicodedata
 
-from src import config
+from src import config, llm
 from src.text import split_sentences
 
 log = logging.getLogger(__name__)
@@ -267,3 +267,102 @@ def check(en_lines: list[str], lines: list[dict], min_seconds: float | None = No
         failures.append(f"the spoken length is about {seconds:.1f} seconds, outside "
                         f"{low:g}-{high:g} seconds")
     return failures
+
+
+# --- rendering (design 7.2) ------------------------------------------------------------------
+
+# The renderer returns each line in spoken order as `parts` too, for the subtitles (7.7). The
+# English line is not echoed back: code pairs by number.
+_RENDER_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["lines"],
+    "properties": {"lines": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["i", "hi", "parts"],
+        "properties": {
+            "i": {"type": "integer"},
+            "hi": {"type": "string"},
+            "parts": {"type": "array", "items": {
+                "type": "object", "additionalProperties": False, "required": ["hi", "en"],
+                "properties": {"hi": {"type": "string"}, "en": {"type": "string"}}}}}}}}}
+
+_TONES = {"somber": "somber: calm and respectful, about loss of life or serious harm",
+          "plain": "plain: a clear, curious, confident explainer"}
+
+# Rules, described as moves, with no phrases to copy (design 9.1's rule holds here too).
+_RENDER_PROMPT = """You turn a fact-checked English narration for a YouTube Short into spoken \
+Hinglish for viewers in India, line by line.
+
+THE STORY: {title}
+TONE: {tone}
+
+ENGLISH LINES (write one Hinglish line for each, with the same number):
+{lines}
+
+RULES FOR EACH HINGLISH LINE ("hi"):
+- Natural spoken Hinglish of young urban Indian creators: Hindi grammar, with English words where \
+an urban speaker would use them; conversational, not news-anchor Hindi.
+- Hindi words in Devanagari, English words in Latin script.
+- Say exactly what its English line says: nothing added, nothing dropped, no claim softened or \
+sharpened.
+- Keep every number exactly as the English writes it: digits stay digits, with their %, ₹ or $, \
+and a number the English spells as a word stays that English word. Never a Hindi number word.
+- Names, places, months, organisations and brands stay in Latin script exactly as in the English.
+- Line 1 has at most 12 words, with its subject or its surprise inside the first four; it never \
+opens on a date, a place or a greeting, nor on a question about whether the viewer knows.
+- End each line with the Hindi full stop । or a question mark. No delivery tags, no emoji.
+
+ALSO give each line its "parts", in spoken order, for the English subtitles: each part pairs a \
+stretch of the Hinglish with the English words that say the same thing. The "hi" parts joined \
+with single spaces are the line's "hi" exactly. The "en" parts use only that English line's own \
+words, regrouped to follow the Hindi order, and together they carry all its numbers and names. \
+Two to four parts for a long line, one for a short one.
+{failures}
+Return ONLY a JSON object: {{"lines": [{{"i": 1, "hi": "...", "parts": [{{"hi": "...", "en": \
+"..."}}]}}]}}
+"""
+
+
+def _render_prompt(en_lines: list[str], title: str, tone: str,
+                   failures: list[str] | None) -> str:
+    numbered = "\n".join(f"{i}. {line}" for i, line in enumerate(en_lines, 1))
+    fixes = ("\nYOUR LAST VERSION FAILED THESE CHECKS; fix every one:\n"
+             + "\n".join(f"- {f}" for f in failures) + "\n") if failures else ""
+    return _RENDER_PROMPT.format(title=title or "(untitled)", tone=_TONES.get(tone, _TONES["plain"]),
+                                 lines=numbered, failures=fixes)
+
+
+def _parse_lines(raw: str) -> list[dict]:
+    data = llm.parse_json_object(raw)
+    lines = data.get("lines") if isinstance(data, dict) else None
+    if not isinstance(lines, list) or not lines:
+        raise ValueError("the reply has no lines")
+    out = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        parts = [{"hi": str(p.get("hi") or "").strip(), "en": str(p.get("en") or "").strip()}
+                 for p in (line.get("parts") or []) if isinstance(p, dict)]
+        out.append({"i": line.get("i"), "hi": str(line.get("hi") or "").strip(), "parts": parts})
+    return out
+
+
+def render(en_lines: list[str], title: str, tone: str,
+           failures: list[str] | None = None) -> tuple[list[dict], str]:
+    """The Hinglish lines and who wrote them: Claude (structured output, the refusal fallback on,
+    purpose "hinglish" in the claude_spend ledger), then Gemini, then Groq. `failures` are the
+    last attempt's check failures, sent back for the retry. Raises RuntimeError when no renderer
+    answers with usable lines."""
+    prompt = _render_prompt(en_lines, title, tone, failures)
+    renderers = (
+        ("claude", lambda: llm.generate_claude(prompt, purpose="hinglish",
+                                               schema=_RENDER_SCHEMA, fallbacks=True)),
+        ("gemini", lambda: llm.generate_with("gemini", prompt, json=True, max_tokens=4096)),
+        ("groq", lambda: llm.generate_with("groq", prompt, json=True, max_tokens=4096)),
+    )
+    errors = []
+    for name, call in renderers:
+        try:
+            return _parse_lines(call()), name
+        except Exception as e:  # noqa: BLE001 — the next renderer (rule 11)
+            log.warning("hinglish: %s could not render (%s)", name, str(e)[:200])
+            errors.append(f"{name}: {str(e)[:120]}")
+    raise RuntimeError("hinglish: no renderer answered — " + " | ".join(errors))
