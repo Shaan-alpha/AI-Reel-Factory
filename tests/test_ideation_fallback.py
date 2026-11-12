@@ -1128,3 +1128,40 @@ def test_seed_ideas_applies_the_mix(monkeypatch):
     monkeypatch.setattr(fb.db, "insert_ideas", lambda r: rows.extend(r) or r)
     fb.seed_ideas(2)
     assert [r["niche"] for r in rows] == ["india-politics", "tech"]
+
+
+# --- de-duplication before research; follow-ups (design 8.5) --------------------------------
+
+def test_a_repeat_is_dropped_before_any_research(monkeypatch):
+    _patch(monkeypatch, [_idea("Something new")])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [
+        {"story": "Chandrayaan 4 launch window confirmed by ISRO", "category": "space",
+         "why_shareworthy": "", "demand": [], "followup": False},
+        {"story": "UPI fees for large merchants from January", "category": "money",
+         "why_shareworthy": "", "demand": [], "followup": False}])
+    monkeypatch.setattr(fb, "_recent_ideas", lambda: [
+        {"id": 9, "title": "Chandrayaan 4 launch window", "hook": "ISRO confirms Chandrayaan 4",
+         "sources": [], "status": "produced"}])
+    researched = []
+    monkeypatch.setattr(fb, "_research_stories",
+                        lambda stories: researched.append(stories) or ("", {}))
+    fb._produce_ideas(2)
+    assert [s["story"] for s in researched[0]] == ["UPI fees for large merchants from January"]
+
+
+def test_vs_and_template_words_do_not_make_a_repeat():
+    old = [{"id": 1, "title": "Korea vs Japan: the race heats up in Seoul", "hook": "",
+            "sources": [], "status": "produced"}]
+    assert not fb._repeats_recent_story(
+        {"title": "SpaceX vs Blue Origin: the race heats up", "hook": ""}, old)
+
+
+def test_a_followup_with_new_sources_is_allowed():
+    old = [{"id": 2, "title": "Chandrayaan 4 launch planned", "hook": "ISRO plans Chandrayaan 4 launch",
+            "sources": ["https://old.example/b"], "status": "produced"}]
+    new = {"title": "Chandrayaan 4 launch date set for March",
+           "hook": "ISRO confirms the Chandrayaan 4 launch", "sources": ["https://new.example/a"],
+           "followup": True}
+    assert not fb._repeats_recent_story(new, old)
+    assert fb._repeats_recent_story({**new, "sources": ["https://old.example/b"]}, old)
+    assert fb._repeats_recent_story({**new, "followup": False}, old)

@@ -133,3 +133,29 @@ def test_ideas_insert_retries_without_the_new_columns(monkeypatch):
     inserts = [c for c in fake.calls if c[0] == "insert"]
     assert len(inserts) == 2
     assert "rank_score" not in inserts[1][2][0][0] and "demand" not in inserts[1][2][0][0]
+
+
+def test_expired_ideas_are_not_recent(monkeypatch):
+    filters = []
+
+    class _Q:
+        def table(self, _n):
+            return self
+
+        def select(self, *_a):
+            return self
+
+        def gte(self, *a):
+            filters.append(("gte",) + a)
+            return self
+
+        def neq(self, *a):
+            filters.append(("neq",) + a)
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": []})()
+
+    monkeypatch.setattr(db, "get_client", lambda: _Q())
+    db.recent_ideas(10)
+    assert ("neq", "status", "expired") in filters

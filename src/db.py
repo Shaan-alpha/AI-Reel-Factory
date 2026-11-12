@@ -30,7 +30,9 @@ log = logging.getLogger(__name__)
 # Telegram digest — not posted, but distinct from a hard 'rejected'.
 # 'blocked' (2026-09-27): the fact-check gate refused the story. It used to be 'rejected', which
 # made a gate verdict indistinguishable from the operator's own Reject tap.
-IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked")
+# 'expired' (2026-11-12): offered and not tapped. Unlike 'passed', the story de-duplication ignores
+# it, so a good story the operator simply did not pick can be offered again (design 8.5).
+IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked", "expired")
 
 
 class _RetryTransport(httpx.BaseTransport):
@@ -193,7 +195,7 @@ def recent_ideas(days: int = 10) -> list[dict]:
     Trump Coverage!') shipped the same claim, citing the same article."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     return (get_client().table("ideas").select("id,title,hook,sources,status")
-            .gte("created_at", since).execute().data) or []
+            .gte("created_at", since).neq("status", "expired").execute().data) or []
 
 
 # --- scripts / posts ------------------------------------------------------------------

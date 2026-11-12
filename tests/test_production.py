@@ -869,7 +869,8 @@ def test_untapped_ideas_from_this_digest_are_passed(monkeypatch):
     monkeypatch.setattr(production.db, "set_idea_status",
                         lambda i, s, from_status=None: moves.append((i, s, from_status)) or i != 2)
     assert production._pass_untapped([1, 2]) == 1  # 2 was tapped meanwhile; 9 is not ours
-    assert moves == [(1, "passed", "pending"), (2, "passed", "pending")]
+    # "expired" since 2026-11-12 (design 8.5): not tapping is not a verdict on the story.
+    assert moves == [(1, "expired", "pending"), (2, "expired", "pending")]
 
 
 def test_make_on_demand_passes_untapped_ideas_before_production(monkeypatch):
@@ -957,3 +958,14 @@ def test_published_is_sent_as_each_reel_goes_live(monkeypatch, tmp_path):
     production.run_production()
     assert events[:3] == [("start", 7), ("notify", "✅ Published: https://www.youtube.com/shorts/VID1"),
                           ("start", 8)]
+
+
+def test_untapped_ideas_expire(monkeypatch):
+    """An idea the operator simply did not tap was banned from the digest for 10 days as
+    'passed'; it now ends 'expired', which the story de-duplication ignores (design 8.5)."""
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 5}, {"id": 6}])
+    set_to = []
+    monkeypatch.setattr(production.db, "set_idea_status",
+                        lambda i, s, from_status=None: set_to.append((i, s, from_status)) or True)
+    assert production._pass_untapped([5]) == 1
+    assert set_to == [(5, "expired", "pending")]

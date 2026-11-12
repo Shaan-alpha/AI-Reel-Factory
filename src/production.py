@@ -467,7 +467,9 @@ def _pass_untapped(offered: list[int]) -> int:
     """
     wanted = {int(i) for i in offered}
     untapped = [i["id"] for i in db.get_pending_ideas() if int(i["id"]) in wanted]
-    passed = [i for i in untapped if db.set_idea_status(i, "passed", from_status="pending")]
+    # 'expired', not 'passed': not tapping is not a verdict, so the story may come back
+    # (design 8.5); 'passed' banned it from the digest for IDEA_DEDUP_DAYS.
+    passed = [i for i in untapped if db.set_idea_status(i, "expired", from_status="pending")]
     if passed:
         log.info("make_on_demand: %d untapped idea(s) marked passed: %s", len(passed), passed)
     return len(passed)

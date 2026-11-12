@@ -84,7 +84,11 @@ _STOPWORDS = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "wit
               "at", "by", "from", "as", "new", "today", "be", "been", "are", "was", "were",
               "could", "would", "will", "can", "may", "its", "it", "this", "that", "over",
               "into", "after", "about", "just", "now", "why", "how", "what", "has", "have",
-              "s", "t"}  # the leftovers of "India's" and "don't"
+              "s", "t",  # the leftovers of "India's" and "don't"
+              # "vs" and the hook template's stock words matched unrelated stories: 3-5 of 20
+              # replayed flags were SpaceX v Blue Origin against Korean football (design 8.5).
+              "vs", "v", "versus", "race", "heats", "showdown", "clash", "battle", "shock",
+              "shocking"}
 
 
 def _fold(token: str) -> str:
@@ -849,6 +853,16 @@ def _produce_ideas(target: int) -> list[dict]:
     demand_block = "\n".join(f"- {d}" for d in demand_lines) or "- (none)"
 
     stories = _select_stories(target, headlines, topics, winners, demand_lines)
+    # Before any grounded search, not after (design 8.5): a story already pitched in the last
+    # IDEA_DEDUP_DAYS costs nothing to drop here.
+    if stories:
+        recent = _recent_ideas()
+        kept = [s for s in stories if not _repeats_recent_story(
+            {"title": s["story"], "hook": "", "followup": s.get("followup")}, recent)]
+        if len(kept) < len(stories):
+            log.info("ideation: %d picked stor%s repeat recent ideas; dropped before research.",
+                     len(stories) - len(kept), "y" if len(stories) - len(kept) == 1 else "ies")
+        stories = kept
     if stories:
         selected_block = "\n".join(
             f"- Story {i}: {s['story']}" + (f" [{s['category']}]" if s["category"] else "")
@@ -1012,6 +1026,12 @@ def _repeats_recent_story(idea: dict, recent: list[dict]) -> bool:
         shared = mine & theirs
         same_words = (mine and theirs and len(shared) >= _STORY_MATCH_MIN_TOKENS + 1
                       and len(shared) / min(len(mine), len(theirs)) >= _STORY_MATCH_RATIO)
+        # A follow-up the picker marked as a new, dated development may come back inside the
+        # window when it cites none of the old sources (design 8.5).
+        if same_words and not shared_src and idea.get("followup"):
+            log.info("ideation: %r follows up recent idea %s with new sources; kept.",
+                     idea.get("title"), old.get("id"))
+            continue
         if shared_src or same_words:
             log.info("ideation: %r repeats recent idea %s (%s, %s); skipped.", idea.get("title"),
                      old.get("id"), old.get("status"), "same source" if shared_src else "same story")
