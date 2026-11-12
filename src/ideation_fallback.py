@@ -742,7 +742,11 @@ def _produce_ideas(target: int) -> list[dict]:
         "- (live trends unavailable — rely on the headlines below)"
     # Stories, not bare headlines: each carries the feed's own live article URL, which is what
     # lets an idea be cited from something we actually fetched instead of from model memory.
-    feed_stories = news.fetch_stories(int(config.get("NEWS_POOL_SIZE", "24")))
+    # 60, set here: the workflow does not pass NEWS_POOL_SIZE through (design 8.2). The India-stake
+    # searches follow the feeds, de-duplicated by URL.
+    feed_stories = news.fetch_stories(int(config.get("NEWS_POOL_SIZE", "60")))
+    known = {s["url"] for s in feed_stories}
+    feed_stories += [s for s in news.search_india_stakes() if s["url"] not in known]
     headlines = [s["title"] for s in feed_stories]
     headlines_block = "\n".join(f"- {h}" for h in headlines) or \
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"

@@ -12,9 +12,12 @@ trends + the model's own knowledge. No secrets, free, machine-off friendly.
 from __future__ import annotations
 
 import logging
+import re
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -35,6 +38,21 @@ _DEFAULT_TOPICS = "WORLD,BUSINESS,TECHNOLOGY,SCIENCE"  # HEALTH left out: journa
 _TIMEOUT = 20
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 _RETRY_WAIT = 5.0
+# Searches that surface a direct stake for Indian viewers (design 8.2), through the same free
+# search feed. Override with NEWS_INDIA_QUERIES (comma list).
+_DEFAULT_INDIA_QUERIES = ("Indian-origin,Indian students,for Indian users,India vs China,"
+                          "price hike India,new rule India")
+# Puzzle and game-help items: 3 of 5 Technology headlines on 2026-11-12 were Quordle or
+# Connections answers. A game word with a help word, so "rail connections" stays.
+_GAME_WORDS = re.compile(r"(?i)\b(wordle|quordle|connections|strands|crossword)\b")
+_HELP_WORDS = re.compile(r"(?i)\b(hints?|answers?|clues?)\b")
+_HELP_PHRASES = re.compile(r"(?i)\bhints and answers\b|\banswers? today\b")
+
+
+def _is_game_help(title: str) -> bool:
+    """True for a puzzle or game-help headline, which is never a story."""
+    return bool(_HELP_PHRASES.search(title)
+                or (_GAME_WORDS.search(title) and _HELP_WORDS.search(title)))
 
 
 def _fetch(url: str) -> str:
@@ -90,14 +108,14 @@ def fetch_stories(limit: int = 12) -> list[dict]:
     stories, seen = [], set()
     for rank in range(max((len(f) for f in feeds), default=0)):
         for feed in feeds:
-            if rank < len(feed) and feed[rank]["url"] not in seen:
+            if rank < len(feed) and feed[rank]["url"] not in seen                     and not _is_game_help(feed[rank]["title"]):
                 seen.add(feed[rank]["url"])
                 stories.append(feed[rank])
     log.info("news: %d stories from %d feed(s)", len(stories), len(feeds))
     return stories[:limit]
 
 
-def search_stories(query: str, limit: int = 6) -> list[dict]:
+def search_stories(query: str, limit: int = 6, window: str | None = None) -> list[dict]:
     """Stories matching `query` as {title, url, source}. [] on failure or an empty query.
 
     Independent outlets covering one event is exactly what MIN_SOURCES asks for, and this gets
@@ -110,7 +128,8 @@ def search_stories(query: str, limit: int = 6) -> list[dict]:
         return []
     # Recency: an unbounded search attached a two-year-old article to a 2026 flood story
     # (live, 2026-09-27). Google News reads `when:3d` as "the last three days".
-    window = (config.get("NEWS_SEARCH_WINDOW", "3d") or "").strip()
+    if window is None:
+        window = (config.get("NEWS_SEARCH_WINDOW", "3d") or "").strip()
     url = _SEARCH_URL.format(q=urllib.parse.quote(f"{query} when:{window}" if window else query))
     try:
         stories = _parse_stories(_fetch(url))
@@ -119,6 +138,20 @@ def search_stories(query: str, limit: int = 6) -> list[dict]:
         return []
     log.info("news: %d stories for %r", len(stories), query)
     return stories[:limit]
+
+
+def search_india_stakes(per_query: int = 3) -> list[dict]:
+    """Stories from searches for a direct Indian stake (last 2 days), tagged `via: india-search`,
+    de-duplicated by URL. [] when every search fails."""
+    queries = [q.strip() for q in
+               (config.get("NEWS_INDIA_QUERIES") or _DEFAULT_INDIA_QUERIES).split(",") if q.strip()]
+    out, seen = [], set()
+    for query in queries:
+        for story in search_stories(query, limit=per_query, window="2d"):
+            if story["url"] not in seen:
+                seen.add(story["url"])
+                out.append({**story, "via": "india-search"})
+    return out
 
 
 def fetch_headlines(limit: int = 12) -> list[str]:
@@ -146,8 +179,24 @@ def _parse_stories(xml_text: str) -> list[dict]:
             published = (item.findtext("pubDate") or "").strip()
             if published:
                 story["published"] = published
+            age = _age_hours(published)
+            if age is not None:
+                story["age_hours"] = age
             stories.append(story)
     return stories
+
+
+def _age_hours(published: str) -> float | None:
+    """Hours since an RSS pubDate; None when it is missing or unreadable."""
+    try:
+        when = parsedate_to_datetime(published) if published else None
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return round((datetime.now(timezone.utc) - when).total_seconds() / 3600, 2)
 
 
 def _parse(xml_text: str) -> list[str]:
