@@ -241,3 +241,13 @@ def test_pending_titles_are_escaped_for_html(bot, monkeypatch):
     monkeypatch.setattr(bot, "pending_ideas", lambda: ["AT&T <outage> hits users"])
     out = bot.dispatch("pending", "")
     assert "AT&amp;T &lt;outage&gt;" in out
+
+
+def test_dispatch_makeshort_reads_the_leading_number(bot, monkeypatch):
+    """"/makeshort 2 isro docking" started a 5-idea run: any non-numeric argument defaulted to 5
+    (audit ideation 10, checked 2026-11-12). The leading number counts; the rest is ignored."""
+    seen = []
+    monkeypatch.setattr(bot, "gh_dispatch_make_short", lambda n: seen.append(n) or True)
+    bot.dispatch("makeshort", "2 isro docking")
+    bot.dispatch("makeshort", "x")
+    assert seen == [2, 5]
