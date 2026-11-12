@@ -366,3 +366,60 @@ def render(en_lines: list[str], title: str, tone: str,
             log.warning("hinglish: %s could not render (%s)", name, str(e)[:200])
             errors.append(f"{name}: {str(e)[:120]}")
     raise RuntimeError("hinglish: no renderer answered — " + " | ".join(errors))
+
+
+# --- the meaning check (design 7.4) ----------------------------------------------------------
+
+# Always another provider than the renderer's, so one model's mistake is not checked by itself.
+_CHECKER_FOR = {"claude": "gemini", "gemini": "groq", "groq": "gemini"}
+
+_MEANING_PROMPT = """You check a translation for a news video. Each numbered pair below is an \
+English sentence and the spoken Hinglish line written for it.
+
+{pairs}
+
+For every pair, answer: does the Hinglish say the same as the English, with nothing added, \
+nothing dropped, and no claim made stronger or weaker? Wording, word order and the mix of Hindi \
+and English are free; only the meaning counts.
+
+Return ONLY a JSON object with one entry per pair: {{"lines": [{{"i": 1, "same": true, "why": \
+"what differs, when it does"}}]}}
+"""
+
+
+def meaning_check(en_lines: list[str], lines: list[dict],
+                  renderer: str) -> tuple[list[str], str]:
+    """Failures from a second model's line-by-line check, and that model's provider. A line
+    judged different, or given no verdict, fails. A checker that cannot run fails under
+    HINGLISH_STRICT (default on); off, it passes with a warning. Every verdict is logged: these
+    checks were tested only on pairs written for the purpose (design 7.4)."""
+    checker = _CHECKER_FOR.get(renderer, "gemini")
+    by_number = {line.get("i"): str(line.get("hi") or "") for line in lines}
+    pairs = "\n".join(f"{i}. EN: {en}\n   HI: {by_number.get(i, '')}"
+                      for i, en in enumerate(en_lines, 1))
+    try:
+        data = llm.parse_json_object(llm.generate_with(
+            checker, _MEANING_PROMPT.format(pairs=pairs), json=True, max_tokens=2048))
+        verdicts = {int(v.get("i")): v for v in data.get("lines") or [] if isinstance(v, dict)}
+    except Exception as e:  # noqa: BLE001 — strict decides
+        if config.get_bool("HINGLISH_STRICT", True):
+            log.warning("hinglish: the meaning check (%s) could not run (%s); strict, so it fails",
+                        checker, str(e)[:200])
+            return [f"the meaning check could not run ({str(e)[:120]})"], checker
+        log.warning("hinglish: the meaning check (%s) could not run (%s); HINGLISH_STRICT is "
+                    "off, so the lines pass unchecked", checker, str(e)[:200])
+        return [], checker
+    failures = []
+    for i in range(1, len(en_lines) + 1):
+        verdict = verdicts.get(i)
+        same = bool(verdict) and verdict.get("same") is True
+        why = str((verdict or {}).get("why") or "").strip()
+        log.info("hinglish: meaning check by %s: line %d %s%s", checker, i,
+                 "same" if same else "DIFFERENT" if verdict else "no verdict",
+                 f" ({why})" if why else "")
+        if not verdict:
+            failures.append(f"line {i}: the meaning check gave no verdict")
+        elif not same:
+            failures.append(f"line {i}: the meaning differs from the English"
+                            + (f" ({why})" if why else ""))
+    return failures, checker

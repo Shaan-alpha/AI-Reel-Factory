@@ -194,3 +194,54 @@ def test_a_retry_carries_the_failures(monkeypatch):
                         lambda prompt, **k: seen.update(prompt=prompt) or _REPLY)
     hinglish.render(EN, "t", "plain", failures=["line 2: the number 25.9 is missing"])
     assert "line 2: the number 25.9 is missing" in seen["prompt"]
+
+
+# --- the meaning check (design 7.4) ----------------------------------------------------------
+
+def _verdicts(*different):
+    return json.dumps({"lines": [{"i": i, "same": i not in different,
+                                  "why": "it adds 'almost'" if i in different else ""}
+                                 for i in range(1, 7)]})
+
+
+def test_the_checker_is_never_the_renderer(monkeypatch):
+    used = []
+    monkeypatch.setattr(hinglish.llm, "generate_with",
+                        lambda provider, p, **k: used.append(provider) or _verdicts())
+    for renderer, checker in (("claude", "gemini"), ("gemini", "groq"), ("groq", "gemini")):
+        failures, who = hinglish.meaning_check(EN, _lines(), renderer)
+        assert failures == [] and who == checker
+    assert used == ["gemini", "groq", "gemini"]
+
+
+def test_a_line_judged_different_fails(monkeypatch):
+    monkeypatch.setattr(hinglish.llm, "generate_with", lambda provider, p, **k: _verdicts(2))
+    failures, _ = hinglish.meaning_check(EN, _lines(), "claude")
+    assert len(failures) == 1 and "line 2" in failures[0] and "almost" in failures[0]
+
+
+def test_a_line_without_a_verdict_fails(monkeypatch):
+    partial = json.dumps({"lines": [{"i": i, "same": True, "why": ""} for i in range(1, 6)]})
+    monkeypatch.setattr(hinglish.llm, "generate_with", lambda provider, p, **k: partial)
+    failures, _ = hinglish.meaning_check(EN, _lines(), "claude")
+    assert any("line 6" in f for f in failures)
+
+
+def test_a_checker_that_cannot_run_fails_when_strict(monkeypatch):
+    def _down(provider, p, **k):
+        raise RuntimeError("gemini down")
+
+    monkeypatch.setattr(hinglish.llm, "generate_with", _down)
+    monkeypatch.delenv("HINGLISH_STRICT", raising=False)
+    failures, _ = hinglish.meaning_check(EN, _lines(), "claude")
+    assert failures and "could not run" in failures[0]
+    monkeypatch.setenv("HINGLISH_STRICT", "false")
+    assert hinglish.meaning_check(EN, _lines(), "claude")[0] == []
+
+
+def test_every_verdict_is_logged(monkeypatch, caplog):
+    monkeypatch.setattr(hinglish.llm, "generate_with", lambda provider, p, **k: _verdicts(2))
+    with caplog.at_level("INFO"):
+        hinglish.meaning_check(EN, _lines(), "claude")
+    for i in range(1, 7):
+        assert f"line {i}" in caplog.text
