@@ -51,7 +51,12 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
                         lambda idea_id, plat="youtube": existing_post)
     monkeypatch.setattr(production.voice, "synthesize", _fake_synth)
     monkeypatch.setattr(production.visuals, "extract_keywords", lambda body: ["rocket"])
-    monkeypatch.setattr(production.visuals, "fetch_broll", lambda kw, dur, d, setting=None: ["c1.mp4"])
+    def _broll(kw, dur, d, setting=None, meta=None):
+        if meta is not None:
+            meta.update(source="ai", clips=1)
+        return ["c1.mp4"]
+
+    monkeypatch.setattr(production.visuals, "fetch_broll", _broll)
     monkeypatch.setattr(production.assembly, "assemble", lambda a, c, o: o)
     monkeypatch.setattr(production.subtitles, "burn_captions", lambda v, a, o, **k: o)
     monkeypatch.setattr(production.publish_youtube, "publish",
@@ -280,7 +285,9 @@ def test_make_on_demand_flow(monkeypatch):
     # ordered: generate -> digest -> drain(900s) -> (then notify links)
     assert calls[0] == ("gen", 3) and calls[1] == ("digest",)
     assert calls[2][0] == "drain" and calls[2][1]["max_seconds"] == 900
-    assert any("https://yt/x" in n for n in notes)  # link sent to Telegram
+    # The link is announced by run_production as the reel goes live (stubbed here), never a
+    # second time by make_on_demand: test_published_is_sent_as_each_reel_goes_live covers it.
+    assert not any("https://yt/x" in n for n in notes)
 
 
 def test_make_on_demand_tops_up_ideas_already_queued(monkeypatch):
@@ -881,3 +888,72 @@ def test_make_on_demand_passes_untapped_ideas_before_production(monkeypatch):
     monkeypatch.setattr(production, "_notify", lambda t: None)
     production.make_on_demand(3, 1)
     assert order == ["wait", ("pass", [5]), "produce"]
+
+
+# --- the format stamp, one row per attempt, "Published" per reel (design 10.1, 8.6) -----------
+
+def _attempts(monkeypatch):
+    calls = []
+    monkeypatch.setattr(production.db, "start_attempt", lambda idea_id: 1)
+    monkeypatch.setattr(production.db, "finish_attempt",
+                        lambda attempt_id, **k: calls.append(k))
+    return calls
+
+
+def test_format_stamp_reaches_publish(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    _attempts(monkeypatch)
+    seen = {}
+
+    def _publish(v, m, sid):
+        seen.update(m)
+        return "VID1", "https://www.youtube.com/shorts/VID1"
+
+    monkeypatch.setattr(production.publish_youtube, "publish", _publish)
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["format"]["version"] == 1 and seen["format"]["language"] == "en"
+    assert seen["format"]["visuals"] == "ai" and seen["audio_language"] == "en"
+
+
+def test_a_failed_attempt_is_recorded_with_its_stage(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    calls = _attempts(monkeypatch)
+    monkeypatch.setattr(production.assembly, "assemble", _raiser(RuntimeError("ffmpeg broke")))
+    with pytest.raises(RuntimeError):
+        production.produce_one(IDEA, str(tmp_path))
+    assert len(calls) == 1 and calls[0]["outcome"] == "failed" and calls[0]["stage"] == "assembly"
+
+
+def test_a_blocked_attempt_is_recorded(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch, factcheck_ok=False)
+    calls = _attempts(monkeypatch)
+    with pytest.raises(production.FactCheckFailed):
+        production.produce_one(IDEA, str(tmp_path))
+    assert calls[0]["outcome"] == "blocked" and calls[0]["stage"] == "factcheck"
+
+
+def test_bookkeeping_failure_never_costs_a_reel(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.db, "start_attempt", _raiser(RuntimeError("db down")))
+    vid, _url = production.produce_one(IDEA, str(tmp_path))
+    assert vid == "VID1"
+
+
+def test_published_is_sent_as_each_reel_goes_live(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    _attempts(monkeypatch)
+    ideas = [dict(IDEA, id=7), dict(IDEA, id=8)]
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
+    monkeypatch.setattr(production, "_work_root", lambda: str(tmp_path))
+    events = []
+    monkeypatch.setattr(production, "_notify", lambda text: events.append(("notify", text)))
+    real = production.produce_one
+
+    def _tracked(idea, root):
+        events.append(("start", idea["id"]))
+        return real(idea, root)
+
+    monkeypatch.setattr(production, "produce_one", _tracked)
+    production.run_production()
+    assert events[:3] == [("start", 7), ("notify", "✅ Published: https://www.youtube.com/shorts/VID1"),
+                          ("start", 8)]
