@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) built** on branch `feat/stage-1-stories-script`, not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) in progress** on `feat/stage-2-hinglish` ([plan](docs/superpowers/plans/2026-11-12-stage-2-hinglish.md)). **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-12 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -62,9 +62,9 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - **New format:** AI-video shots, Hinglish narration, English subtitles, Indian viewers. The
   audit is checked and the design rewritten (2026-11-12,
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
-  **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is built** (1a and 1b) on
-  `feat/stage-1-stories-script`. Next: the final review of stage 1, then push and a PR with the
-  operator's go-ahead; then stage 2 (Hinglish). State and decisions are in
+  **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
+  fresh final review and its fixes). Next: stage 2 (Hinglish), behind `NARRATION_LANGUAGE`, on
+  `feat/stage-2-hinglish`. State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ⚠️ **Operator, for stages 0 and 1:** run the new SQL at the end of docs/03 §4 in Supabase (two
   columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; two on
