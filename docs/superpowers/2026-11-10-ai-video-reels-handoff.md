@@ -20,7 +20,15 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   better than others". From 2026-11-17 it runs on Vertex. The STATUS item "ear-test 3.8 before
   2026-11-17" is closed by this.
 
-Next: finish the design (sections 11-20), have it read by a fresh builder, write the plan, build.
+- The voice change shipped (PR #16, merged): Vertex voices the channel; CI's `verify-tts` passed.
+- The design is complete; a fresh builder read it and its two questions were answered (the operator
+  chose up to **$1.10 a reel**, all video; the judging rule was corrected).
+- The disclosure flag does not come back from the API on the channel's uploads (design 9.9, 18.9).
+- **The Stage 0 plan is written:** `docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md`.
+  One plan per stage, each written just before it is built.
+
+**Next:** build Stage 0 task by task (executing inline, the operator's preference), then ask before
+pushing it; then write and build the Stage 1 plan, and so on through the stages in design section 14.
 
 ## 1. What the operator wants
 
