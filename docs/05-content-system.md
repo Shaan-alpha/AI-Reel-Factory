@@ -49,14 +49,17 @@ Narrative; strong for "how this unfolded" backstories.
 
 ## Script constraints (YouTube Shorts, Template N)
 
-- **25–30 seconds → about 55–70 spoken words**, never more than `SCRIPT_MAX_WORDS` (80), and the
-  prompt says so. Over the cap, an LLM **tighten pass** cuts to fit and keeps the hook and the
-  "why it matters" turn; dropping whole sentences is the backstop (the CTA goes first, and no
-  sentence is cut in half). Shorter = higher completion rate on Shorts.
-- **First 2–3 seconds = the hook.** No throat-clearing. A hook judge scores the opening 1–10 and,
-  below 7 (`HOOK_MIN_SCORE`), rewrites the title and opening; it is told not to change a fact.
-- **Title ≤ 70 characters** (the prompt aims for 40–55; code cuts anything longer). The title is
-  also the frame-1 banner, so it must be true to the video.
+- **Length in seconds:** about 27 s (`SCRIPT_TARGET_SECONDS`, about 59 words at 2.2 a second),
+  never more than 33 s (`SCRIPT_MAX_SECONDS`, about 73 words), and the prompt says so. Over the
+  cap, the sentences the writer marked `optional` go first, from the end; then whole sentences
+  (the CTA first), never sentence one or the payoff the writer marked with `payoff_index`, and no
+  sentence is cut in half. The LLM tighten rewrite is retired (`ENABLE_SCRIPT_TIGHTEN=false`).
+- **Sentence one = the news.** No throat-clearing: a code check on every script refuses a
+  wind-up word, a date or a day as the opening. The hook judge's rewrite is off
+  (`ENABLE_HOOK_JUDGE=false`); switched on, its rewrite is refused if it adds a number or a name.
+- **Title ≤ 7 words and 44 characters**, the searchable name first. Over either limit the model
+  is asked once to shorten it, then code cuts it at a word. The title is also the frame-1 banner,
+  so it must be true to the video.
 - **2–3 key-point cards** (≤ 4 words each) burned on screen. They are published claims, so the
   fact check covers them too.
 - **Add genuine analysis**, not just facts (the originality requirement — non-negotiable).

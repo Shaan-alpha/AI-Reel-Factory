@@ -519,6 +519,8 @@ def test_truncation_drops_the_close_before_the_facts():
 
 
 def test_tighten_pass_is_used_when_the_draft_runs_long(monkeypatch):
+    """Retired by default (design 9.5); it still works when switched on."""
+    monkeypatch.setenv("ENABLE_SCRIPT_TIGHTEN", "true")
     long = " ".join(["Word"] * 90) + ". Here's why it matters: it does."
     tight = " ".join(["Word"] * 50) + ". Here's why it matters: it does."
     monkeypatch.setattr(scriptwriter.llm, "generate",
@@ -541,6 +543,7 @@ def test_tighten_pass_leaves_room_for_reasoning(monkeypatch):
 
 
 def test_tighten_pass_that_drops_the_payoff_is_refused(monkeypatch):
+    monkeypatch.setenv("ENABLE_SCRIPT_TIGHTEN", "true")
     long = " ".join(["Word"] * 90) + ". Here's why it matters: it does."
     monkeypatch.setattr(scriptwriter.llm, "generate",
                         lambda *a, **k: '{"script_body": "%s."}' % " ".join(["Word"] * 50))
@@ -896,3 +899,120 @@ def test_a_missing_title_falls_back_to_the_idea_title_within_the_limits(monkeypa
     monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
     out = scriptwriter.write_script(IDEA)  # "ISRO's reusable rocket, explained - why it matters"
     assert out["title"] == "ISRO's reusable rocket, explained" == captured["title"]
+
+
+# --- stage 1b: length in seconds, writer-marked cuts, the payoff by index (design 9.5, 9.1) ---
+
+def _sent(word: str, n: int) -> str:
+    return " ".join([word.capitalize()] + [word.lower()] * (n - 1)) + "."
+
+
+# 85 spoken words: sentence 0 has 10, the other five 15 each. Sentence 4 is the payoff and says
+# nothing the 'why it matters' pattern would match.
+_S = [_sent("zero", 10), _sent("one", 15), _sent("two", 15), _sent("three", 15),
+      _sent("four", 15), _sent("five", 15)]
+_LONG_BODY = " ".join(_S)
+
+
+def _clear_length(monkeypatch):
+    for k in ("SCRIPT_MAX_WORDS", "SCRIPT_MAX_SECONDS", "SCRIPT_TARGET_SECONDS",
+              "ENABLE_SCRIPT_TIGHTEN"):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_the_budget_is_set_in_seconds(monkeypatch):
+    _clear_length(monkeypatch)
+    assert scriptwriter._max_words() == 73 and scriptwriter._target_words() == 59
+    monkeypatch.setenv("SCRIPT_MAX_SECONDS", "30")
+    assert scriptwriter._max_words() == 66
+    monkeypatch.setenv("SCRIPT_MAX_WORDS", "80")
+    assert scriptwriter._max_words() == 80
+    monkeypatch.setenv("SCRIPT_TARGET_SECONDS", "25")
+    assert scriptwriter._target_words() == 55
+    assert "about 25 seconds" in scriptwriter._build_prompt(IDEA, "N")
+
+
+def test_optional_sentences_go_first_and_never_the_payoff(monkeypatch):
+    _clear_length(monkeypatch)
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+    assert len(scriptwriter._visible_words(_LONG_BODY)) == 85
+    # 85 > 73: dropping sentence 2 is enough (70 words); 4 is the payoff, so it stays.
+    out = scriptwriter._enforce_length(_LONG_BODY, 1, optional=[2, 4], payoff=4)
+    assert out == " ".join([_S[0], _S[1], _S[3], _S[4], _S[5]])
+    # At 50, sentence 2 goes, then whole sentences from the end, never 0 or the payoff.
+    monkeypatch.setenv("SCRIPT_MAX_WORDS", "50")
+    out = scriptwriter._enforce_length(_LONG_BODY, 1, optional=[2, 4], payoff=4)
+    assert _S[0] in out and _S[4] in out and _S[2] not in out
+    assert len(scriptwriter._visible_words(out)) <= 50
+
+
+def test_over_budget_without_optional_sentences_keeps_the_payoff(monkeypatch):
+    _clear_length(monkeypatch)
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+    monkeypatch.setenv("SCRIPT_MAX_WORDS", "40")
+    out = scriptwriter._enforce_length(_LONG_BODY, 1, payoff=2)
+    assert out.startswith(_S[0]) and _S[2] in out
+    assert len(scriptwriter._visible_words(out)) <= 40
+
+
+def test_the_tighten_rewrite_is_off_by_default(monkeypatch):
+    _clear_length(monkeypatch)
+    monkeypatch.setattr(scriptwriter.llm, "generate",
+                        lambda *a, **k: pytest.fail("no tighten call by default"))
+    scriptwriter._enforce_length(_LONG_BODY, 1)
+
+
+def test_the_payoff_tag_follows_payoff_index():
+    body = "Fact one here. Fact two here. Prices will rise by June. More detail follows."
+    out = scriptwriter._ensure_delivery_tag(body, payoff=2)
+    assert out == "Fact one here. Fact two here. [serious] Prices will rise by June. " \
+                  "More detail follows."
+    assert scriptwriter._ensure_delivery_tag(body, payoff=9) == body  # out of range: no guess
+
+
+def test_write_script_uses_the_writers_payoff_and_optional_marks(monkeypatch, caplog):
+    _clear_length(monkeypatch)
+    captured = _patch(monkeypatch, json.dumps({
+        "title": "Zero news", "script_body": _LONG_BODY, "caption": "c", "hashtags": [],
+        "payoff_index": 4, "optional": [2]}))
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+    with caplog.at_level("WARNING"):
+        out = scriptwriter.write_script(IDEA)
+    assert _S[2] not in out["script_body"]
+    assert "[serious] " + _S[4] in out["script_body"] and captured["body"] == out["script_body"]
+    assert "NO 'why it matters'" not in caplog.text
+
+
+def test_a_script_without_the_new_fields_still_ships(monkeypatch):
+    _clear_length(monkeypatch)
+    body = "ISRO's rocket landed itself on Tuesday. Here's why it matters: launches get cheaper."
+    _patch(monkeypatch, json.dumps({"title": "ISRO rocket lands itself", "script_body": body,
+                                    "caption": "c", "hashtags": []}))
+    out = scriptwriter.write_script(IDEA)
+    assert out["script_body"] == ("ISRO's rocket landed itself on Tuesday. [serious] Here's why it "
+                                  "matters: launches get cheaper.")
+    assert out["structure"] == scriptwriter.structure_for(IDEA)
+
+
+def test_the_hook_judge_is_off_by_default(monkeypatch):
+    _clear_length(monkeypatch)
+    monkeypatch.delenv("ENABLE_HOOK_JUDGE", raising=False)
+    body = "ISRO's rocket landed itself on Tuesday. Here's why it matters: launches get cheaper."
+    _patch(monkeypatch, json.dumps({"title": "ISRO rocket lands itself", "script_body": body,
+                                    "caption": "c", "hashtags": []}))
+    calls = []
+    monkeypatch.setattr(scriptwriter, "_punch_up_hook", lambda t, b: calls.append(1) or (t, b))
+    scriptwriter.write_script(IDEA)
+    assert calls == []
+    monkeypatch.setenv("ENABLE_HOOK_JUDGE", "true")
+    scriptwriter.write_script(IDEA)
+    assert calls == [1]
+
+
+def test_a_punch_up_that_adds_a_fact_is_refused(monkeypatch):
+    """Every model-written rewrite passes the added-facts guard (design 9.6)."""
+    body = "ISRO's rocket landed itself on Tuesday. " + "word " * 50
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: json.dumps(
+        {"hook_score": 2, "title": "ISRO rocket lands 3 times",
+         "script_body": "ISRO's rocket landed itself 3 times on Tuesday. " + "word " * 50}))
+    assert scriptwriter._punch_up_hook("Old", body) == ("Old", body)

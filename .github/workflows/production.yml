@@ -134,7 +134,7 @@ jobs:
           ENABLE_HOOK_CAPTION: ${{ vars.ENABLE_HOOK_CAPTION || 'true' }}  # frame-1 title hook banner (CTR)
           HOOK_SECONDS: ${{ vars.HOOK_SECONDS || '1.8' }}            # how long the hook banner shows
           CLIP_SECONDS: ${{ vars.CLIP_SECONDS || '3.5' }}           # B-roll cut length (fast = more retention)
-          ENABLE_HOOK_JUDGE: ${{ vars.ENABLE_HOOK_JUDGE || 'true' }} # LLM punches up weak hooks/titles pre-render
+          ENABLE_HOOK_JUDGE: ${{ vars.ENABLE_HOOK_JUDGE || 'false' }} # off since 2026-11-12 (design 9.2): it rewrote the writer's opening
           KOKORO_SPEED: ${{ vars.KOKORO_SPEED || '1.0' }}
           ENABLE_DRAMATIC_PACING: ${{ vars.ENABLE_DRAMATIC_PACING || 'true' }}  # snappier mid-script + beat before payoff
           PAUSE_BETWEEN: ${{ vars.PAUSE_BETWEEN || '0.18' }}        # inter-sentence silence (s)
@@ -177,7 +177,9 @@ jobs:
           FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
           FACTCHECK_SAMPLES: ${{ vars.FACTCHECK_SAMPLES || '2' }}      # a finding from either of two checks blocks
           ENABLE_FACTCHECK_REPAIR: ${{ vars.ENABLE_FACTCHECK_REPAIR || 'true' }}  # rewrite blocked claims once, re-check
-          ENABLE_SCRIPT_TIGHTEN: ${{ vars.ENABLE_SCRIPT_TIGHTEN || 'true' }}  # LLM cut to the word cap before truncation
+          ENABLE_SCRIPT_TIGHTEN: ${{ vars.ENABLE_SCRIPT_TIGHTEN || 'false' }}  # retired 2026-11-12: the writer marks optional sentences
+          SCRIPT_TARGET_SECONDS: ${{ vars.SCRIPT_TARGET_SECONDS }}  # default 27 (about 59 words)
+          SCRIPT_MAX_SECONDS: ${{ vars.SCRIPT_MAX_SECONDS }}        # default 33 (about 73 words)
           IDEA_DEDUP_DAYS: ${{ vars.IDEA_DEDUP_DAYS || '10' }}           # story-level dedup window
           WINNERS_SINCE: ${{ vars.WINNERS_SINCE }}                     # optional: the relaunch date; unset keeps the winners block off
           ELECTION_SILENCE: ${{ vars.ELECTION_SILENCE }}               # optional: State:YYYY-MM-DD pairs, no election matter in the 48 h before

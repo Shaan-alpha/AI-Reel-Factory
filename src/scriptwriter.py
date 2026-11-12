@@ -204,8 +204,8 @@ def _build_prompt(idea: dict, template: str) -> str:
         angle=idea.get("angle", ""),
         sources=sources_block,
         structure=STRUCTURES[structure_for(idea)],
-        target_seconds=27,
-        target_words=59,
+        target_seconds=f"{_seconds('SCRIPT_TARGET_SECONDS', 27):g}",
+        target_words=_target_words(),
         max_words=_max_words(),
     )
     # The human "why it matters" take is the originality + anti-"AI-slop" signal (2026 policy).
@@ -280,11 +280,28 @@ def _shorten_title(title: str, body: str) -> str:
     return _cut_title(title)
 
 
-def _max_words() -> int:
+# Design 9.5: the budget is set in seconds and converted to words at 2.2 a second.
+_WORDS_PER_SECOND = 2.2
+
+
+def _seconds(key: str, default: float) -> float:
     try:
-        return max(30, int(config.get("SCRIPT_MAX_WORDS", "80")))
+        return float(config.get(key, str(default)))
     except (TypeError, ValueError):
-        return 80
+        return default
+
+
+def _max_words() -> int:
+    """The spoken-word cap: SCRIPT_MAX_WORDS when set, else SCRIPT_MAX_SECONDS (33 s, 73 words)."""
+    try:
+        return max(30, int(config.get("SCRIPT_MAX_WORDS")))
+    except (TypeError, ValueError):
+        return max(30, round(_seconds("SCRIPT_MAX_SECONDS", 33) * _WORDS_PER_SECOND))
+
+
+def _target_words() -> int:
+    """The length the writer aims at: SCRIPT_TARGET_SECONDS (27 s, 59 words)."""
+    return max(20, round(_seconds("SCRIPT_TARGET_SECONDS", 27) * _WORDS_PER_SECOND))
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -543,6 +560,12 @@ def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
         log.info("scriptwriter: punch-up broke the opening (%s); keeping original.",
                  opening_problem(new_body))
         return title, body
+    # Every model-written rewrite passes the added-facts guard (design 9.6): the prompt forbids
+    # new facts, and this makes it true.
+    added = _added_facts({"script_body": new_body, "title": new_title}, f"{title}\n{body}")
+    if added:
+        log.info("scriptwriter: punch-up adds %s; keeping original.", ", ".join(added))
+        return title, body
     if new_body and 40 <= len(_visible_words(new_body)) <= max_words:  # accept only if it stayed short
         log.info("scriptwriter: punched up a weak hook (score %d).", score)
         return (new_title or title), new_body
@@ -565,17 +588,41 @@ def _visible_words(body: str) -> list[str]:
     return _TAG_IN_TEXT_RE.sub(" ", body).split()
 
 
-def _payoff_start(body: str) -> int | None:
-    """Index where the 'why it matters' sentence begins, or None if there is no bridge.
+def _payoff_start(body: str, payoff: int | None = None) -> int | None:
+    """Offset where the 'why it matters' sentence begins, or None when it cannot be placed.
 
-    Shared by the tag floor and the length cap so the two agree on WHERE the payoff is; two
-    copies of this walk-back drifting apart is how [curious] came to be emitted-but-stripped.
-    """
+    With the writer's `payoff` (a sentence index, design 9.1) the payoff is marked, not matched:
+    out of range means None, never a guess. Without it, the bridge phrase is matched as before."""
+    if payoff is not None:
+        if not 0 <= payoff < len(_sentences(body)):
+            return None
+        return sentence_ends(body)[payoff - 1] if payoff else 0
     m = _WHY_IT_MATTERS_RE.search(body)
     if not m:
         return None
     starts = sentence_ends(body, 0, m.start())
     return starts[-1] if starts else 0
+
+
+def _as_index(value) -> int | None:
+    """A sentence index from the writer's JSON: an int or a digit string; anything else is None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _index_of(body: str, sentence: str | None) -> int | None:
+    """Where `sentence` sits among the body's sentences now; None when it is gone or unknown.
+    The payoff is followed by its text, since every cut and rewrite moves the indices."""
+    if not sentence:
+        return None
+    return next((i for i, s in enumerate(_sentences(body)) if s == sentence), None)
 
 
 # A call to action is the cheapest sentence in the script: it carries no fact and no payoff.
@@ -588,13 +635,14 @@ def _sentences(body: str) -> list[str]:
     return split_sentences(body)
 
 
-def _truncate_to_words(body: str, max_words: int) -> str:
+def _truncate_to_words(body: str, max_words: int, payoff: int | None = None) -> str:
     """Hard length backstop: drop WHOLE sentences until the body fits max_words. Deterministic.
 
     Delivery tags are carried through with their sentence and do not count toward the cap.
 
     Two protected sentences: the hook (first) and the 'why it matters' turn, which is the
-    originality signal the monetization gate turns on (docs/08 §1). Everything else goes in
+    originality signal the monetization gate turns on (docs/08 §1); `payoff` (a sentence index)
+    names that turn when the writer marked it, else the bridge phrase is matched. Everything else goes in
     order of how little it costs: the call to action, then the loop-back close, then the setup
     from its end backwards, then any extra payoff detail.
 
@@ -618,7 +666,10 @@ def _truncate_to_words(body: str, max_words: int) -> str:
             kept.append(piece)
         return " ".join(kept).strip()
 
-    bridge = next((i for i, x in enumerate(sents) if _WHY_IT_MATTERS_RE.search(x)), None)
+    if payoff is not None and 0 <= payoff < len(sents):
+        bridge = payoff
+    else:
+        bridge = next((i for i, x in enumerate(sents) if _WHY_IT_MATTERS_RE.search(x)), None)
     # The loop-back close is the last sentence that is not a call to action.
     last = max((i for i, x in enumerate(sents) if not _CTA_RE.search(x)), default=len(sents) - 1)
     cost: dict[int, tuple[int, int]] = {}
@@ -700,21 +751,44 @@ def _strip_markdown(body: str) -> str:
     return body.replace("*", "")
 
 
-def _enforce_length(body: str, idea_id) -> str:
-    """Bring the body under SCRIPT_MAX_WORDS: the tighten pass first, truncation as backstop."""
+def _drop_optional(body: str, optional: list[int], payoff: int | None, max_words: int) -> str:
+    """Drop the sentences the writer marked optional, from the end, until the body fits; never
+    sentence one or the payoff (design 9.5). The result may still be over the cap."""
+    sents = _sentences(body)
+    keep = list(range(len(sents)))
+    for i in sorted({i for i in optional if 0 < i < len(sents) and i != payoff}, reverse=True):
+        if len(_visible_words(" ".join(sents[j] for j in keep))) <= max_words:
+            break
+        keep.remove(i)
+    return " ".join(sents[j] for j in keep)
+
+
+def _enforce_length(body: str, idea_id, optional: list[int] | None = None,
+                    payoff: int | None = None) -> str:
+    """Bring the body under the cap (design 9.5): the sentences the writer marked optional, from
+    the end; then the tighten rewrite, retired by default (ENABLE_SCRIPT_TIGHTEN); then whole
+    sentences, keeping sentence one and the payoff (`payoff`, a sentence index, when known)."""
     max_words = _max_words()
     words = len(_visible_words(body))
     if words <= max_words:
         return body
-    log.warning("scriptwriter: idea %s script %d words > %d cap; tightening.",
+    log.warning("scriptwriter: idea %s script %d words > %d cap; cutting.",
                 idea_id, words, max_words)
-    if config.get_bool("ENABLE_SCRIPT_TIGHTEN", True):
+    sents = _sentences(body)
+    payoff_text = sents[payoff] if payoff is not None and 0 <= payoff < len(sents) else None
+    if optional:
+        body = _drop_optional(body, optional, payoff, max_words)
+        if len(_visible_words(body)) <= max_words:
+            log.info("scriptwriter: idea %s fits after its optional sentences (%d words).",
+                     idea_id, len(_visible_words(body)))
+            return body
+    if config.get_bool("ENABLE_SCRIPT_TIGHTEN", False):
         tight = _tighten(body, max_words)
         if tight:
             log.info("scriptwriter: idea %s tightened %d -> %d words.",
                      idea_id, words, len(_visible_words(tight)))
             return tight
-    return _truncate_to_words(body, max_words)
+    return _truncate_to_words(body, max_words, payoff=_index_of(body, payoff_text))
 
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -786,8 +860,9 @@ _WHY_IT_MATTERS_RE = re.compile(
     r"|(?:it|this) (?:actually )?matters because\b|the real (?:point|issue) (?:here )?is\b)")
 
 
-def _ensure_delivery_tag(body: str) -> str:
-    """Guarantee the script carries at least one delivery tag, on the 'why it matters' turn.
+def _ensure_delivery_tag(body: str, payoff: int | None = None) -> str:
+    """Guarantee the script carries at least one delivery tag, on the 'why it matters' turn
+    (`payoff`, the sentence the writer marked, when known; else the bridge phrase).
 
     Measured 2026-08-07 against the last 5 produced scripts: two of them shipped with NO tags at
     all. The prompt says "AT MOST 3 … fewer is better", which permits zero — so on a channel whose
@@ -807,15 +882,11 @@ def _ensure_delivery_tag(body: str) -> str:
     if not config.get_bool("ENABLE_TAG_FLOOR", True) or voice.has_style_tag(body):
         return body
 
-    m = _WHY_IT_MATTERS_RE.search(body)
-    if not m:
-        log.info("scriptwriter: no delivery tag and no 'why it matters' bridge found; "
+    at = _payoff_start(body, payoff)
+    if at is None:
+        log.info("scriptwriter: no delivery tag and no 'why it matters' sentence found; "
                  "leaving the script untagged rather than guessing a placement.")
         return body
-
-    # Walk back to the start of the sentence containing the bridge.
-    starts = sentence_ends(body, 0, m.start())
-    at = starts[-1] if starts else 0
     log.info("scriptwriter: script had no delivery tag; inserted [serious] on the payoff turn.")
     return f"{body[:at]}[serious] {body[at:]}".strip()
 
@@ -1060,10 +1131,24 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # fact-check and the banner see the title that is published.
     title = _shorten_title(str(data.get("title") or idea.get("title") or "").strip(), body)
 
+    # The writer marks its payoff and the sentences it could lose (design 9.1, 9.5). The payoff is
+    # followed by its text from here on, since cuts and rewrites move the indices. Without the
+    # marks, everything below works as it did: the bridge phrase locates the payoff.
+    sents = _sentences(body)
+    payoff_index = _as_index(data.get("payoff_index"))
+    payoff_text = (sents[payoff_index] if payoff_index is not None
+                   and 0 <= payoff_index < len(sents) else None)
+    if payoff_index is not None and payoff_text is None:
+        log.warning("scriptwriter: idea %s payoff_index %s is out of range (%d sentences)",
+                    idea_id, payoff_index, len(sents))
+    optional = data.get("optional")
+    optional = ([i for i in map(_as_index, optional) if i is not None]
+                if isinstance(optional, list) else [])
+
     # Fit the cap BEFORE the punch-up: the punch-up only accepts a rewrite that is under the cap,
     # so on the 100-word drafts every run was producing it could not act (9 of 16 logged
     # decisions were "unusable").
-    body = _enforce_length(body, idea_id)
+    body = _enforce_length(body, idea_id, optional, _index_of(body, payoff_text))
 
     # The opening, on every script and before the gate (design 9.2): sentence one states the news.
     problem = opening_problem(body)
@@ -1073,8 +1158,9 @@ def write_script(idea: dict, template: str = "N") -> dict:
 
     # Scroll-stop judge: punch up a weak hook+title before we spend a render (fail-soft, no new facts).
     # Never on a somber story: a calm opening scores low, and the rewrite is shock copy, which
-    # becomes the YouTube title and the frame-1 banner of a story about deaths.
-    if config.get_bool("ENABLE_HOOK_JUDGE", True) and tone_for(idea, body) != "somber":
+    # becomes the YouTube title and the frame-1 banner of a story about deaths. Off by default
+    # since 2026-11-12 (design 9.2): a cheaper model rewrote the writer's opening on a "shock" score.
+    if config.get_bool("ENABLE_HOOK_JUDGE", False) and tone_for(idea, body) != "somber":
         title, body = _punch_up_hook(title, body)
         title = _shorten_title(title, body)  # the punch-up writes its own title
 
@@ -1095,7 +1181,9 @@ def write_script(idea: dict, template: str = "N") -> dict:
     key_points = ([str(p).strip() for p in kp if str(p).strip()][:5]
                   if isinstance(kp, list) else [])
 
-    body = _enforce_length(body, idea_id)  # the punch-up is capped too; this is a no-op then
+    # The punch-up is capped too; this is a no-op without it.
+    body = _enforce_length(body, idea_id, payoff=_index_of(body, payoff_text))
+    payoff_now = _index_of(body, payoff_text)
     if len(_visible_words(body)) < 50:
         log.warning("scriptwriter: idea %s script is short (%d words)",
                     idea_id, len(_visible_words(body)))
@@ -1105,8 +1193,9 @@ def write_script(idea: dict, template: str = "N") -> dict:
     # the monetization gate turns on. Found live on script 158 (2026-08-07), where it was
     # invisible because nothing checked. Warn rather than block: accuracy already has a hard gate
     # (factcheck), and stacking a second blocking gate on a SOFT quality judgement would cost
-    # reels for something a human should eyeball (rule 14 — soft on runtime).
-    if not _WHY_IT_MATTERS_RE.search(body):
+    # reels for something a human should eyeball (rule 14 — soft on runtime). The writer's marked
+    # payoff counts; the bridge phrase is the check only when there is no mark.
+    if payoff_now is None and not _WHY_IT_MATTERS_RE.search(body):
         log.warning("scriptwriter: idea %s has NO 'why it matters' turn — that makes it a bare "
                     "summary, which is the originality/monetization risk (docs/08 §1). Review it.",
                     idea_id)
@@ -1117,7 +1206,7 @@ def write_script(idea: dict, template: str = "N") -> dict:
 
     # After the word cap, so truncation can never cut the tag back off. Tags are not spoken
     # words (_visible_words ignores them), so this cannot push the script over the cap.
-    body = _ensure_delivery_tag(body)
+    body = _ensure_delivery_tag(body, payoff_now)
 
     # The writer may fall back to what-happened and says so; anything else keeps the chosen one.
     said = str(data.get("structure") or "").strip().lower()
