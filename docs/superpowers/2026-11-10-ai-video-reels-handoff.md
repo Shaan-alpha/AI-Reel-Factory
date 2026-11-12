@@ -27,11 +27,17 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **The Stage 0 plan is written:** `docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md`.
   One plan per stage, each written just before it is built.
 
-- **Stage 0 is built** on branch `feat/stage-0-safety-measuring` (9 tasks, 10 commits, 775 pass
-  and 5 skipped locally after the final review's fixes: 786 pass); its progress ledger is `.superpowers/sdd/2026-11-12-stage-0-safety-and-measuring/progress.md`
-  (git-ignored). A final whole-branch review was dispatched.
+- **Stage 0 is built** on branch `feat/stage-0-safety-measuring` (11 commits; 786 pass, 5 skipped
+  locally), including the fixes from a fresh final review. Calls made while building it, each
+  with its cost if wrong (none): two old tests were updated where the behaviour moved (an "ok ..."
+  fixture now opens on a subject; `make_on_demand` no longer re-sends "Published"); an India share
+  of 0 for fully withheld countries was treated as a real defect, not polish; two stale docs lines
+  were fixed under rule 1. **Deferred minors:** an idempotent rerun re-sends "✅ Published"; a video
+  whose Analytics query always fails is retried every run; the opening rewrite's 20-word limit is
+  asked for, not enforced; `reel_attempts.spend_usd` waits for stage 3, and a job kill leaves a
+  NULL outcome (read it as "killed").
 
-**Next:** act on the final review; ask the operator to push and merge Stage 0, run its SQL (end of
+**Next:** ask the operator to push and merge Stage 0, run its SQL (end of
 docs/03 §4) and approve the bot deploy; then write and build the Stage 1 plan, and so on through
 the stages in design section 14.
 
