@@ -27,8 +27,13 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **The Stage 0 plan is written:** `docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md`.
   One plan per stage, each written just before it is built.
 
-**Next:** build Stage 0 task by task (executing inline, the operator's preference), then ask before
-pushing it; then write and build the Stage 1 plan, and so on through the stages in design section 14.
+- **Stage 0 is built** on branch `feat/stage-0-safety-measuring` (9 tasks, 10 commits, 775 pass
+  and 5 skipped locally after the final review's fixes: 786 pass); its progress ledger is `.superpowers/sdd/2026-11-12-stage-0-safety-and-measuring/progress.md`
+  (git-ignored). A final whole-branch review was dispatched.
+
+**Next:** act on the final review; ask the operator to push and merge Stage 0, run its SQL (end of
+docs/03 §4) and approve the bot deploy; then write and build the Stage 1 plan, and so on through
+the stages in design section 14.
 
 ## 1. What the operator wants
 

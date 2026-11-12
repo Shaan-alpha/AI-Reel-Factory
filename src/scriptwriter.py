@@ -24,7 +24,7 @@ import re
 from urllib.parse import urlparse
 
 from src import config, db, llm
-from src.text import SENTENCE_END_RE, split_sentences
+from src.text import sentence_ends, split_sentences
 
 log = logging.getLogger(__name__)
 
@@ -476,6 +476,12 @@ def _punch_up_hook(title: str, body: str) -> tuple[str, str]:
     if _WHY_IT_MATTERS_RE.search(body) and not _WHY_IT_MATTERS_RE.search(new_body):
         log.info("scriptwriter: punch-up dropped the 'why it matters' turn; keeping original.")
         return title, body
+    # The opening check runs before the punch-up, so a rewrite that reopens on "So, ..." or a date
+    # would ship unchecked (final review, 2026-11-12): it must pass the same check.
+    if new_body and opening_problem(new_body) is not None:
+        log.info("scriptwriter: punch-up broke the opening (%s); keeping original.",
+                 opening_problem(new_body))
+        return title, body
     if new_body and 40 <= len(_visible_words(new_body)) <= max_words:  # accept only if it stayed short
         log.info("scriptwriter: punched up a weak hook (score %d).", score)
         return (new_title or title), new_body
@@ -507,7 +513,7 @@ def _payoff_start(body: str) -> int | None:
     m = _WHY_IT_MATTERS_RE.search(body)
     if not m:
         return None
-    starts = [e.end() for e in _SENTENCE_END_RE.finditer(body, 0, m.start())]
+    starts = sentence_ends(body, 0, m.start())
     return starts[-1] if starts else 0
 
 
@@ -717,10 +723,6 @@ def _ensure_disclosure(caption: str) -> str:
 _WHY_IT_MATTERS_RE = re.compile(
     r"(?i)\b(here'?s why\b|why (?:it|this)(?: actually)? matters\b"
     r"|(?:it|this) (?:actually )?matters because\b|the real (?:point|issue) (?:here )?is\b)")
-# Sentence boundary: terminator + whitespace (src/text.py, shared with the voice and subtitles).
-# Used to walk BACK to the start of the sentence the bridge lives in, so the tag lands on the whole
-# payoff rather than mid-clause.
-_SENTENCE_END_RE = SENTENCE_END_RE
 
 
 def _ensure_delivery_tag(body: str) -> str:
@@ -751,7 +753,7 @@ def _ensure_delivery_tag(body: str) -> str:
         return body
 
     # Walk back to the start of the sentence containing the bridge.
-    starts = [e.end() for e in _SENTENCE_END_RE.finditer(body, 0, m.start())]
+    starts = sentence_ends(body, 0, m.start())
     at = starts[-1] if starts else 0
     log.info("scriptwriter: script had no delivery tag; inserted [serious] on the payoff turn.")
     return f"{body[:at]}[serious] {body[at:]}".strip()
@@ -829,10 +831,14 @@ _DANGLING_OPENERS = ("because", "and", "but", "so", "which", "or")
 # Openers that wind up instead of stating the news (design 9.2). Scripts that started on one were
 # picked up (100+ views) 9 times in 41, against 21 in 46 for scripts starting on the subject, and
 # the gap held within the same topic and month (audit data 4, checked 2026-11-12).
-_WIND_UPS = ("did you know", "picture this", "ever wondered", "guess what", "so", "okay", "ok",
-             "alright", "imagine", "here's", "let's")
+# A word alone is a wind-up only in context (final review, 2026-11-12): "So far this year" and
+# "So India banned" are not "So, ...", "Imagine Dragons" and "Let's Encrypt" are names.
+_PHRASE_WIND_UPS = ("did you know", "picture this", "ever wondered", "guess what")
+_COMMA_WIND_UPS = ("so", "okay", "ok", "alright")   # set off by a comma or dash
+_LOWER_WIND_UPS = ("imagine", "here's", "let's")    # before a lower-case word
 # Never wind-ups, never cut: removing one turns a hedged claim into a flat one before the gate.
 _HEDGES = ("apparently", "reportedly", "allegedly")
+_SET_OFF = (",", "—", "–", "-")
 _DATE_WORDS = frozenset((
     "january", "february", "march", "april", "may", "june", "july", "august", "september",
     "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep",
@@ -852,9 +858,36 @@ Output ONE valid JSON object and nothing else, no markdown or fences:
 {{"first_sentence": "..."}}"""
 
 
+def _plain(token: str) -> str:
+    """A token lower-cased, curly apostrophes made straight, surrounding punctuation dropped."""
+    return token.replace("’", "'").strip("\"'“”‘,.:;!?—–-").lower()
+
+
 def _plain_words(sentence: str) -> list[str]:
     """Spoken words, lower-cased, without the punctuation around them."""
-    return [w.strip("\"'“”‘’,.:;!?—–-").lower() for w in _visible_words(sentence)]
+    return [_plain(w) for w in _visible_words(sentence)]
+
+
+def _set_off(token: str) -> bool:
+    """True when a token ends in a comma or a dash ("So," or "So—")."""
+    return token.rstrip("\"'”’").endswith(_SET_OFF)
+
+
+def _wind_up(raw: list[str]) -> tuple[str, int] | None:
+    """(the wind-up, how many tokens it spans) at the start of a sentence's tokens, or None."""
+    if not raw:
+        return None
+    plain = [_plain(t) for t in raw]
+    for w in _PHRASE_WIND_UPS:
+        n = len(w.split())
+        if " ".join(plain[:n]) == w:
+            return w, n
+    lower_next = len(raw) > 1 and raw[1][:1].islower()
+    if plain[0] in _COMMA_WIND_UPS and (_set_off(raw[0]) or (plain[0] != "so" and lower_next)):
+        return plain[0], 1
+    if plain[0] in _LOWER_WIND_UPS and lower_next:
+        return plain[0], 1
+    return None
 
 
 def opening_problem(body: str) -> str | None:
@@ -869,45 +902,52 @@ def opening_problem(body: str) -> str | None:
     if text.startswith("["):
         return "it opens on a delivery tag"
     sentences = _sentences(text)
-    words = _plain_words(sentences[0] if sentences else text)
+    raw = _visible_words(sentences[0] if sentences else text)
+    words = [_plain(t) for t in raw]
     if len(words) < 5:
         return "the first sentence has fewer than five words"
-    lead = " ".join(words[:3])
-    for w in _WIND_UPS:
-        if lead == w or lead.startswith(w + " "):
-            return f"it opens on the wind-up '{w}'"
+    found = _wind_up(raw)
+    if found:
+        return f"it opens on the wind-up '{found[0]}'"
     i = 1 if words[0] in ("on", "in", "by") else 0
     if words[i] in _DATE_WORDS or re.fullmatch(r"(?:19|20)\d\d", words[i]):
         return "it opens on a date or a day"
-    if words[0] in _DANGLING_OPENERS:
+    if words[0] in _DANGLING_OPENERS and words[:2] != ["so", "far"]:
         return f"it opens on the conjunction '{words[0]}'"
     return None
 
 
 def _cut_wind_up(sentence: str) -> str | None:
-    """The sentence without its leading wind-up word(s), capitalised; None if under five words
-    would remain or it does not start with one."""
-    words = _plain_words(sentence)
-    for w in _WIND_UPS:
-        n = len(w.split())
-        if " ".join(words[:n]) != w:
-            continue
-        pieces = sentence.split(None, n)
-        if len(pieces) <= n:
-            return None
-        rest = pieces[n].lstrip(" ,—–-")
-        if len(_visible_words(rest)) < 5:
-            return None
-        return rest[0].upper() + rest[1:]
-    return None
+    """The sentence without its leading wind-up, capitalised, or None.
+
+    Cut only where what is left is still the sentence: a wind-up set off by a comma or dash
+    ("So, India banned ...") or "Did you know that ...", whose "that" goes too and whose question
+    mark becomes a full stop. Anything else is left for the rewrite: cutting "Did you know" alone
+    left "That India has 28 states now?" (final review, 2026-11-12)."""
+    raw = sentence.split()
+    found = _wind_up(_visible_words(sentence))
+    if not found:
+        return None
+    w, n = found
+    rest_tokens = raw[n:]
+    if w == "did you know" and rest_tokens and _plain(rest_tokens[0]) == "that":
+        rest_tokens = rest_tokens[1:]
+    elif not _set_off(raw[n - 1]):
+        return None
+    rest = " ".join(rest_tokens).lstrip(" ,—–-")
+    if w == "did you know" and rest.endswith("?"):
+        rest = rest[:-1] + "."
+    if len(_visible_words(rest)) < 5:
+        return None
+    return rest[0].upper() + rest[1:]
 
 
 def _fix_opening(body: str, problem: str, source_text: str) -> str:
     """Fix the opening `opening_problem` found: one rewrite of sentence one, refused if it adds a
     number or a name `source_text` lacks; else a leading wind-up is cut when five words or more
     remain; else the body is kept as written. Never raises, never blocks a reel."""
-    m = _SENTENCE_END_RE.search(body)
-    first, rest = (body[:m.end()].strip(), body[m.end():].strip()) if m else (body.strip(), "")
+    ends = sentence_ends(body)
+    first, rest = (body[:ends[0]].strip(), body[ends[0]:].strip()) if ends else (body.strip(), "")
     new_first = ""
     try:
         data = _parse_llm_json(llm.generate(_OPENING_PROMPT.format(problem=problem, body=body),

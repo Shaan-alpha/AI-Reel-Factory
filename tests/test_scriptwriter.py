@@ -743,3 +743,40 @@ def test_a_rewrite_that_adds_a_number_is_refused(monkeypatch):
     fixed = scriptwriter._fix_opening("So, India banned the app students use daily. More here.",
                                       "opens on the wind-up 'so'", "India banned the app")
     assert "40" not in fixed and fixed.startswith("India banned the app")
+
+
+# --- final review, 2026-11-12 --------------------------------------------------------------
+
+def test_the_cut_never_garbles_an_opening(monkeypatch):
+    monkeypatch.setattr(scriptwriter.llm, "generate", _raiser(RuntimeError("down")))
+    fixed = scriptwriter._fix_opening("Did you know that India has 28 states now? More here.",
+                                      "it opens on the wind-up 'did you know'", "India 28 states")
+    assert fixed.startswith("India has 28 states now.")
+    body = "So India banned the app students use daily. More here."
+    assert scriptwriter._fix_opening(body, "it opens on the conjunction 'so'", body) == body
+
+
+def test_names_and_so_far_are_not_wind_ups():
+    for opener in ("So far this year, 40 startups have shut down in Bengaluru.",
+                   "Imagine Dragons cancelled their Mumbai show after the storm.",
+                   "Let's Encrypt revoked millions of certificates this week."):
+        assert scriptwriter.opening_problem(opener) is None, opener
+
+
+def test_a_curly_apostrophe_wind_up_is_caught():
+    assert "wind-up" in scriptwriter.opening_problem(
+        "Here’s why your UPI payments may soon cost money.")
+
+
+def test_a_punch_up_that_reopens_on_a_wind_up_is_refused(monkeypatch):
+    body = ("India banned the app millions of students use daily. " + "More words here. " * 10
+            + "Here's why it matters: exams.")
+    monkeypatch.setattr(scriptwriter.llm, "generate", lambda *a, **k: json.dumps(
+        {"hook_score": 3, "title": "New", "script_body": "So, " + body}))
+    title, new = scriptwriter._punch_up_hook("Old", body)
+    assert new == body and title == "Old"
+
+
+def test_the_payoff_tag_lands_on_the_payoff_after_a_us_sentence():
+    out = scriptwriter._ensure_delivery_tag("Prices rose in the U.S. Here's why it matters to you.")
+    assert out == "Prices rose in the U.S. [serious] Here's why it matters to you."

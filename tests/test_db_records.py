@@ -117,3 +117,10 @@ def test_upsert_post_metrics_uses_post_and_window_as_the_key(monkeypatch):
     assert (op, table) == ("upsert", "post_metrics")
     assert args[0]["post_id"] == 7 and args[0]["window_days"] == 7 and args[0]["views"] == 100
     assert kwargs["on_conflict"] == "post_id,window_days"
+
+
+def test_backfill_post_published_at_only_fills_an_empty_date(monkeypatch):
+    fake = _use(monkeypatch, _Fake())
+    db.backfill_post_published_at(4, "2026-07-01T10:00:00Z")
+    op, table, args, _ = fake.calls[0]
+    assert (op, table) == ("update", "posts") and args[0] == {"published_at": "2026-07-01T10:00:00Z"}

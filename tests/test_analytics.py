@@ -27,8 +27,10 @@ def test_fetch_stats_parses_counts():
         {"id": "v2", "statistics": {"viewCount": "10"}},  # likes/comments hidden
     ])
     out = analytics._fetch_stats(yt, ["v1", "v2"])
-    assert out["v1"] == {"views": 1500, "likes": 42, "comments": 7, "title": None}
-    assert out["v2"] == {"views": 10, "likes": None, "comments": None, "title": None}
+    assert out["v1"] == {"views": 1500, "likes": 42, "comments": 7, "title": None,
+                         "published_at": None}
+    assert out["v2"] == {"views": 10, "likes": None, "comments": None, "title": None,
+                         "published_at": None}
 
 
 def test_collect_stats_records_each_post(monkeypatch):
@@ -210,3 +212,29 @@ def test_collect_metrics_measures_each_post_once_and_survives_an_error(monkeypat
     monkeypatch.setattr(analytics, "_analytics_client", lambda: _FakeAnalytics(_FULL, {"BAD"}))
     assert analytics.collect_metrics() == 1
     assert stored == [(2, 7)]
+
+
+def test_india_share_is_unknown_when_every_country_is_withheld():
+    """YouTube withholds countries below its privacy threshold; no rows is "unknown", not 0%."""
+    yta = _FakeAnalytics({None: {"rows": [[100, 40, 20, 71.5, 2]]}})
+    m = analytics._video_metrics(yta, "V1", date(2026, 11, 1), date(2026, 11, 7))
+    assert m["views"] == 100 and m["india_share"] is None
+
+
+def test_collect_stats_fills_a_missing_publish_date_from_youtube(monkeypatch):
+    """75 of 96 posts had no published_at, so the metrics backfill would skip them."""
+    posts = [{"id": 1, "external_id": "v1", "script_id": None, "published_at": None},
+             {"id": 2, "external_id": "v2", "script_id": None, "published_at": "2026-10-01T00:00:00+00:00"}]
+    monkeypatch.setattr(analytics.db, "get_published_posts", lambda platform="youtube": posts)
+    monkeypatch.setattr(analytics.db, "insert_analytics", lambda *a, **k: None)
+    monkeypatch.setattr(analytics.db, "prune_analytics", lambda: 0)
+    filled = []
+    monkeypatch.setattr(analytics.db, "backfill_post_published_at",
+                        lambda post_id, ts: filled.append((post_id, ts)))
+    yt = _FakeYouTube([
+        {"id": "v1", "statistics": {"viewCount": "5"}, "snippet": {"publishedAt": "2026-07-01T10:00:00Z"}},
+        {"id": "v2", "statistics": {"viewCount": "6"}, "snippet": {"publishedAt": "2026-10-01T00:00:00Z"}},
+    ])
+    monkeypatch.setattr(analytics, "_youtube_client", lambda: yt)
+    analytics.collect_stats()
+    assert filled == [(1, "2026-07-01T10:00:00Z")]

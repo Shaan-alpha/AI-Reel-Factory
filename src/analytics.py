@@ -61,6 +61,7 @@ def _fetch_stats(youtube, video_ids: list[str]) -> dict[str, dict]:
                 "likes": int(s.get("likeCount", 0)) if "likeCount" in s else None,
                 "comments": int(s.get("commentCount", 0)) if "commentCount" in s else None,
                 "title": (item.get("snippet") or {}).get("title"),
+                "published_at": (item.get("snippet") or {}).get("publishedAt"),
             }
     return out
 
@@ -121,6 +122,13 @@ def collect_stats() -> int:
                 db.backfill_script_title(post["script_id"], st["title"])
             except Exception as e:  # noqa: BLE001
                 log.warning("analytics: title backfill failed for %s (%s)", vid, e)
+        # 75 of 96 posts were recorded with no published_at (STATUS 2026-08-25), and the metrics
+        # pull dates each Short's first week from it. YouTube knows the real time.
+        if not post.get("published_at") and st.get("published_at"):
+            try:
+                db.backfill_post_published_at(post["id"], st["published_at"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("analytics: publish-date backfill failed for %s (%s)", vid, e)
     log.info("analytics: recorded %d snapshots.", recorded)
 
     # Retention is a no-op unless ANALYTICS_KEEP_PER_POST is set (see db.prune_analytics), but it
@@ -190,7 +198,8 @@ def _video_metrics(yta, video_id: str, start: date, end: date) -> dict:
     views = int(views)
     return {"views": views, "engaged_views": int(engaged), "avg_view_seconds": float(avg_seconds),
             "avg_view_pct": float(avg_pct), "subscribers_gained": int(subs),
-            "india_share": round(countries.get("IN", 0) / views, 4) if views else None,
+            # No country rows means every country was withheld: unknown, not "no Indian viewers".
+            "india_share": round(countries.get("IN", 0) / views, 4) if views and countries else None,
             "countries": countries, "traffic": traffic, "retention": retention}
 
 

@@ -41,3 +41,9 @@ def test_a_render_that_times_out_fails_with_a_clear_error(monkeypatch, tmp_path)
     monkeypatch.setattr(assembly.subprocess, "run", _hang)
     with pytest.raises(RuntimeError, match="timed out"):
         assembly.assemble(str(audio), [str(clip)], str(tmp_path / "out.mp4"))
+
+
+def test_three_timed_out_renders_still_fit_in_one_reels_budget():
+    """A hung polished render, its plain retry and the caption burn must all time out inside
+    the 12 minutes a reel is started with, or the job's kill lands first (final review)."""
+    assert 3 * assembly.RENDER_TIMEOUT_SECONDS <= 12 * 60

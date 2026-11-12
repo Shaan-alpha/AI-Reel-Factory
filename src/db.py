@@ -375,6 +375,13 @@ def backfill_script_title(script_id: int, title: str) -> None:
         .is_("title", "null").execute()
 
 
+def backfill_post_published_at(post_id: int, published_at: str) -> None:
+    """Set a post's published_at from YouTube's record, only where it is empty: 75 of 96 rows
+    were written before insert_post stamped it, and the metrics pull dates each window from it."""
+    get_client().table("posts").update({"published_at": published_at}).eq("id", post_id) \
+        .is_("published_at", "null").execute()
+
+
 def insert_analytics(post_id: int, views: int, likes: int | None = None,
                      comments: int | None = None) -> None:
     """Record a metrics snapshot for a post (analytics table; pulled_at defaults to now())."""

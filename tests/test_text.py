@@ -31,3 +31,20 @@ def test_a_tag_stays_with_the_sentence_it_introduces():
 def test_ends_clause():
     assert ends_clause("today.") and ends_clause("matters:") and ends_clause("है।")
     assert not ends_clause("U.S.") and not ends_clause("Dr.") and not ends_clause("J.")
+
+
+# --- final review, 2026-11-12: a sentence that ends on an abbreviation still ends -------------
+
+def test_a_sentence_ending_on_an_abbreviation_ends_before_a_sentence_starter():
+    assert split_sentences("Prices rose in the U.S. Here's why it matters to you.") == [
+        "Prices rose in the U.S.", "Here's why it matters to you."]
+    assert split_sentences("Tariffs hit the U.K. [pause] The pact is dead.") == [
+        "Tariffs hit the U.K.", "[pause] The pact is dead."]
+    assert split_sentences("Plan B. The rest failed.") == ["Plan B.", "The rest failed."]
+
+
+def test_titles_and_amounts_never_end_a_sentence():
+    assert split_sentences("Rs. 500 crore vanished from the scheme. No. 5 is next.") == [
+        "Rs. 500 crore vanished from the scheme.", "No. 5 is next."]
+    assert split_sentences("The U.S. President spoke. Dr. Rao agreed.") == [
+        "The U.S. President spoke.", "Dr. Rao agreed."]

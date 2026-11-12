@@ -174,7 +174,7 @@ in look and sound:
   percentage viewed, India share, traffic, the retention curve), backfilling the old Shorts as the
   baseline; checked live on one Short;
 - the bot reads the leading number of `/makeshort`.
-775 pass, 5 skipped locally. **Waiting for the operator:** push and merge; the SQL in docs/03
+A fresh final review found 5 issues worth fixing (the wind-up cut could garble an opening; a sentence ending on "U.S." merged with the next; 75 old posts lacked a publish date for the metrics; the render timeout outlasted a reel's budget; the punch-up skipped the opening check), plus an India share of 0 for withheld countries; all fixed test-first. 786 pass, 5 skipped locally. **Waiting for the operator:** push and merge; the SQL in docs/03
 (the code runs without it, skipping those records); `vercel deploy --prod` for the bot.
 
 ### 2026-11-10 — A new format chosen; design, research and a reach audit in progress (no code changed)

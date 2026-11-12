@@ -46,8 +46,10 @@ _MAX_SLICES = 60        # filter-graph safety cap (covers a 60s reel down to ~1.
 _MUSIC_EXTS = (".mp3", ".m4a", ".wav", ".ogg", ".aac")
 # Every FFmpeg call has a timeout. Without one, a stalled render waited for the job's hard kill,
 # which skips every handler and leaves the idea 'approved' with no word to the operator. A render
-# measures about 76 s on CI (with captions); a probe, under a second.
-RENDER_TIMEOUT_SECONDS = 600
+# measures about 76 s on CI (with captions); a probe, under a second. Three timed-out renders (the
+# polished one, its plain retry, the caption burn) must still fit in the 12 minutes a reel is
+# started with, or the kill lands first (final review, 2026-11-12): hence 240, not 600.
+RENDER_TIMEOUT_SECONDS = 240
 PROBE_TIMEOUT_SECONDS = 60
 
 
