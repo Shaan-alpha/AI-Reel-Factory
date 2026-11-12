@@ -954,3 +954,16 @@ def test_generate_grounded_reports_its_citations_in_meta(monkeypatch):
     meta = {}
     assert llm.generate_grounded("x", meta=meta) == "body"
     assert meta == {"citations": 2}
+
+
+# --- stage 2: one named provider (the Hinglish meaning check, design 7.4) ---------------------
+
+def test_generate_with_uses_only_the_named_provider(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    monkeypatch.setattr(llm, "_gen_gemini", _raise("gemini down"))
+    monkeypatch.setattr(llm, "_gen_groq", lambda prompt, *, json, max_tokens: "ok")
+    assert llm.generate_with("groq", "p", json=True) == "ok"
+    with pytest.raises(Exception, match="gemini down"):
+        llm.generate_with("gemini", "p")
+    with pytest.raises(ValueError):
+        llm.generate_with("claude", "p")

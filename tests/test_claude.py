@@ -488,3 +488,64 @@ def test_claude_can_be_switched_off(monkeypatch):
     data = scriptwriter._generate_script_json(PROMPT)
     assert data["script_body"] == "gemini draft about Chitradurga"
     assert "claude_prompt" not in seen and data.get("claude_issue") is None
+
+
+# --- stage 2: structured output and the refusal fallback (design 7.2) ------------------------
+
+_SCHEMA = {"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"],
+           "additionalProperties": False}
+
+
+def _beta_path(claude):
+    """The beta messages path, recorded with a marker so a test can tell it was used."""
+    claude.client.beta = SimpleNamespace(
+        messages=SimpleNamespace(create=lambda **k: claude.client.create(_beta=True, **k)))
+
+
+def test_claude_schema_is_sent_as_structured_output(claude):
+    llm.generate_claude("p", purpose="hinglish", schema=_SCHEMA)
+    assert claude.client.calls[-1]["output_config"] == {
+        "effort": "low", "format": {"type": "json_schema", "schema": _SCHEMA}}
+
+
+def test_claude_fallbacks_use_the_beta_server_side_fallback(claude):
+    _beta_path(claude)
+    llm.generate_claude("p", purpose="hinglish", fallbacks=True)
+    call = claude.client.calls[-1]
+    assert call.get("_beta") is True
+    assert call["betas"] == ["server-side-fallback-2026-07-01"] and call["fallbacks"] == "default"
+
+
+def test_a_fallback_call_reserves_at_the_highest_price(claude, monkeypatch):
+    """Another model may answer a declined request, so its worst case is priced at the top."""
+    _beta_path(claude)
+    reserved = []
+    monkeypatch.setattr(db, "reserve_claude_spend",
+                        lambda **row: reserved.append(row) or claude.ledger.reserve(**row))
+    reply = _reply()
+    reply.model = "claude-opus-4-8"
+    _use(claude, reply)
+    prompt = "p" * 300
+    llm.generate_claude(prompt, purpose="hinglish", fallbacks=True)
+    price_in, price_out = llm._ANTHROPIC_PRICE_FALLBACK
+    worst = ((len(prompt) // 3 + 1) * price_in + llm._CLAUDE_MAX_TOKENS["low"] * price_out) / 1e6
+    assert reserved[0]["cost_usd"] == pytest.approx(worst)
+    settled = next(iter(claude.ledger.rows.values()))["cost_usd"]
+    assert settled == pytest.approx((3000 * price_in + 1200 * price_out) / 1e6)
+
+
+def test_the_requested_model_answering_settles_at_its_own_price(claude):
+    _beta_path(claude)
+    reply = _reply()
+    reply.model = "claude-opus-5-5"
+    _use(claude, reply)
+    llm.generate_claude("p", purpose="hinglish", fallbacks=True)
+    price_in, price_out = llm._ANTHROPIC_PRICES["claude-opus-5-5"]
+    settled = next(iter(claude.ledger.rows.values()))["cost_usd"]
+    assert settled == pytest.approx((3000 * price_in + 1200 * price_out) / 1e6)
+
+
+def test_a_refusal_raises(claude):
+    _use(claude, _reply(stop="refusal"))
+    with pytest.raises(RuntimeError, match="refusal"):
+        llm.generate_claude("p")
