@@ -5,7 +5,7 @@ Contract:
     how to use   : import the helpers below; pass/return plain dicts (typed rows).
     depends on   : supabase-py, src.config (SUPABASE_URL, SUPABASE_KEY = sb_secret_ key).
 
-Tables (see docs/03-setup-guide.md §4): ideas, scripts, posts, analytics, hook_performance,
+Tables (see docs/03-setup-guide.md §4): ideas, scripts, posts, analytics, hook_performance, post_metrics, reel_attempts,
 claude_spend (one row per Claude call, the ledger that holds the Anthropic budget).
 RLS is enabled on every table; this layer authenticates with the server-side **secret** key
 (`sb_secret_…`), which bypasses RLS. Never use the publishable key here. Never store video
@@ -219,8 +219,31 @@ def set_script_factcheck(script_id: int, verdict: dict) -> None:
     get_client().table("scripts").update({"factcheck": verdict}).eq("id", script_id).execute()
 
 
+# --- measuring records (design sections 10 and 13) -------------------------------------------
+# Written by code that ships before the operator runs the new SQL, so a missing column or table
+# costs the record, never a reel: it is logged once a run and skipped (rule 14).
+_MISSING_SCHEMA_CODES = frozenset({"PGRST204", "PGRST205", "42P01", "42703"})
+_WARNED: set[str] = set()
+
+
+def _missing_schema(e: Exception) -> bool:
+    """True for PostgREST's "no such column / table" answers."""
+    message = str(getattr(e, "message", "") or e)
+    return getattr(e, "code", None) in _MISSING_SCHEMA_CODES or "schema cache" in message
+
+
+def _warn_once(key: str, message: str) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        log.warning("db: %s", message)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def insert_post(script_id: int, platform: str, external_id: str, url: str,
-                status: str, voice: str | None = None) -> int:
+                status: str, voice: str | None = None, format: dict | None = None) -> int:  # noqa: A002
     """Record a published/queued output; return its id.
 
     `published_at` is stamped HERE. The column has no database default, and nothing else ever
@@ -228,13 +251,110 @@ def insert_post(script_id: int, platform: str, external_id: str, url: str,
     dashboard: the Telegram bot's /today filters `published_at=gte.<IST midnight>` (a NULL
     matches no range, so it always answered "0 Shorts today") and /latest orders by it.
     Timezone-aware UTC, because the bot compares against an IST-midnight boundary.
+
+    `format` (posts.format, jsonb) stamps how the reel was made, for judging the relaunch. If the
+    column does not exist yet, the post is recorded without it: PostgREST refused the first insert,
+    so the second cannot duplicate a row.
     """
     row = {"script_id": script_id, "platform": platform,
            "external_id": external_id, "url": url, "status": status,
-           "published_at": datetime.now(timezone.utc).isoformat()}
+           "published_at": _now()}
     if voice:  # posts.voice: which engine and model spoke (see voice.synthesize meta)
         row["voice"] = voice
-    return get_client().table("posts").insert(row).execute().data[0]["id"]
+    if format:
+        row["format"] = format
+    try:
+        return get_client().table("posts").insert(row).execute().data[0]["id"]
+    except Exception as e:  # noqa: BLE001 — only a missing column is retried
+        if not (format and _missing_schema(e)):
+            raise
+        _warn_once("posts.format", "posts.format is missing (run the SQL in docs/03); posts are "
+                                   "recorded without their format")
+        row.pop("format")
+        return get_client().table("posts").insert(row).execute().data[0]["id"]
+
+
+def set_post_readback(post_id: int, readback: dict) -> None:
+    """Store what YouTube recorded for an upload (posts.youtube_readback). Never raises."""
+    try:
+        get_client().table("posts").update({"youtube_readback": readback}) \
+            .eq("id", post_id).execute()
+    except Exception as e:  # noqa: BLE001 — bookkeeping (rule 14)
+        if _missing_schema(e):
+            _warn_once("posts.youtube_readback", "posts.youtube_readback is missing (run the SQL "
+                                                 "in docs/03); the read-back is not stored")
+        else:
+            log.warning("db: could not store the read-back for post %s (%s)", post_id, e)
+
+
+def start_attempt(idea_id: int) -> int | None:
+    """Open a reel_attempts row for one produce_one call; its id, or None. Never raises."""
+    try:
+        return get_client().table("reel_attempts").insert(
+            {"idea_id": idea_id, "started_at": _now()}).execute().data[0]["id"]
+    except Exception as e:  # noqa: BLE001 — bookkeeping (rule 14)
+        if _missing_schema(e):
+            _warn_once("reel_attempts", "reel_attempts is missing (run the SQL in docs/03); "
+                                        "attempts are not recorded")
+        else:
+            log.warning("db: could not open an attempt row for idea %s (%s)", idea_id, e)
+        return None
+
+
+def finish_attempt(attempt_id: int | None, *, outcome: str, stage: str,
+                   reason: str | None = None, script_id: int | None = None,
+                   spend_usd: float | None = None, downgrades: list[str] | None = None) -> None:
+    """Close an attempt row: published | blocked | failed | out-of-time, the stage it ended at,
+    why, and any downgrade. A None id (no table, or no row) does nothing. Never raises."""
+    if attempt_id is None:
+        return
+    row = {"ended_at": _now(), "outcome": outcome, "stage": stage,
+           "reason": str(reason)[:500] if reason else None, "script_id": script_id,
+           "spend_usd": spend_usd, "downgrades": list(downgrades or [])}
+    try:
+        get_client().table("reel_attempts").update(row).eq("id", attempt_id).execute()
+    except Exception as e:  # noqa: BLE001 — bookkeeping (rule 14)
+        log.warning("db: could not close attempt %s (%s)", attempt_id, e)
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+    except ValueError:
+        return None
+
+
+def posts_needing_metrics(min_age_days: int = 9, window_days: int = 7) -> list[dict]:
+    """Published posts old enough for their `window_days` Analytics window (plus reporting lag)
+    that have no post_metrics row for it yet. [] when the table is missing. Never raises."""
+    try:
+        posts = get_published_posts("youtube")
+        done = {r["post_id"] for r in get_client().table("post_metrics").select("post_id")
+                .eq("window_days", window_days).execute().data}
+    except Exception as e:  # noqa: BLE001 — measuring must never stop the analytics job
+        if _missing_schema(e):
+            _warn_once("post_metrics", "post_metrics is missing (run the SQL in docs/03); "
+                                       "retention is not pulled")
+        else:
+            log.warning("db: could not list posts needing metrics (%s)", e)
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=min_age_days)
+    return [p for p in posts if p["id"] not in done
+            and (_parse_time(p.get("published_at")) or cutoff) < cutoff]
+
+
+def upsert_post_metrics(post_id: int, window_days: int, metrics: dict) -> None:
+    """Store one post's Analytics window, keyed by (post_id, window_days). Never raises."""
+    row = {"post_id": post_id, "window_days": window_days, "pulled_at": _now(), **metrics}
+    try:
+        get_client().table("post_metrics").upsert(row, on_conflict="post_id,window_days") \
+            .execute()
+    except Exception as e:  # noqa: BLE001 — bookkeeping (rule 14)
+        if _missing_schema(e):
+            _warn_once("post_metrics", "post_metrics is missing (run the SQL in docs/03); "
+                                       "retention is not stored")
+        else:
+            log.warning("db: could not store metrics for post %s (%s)", post_id, e)
 
 
 def get_published_posts(platform: str = "youtube") -> list[dict]:
