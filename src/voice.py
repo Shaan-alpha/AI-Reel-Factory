@@ -40,6 +40,7 @@ import hashlib
 import logging
 import os
 import re
+import subprocess
 
 from functools import lru_cache
 
@@ -114,6 +115,35 @@ _DEFAULT_STYLE_PROMPT = (
     "a brisk, steady pace with no long pauses between sentences. Give the numbers crisp emphasis, "
     "and let the final line land with quiet weight."
 )
+
+# --- Hinglish (design 7.5) ---------------------------------------------------------------------
+# Text containing Devanagari goes only to voices that read Hindi. Measured on test 4's text:
+# edge-tts en-IN-PrabhatNeural dropped every Hindi word and returned 18.1 s of English fragments
+# with no error; Kokoro spoke its own language markers aloud at every switch.
+_DEVANAGARI_RE = re.compile(r"[ऀ-ॿ]")
+# Test 4's prompt, word for word: what the operator chose by ear (2026-11-10, 2026-11-12).
+_HINGLISH_STYLE_PROMPT = (
+    "You are a confident science explainer recording a short video for viewers in India. Speak "
+    "natural Hinglish the way young urban Indian creators do: Hindi sentences, with the English "
+    "words said in an Indian English accent. Clear, informative and engaging, at a brisk, steady "
+    "pace with no long pauses between sentences. Give the numbers crisp emphasis, and let the "
+    "final line land with quiet weight."
+)
+# Derived from it for deaths and serious harm: calm and unhurried, the same accent direction.
+_HINGLISH_SOMBER_STYLE_PROMPT = (
+    "You are a calm, measured explainer recording a short video for viewers in India about a "
+    "serious story. Speak natural Hinglish the way young urban Indian creators do: Hindi "
+    "sentences, with the English words said in an Indian English accent. Calm and unhurried, "
+    "with quiet seriousness and warmth; no irony anywhere. Let the facts carry the weight, and "
+    "read the final line plainly."
+)
+# Chirp 3 HD's Hindi Charon: in the chain since its live check on test 4's narration (2026-11-12:
+# 23.56 s against an expected 26.82 s, ratio 0.88; the English words were spoken).
+_HINDI_CHIRP_VOICE = "hi-IN-Chirp3-HD-Charon"
+# Every Hindi render must last 0.75-1.30 times the English script's length at 2.2 words a
+# second. The broken renders above measured 0.67 and 1.56; Gemini's 1.01. A words-a-second
+# band separated good from broken by 0.03-0.11 words a second, too thin to trust.
+_LENGTH_BAND = (0.75, 1.30)
 
 
 def _audio_filename(script_body: str, ext: str = ".mp3") -> str:
@@ -245,20 +275,24 @@ def _speaking_rate() -> float | None:
         return None
 
 
-def _synthesize_google(text: str, out_dir: str) -> tuple[str, float]:
+def _synthesize_google(text: str, out_dir: str, voice_name: str | None = None,
+                       language: str | None = None) -> tuple[str, float]:
     """Synthesize via Google Cloud TTS Chirp 3 HD (REST + API key). Returns (wav_path, seconds).
 
     Requests LINEAR16 so the response bytes are a real WAV we measure with the stdlib `wave`
     module (exact, no ffprobe). Raises — so the chain falls back — if the key/voice is unset
-    or the API errors."""
+    or the API errors. `voice_name` and `language` override GOOGLE_TTS_VOICE (default the
+    English Charon, the channel's one narrator) and GOOGLE_TTS_LANGUAGE: the Hindi route passes
+    the Hindi Charon voice."""
     import wave
 
     api_key = (config.get("GOOGLE_TTS_API_KEY", "") or "").strip()
-    voice_name = (config.get("GOOGLE_TTS_VOICE", "") or "").strip()
+    voice_name = (voice_name or config.get("GOOGLE_TTS_VOICE", "en-IN-Chirp3-HD-Charon")
+                  or "").strip()
     if not api_key or not voice_name:
         raise RuntimeError("google tts: GOOGLE_TTS_API_KEY / GOOGLE_TTS_VOICE not set")
 
-    lang = config.get("GOOGLE_TTS_LANGUAGE", "en-IN")
+    lang = language or config.get("GOOGLE_TTS_LANGUAGE", "en-IN")
 
     # Chirp 3 HD reads pause tags — but only via the dedicated `markup` input field, and only on
     # Chirp voices (the API rejects `markup` for anything else). Style tags are Gemini's and are
@@ -315,6 +349,9 @@ _GEMINI_TTS_VERTEX_MODELS = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-t
 # of the Developer API: the channel voice comes from Vertex, billed at cents a reel. A run with
 # only an API key (a fresh local clone) still uses the Developer API until the shutdown.
 _DEV_TTS_RETIRING = ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
+# From this day they are gone everywhere, so they are never asked, Vertex or not (design 14: the
+# dead attempts stop costing a round trip).
+_DEV_TTS_SHUTDOWN = (2026, 11, 17)
 # The GA model on Vertex: the last same-voice attempt before the chain leaves Gemini.
 _GEMINI_TTS_VERTEX_STABLE = "gemini-2.5-flash-tts"
 # Values of VOICE_STYLE_PROMPT that mean "no direction at all". An empty value cannot say that:
@@ -368,7 +405,7 @@ def _vertex_tts_enabled() -> bool:
             and config.get_bool("GEMINI_USE_VERTEX", False) and bool(config.get("GCP_PROJECT")))
 
 
-def _gemini_tts_attempts(model: str, have_key: bool) -> list[tuple[str, str]]:
+def _gemini_tts_attempts(model: str, have_key: bool, today=None) -> list[tuple[str, str]]:
     """(backend, model) pairs to try, in order. Every one speaks with the same voice.
 
     With Vertex set up: the model on Vertex, then Vertex's GA model; the two models the Developer
@@ -376,10 +413,13 @@ def _gemini_tts_attempts(model: str, have_key: bool) -> list[tuple[str, str]]:
     serve still goes to the Developer API first. Without Vertex: the Developer API's model, then
     its stable preview. Vertex has capacity of its own: the 2026-09-15 reels lost the channel voice
     to Chirp when the Developer API 503'd on BOTH its models at once."""
+    from datetime import date, datetime, timezone
+
     vertex = _vertex_tts_enabled()
+    gone = (today or datetime.now(timezone.utc).date()) >= date(*_DEV_TTS_SHUTDOWN)
 
     def dev(m: str) -> bool:
-        return have_key and not (vertex and m in _DEV_TTS_RETIRING)
+        return have_key and not ((vertex or gone) and m in _DEV_TTS_RETIRING)
 
     pairs = []
     if dev(model):
@@ -407,8 +447,16 @@ def _tts_timeout_ms() -> int:
         return 120_000
 
 
+def _gemini_voice_name() -> str:
+    """The Gemini voice: Charon, the informative male narrator the operator chose for the new
+    format (design 7.5). The production workflows still pass Zubenelgenubi until the relaunch
+    sets GEMINI_TTS_VOICE (design 15), so the live English voice does not change at merge."""
+    return config.get("GEMINI_TTS_VOICE", "Charon")
+
+
 def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
-                       tone: str | None = None) -> tuple[str, float]:
+                       tone: str | None = None, style: str | None = None,
+                       hindi: bool = False) -> tuple[str, float]:
     """Synthesize via Gemini TTS. Returns (wav_path, seconds); fills meta["model"] if given.
 
     Uses the already-pinned google-genai SDK and the existing GEMINI_API_KEY, so this adds no
@@ -440,8 +488,9 @@ def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
     if not attempts:
         raise RuntimeError("gemini tts: GEMINI_TTS_API_KEY / GEMINI_API_KEY not set")
 
-    spoken = _style_text(text, tone)  # keep style tags, degrade pause tags to an ellipsis
-    style = _style_prompt(tone)
+    # Keep style tags, degrade pause tags to an ellipsis; Hinglish text carries no tags at all.
+    spoken = _clean_tts_text(text) if hindi else _style_text(text, tone)
+    style = _style_prompt(tone) if style is None else style
 
     # The API caps text and prompt at 4000 bytes each, 8000 combined. Check before spending a
     # request: the free tier is only 10/day, so an opaque 400 would cost real quota (rule 13).
@@ -451,9 +500,9 @@ def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
         raise RuntimeError(
             f"gemini tts: input too long (script {t_bytes}B, style {p_bytes}B; limits are "
             f"{_GEMINI_MAX_FIELD_BYTES}B each / {_GEMINI_MAX_TOTAL_BYTES}B combined)")
-    # Zubenelgenubi ("Casual") was chosen by ear over Kore/Schedar/Algenib/Charon — it is the
-    # channel's voice identity now, not an incidental default. Re-pick via tools/tune_voice.py.
-    voice_name = config.get("GEMINI_TTS_VOICE", "Zubenelgenubi")
+    # Zubenelgenubi ("Casual") was the channel voice until the new format; Charon is the
+    # format's narrator (design 7.5). Re-pick via tools/tune_voice.py.
+    voice_name = _gemini_voice_name()
     cfg = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
         # No tools here; the SDK only warns about automatic function calling on every call.
@@ -728,8 +777,77 @@ def _has_pause_tag(text: str) -> bool:
     return bool(re.search(r"\[(?:pause short|pause long|pause)\]", text))
 
 
+def _wav_seconds(path: str) -> float:
+    import wave
+
+    with wave.open(path, "rb") as w:
+        return w.getnframes() / float(w.getframerate())
+
+
+def trim_silence(path: str) -> float:
+    """Cut the leading and trailing silence of a narration in place, keeping 0.05 s at each end;
+    return the new length (design 7.5: test 4 went from 27.04 s to 26.26 s, its speech 10 ms in).
+    The trimmed length is what sizes the shots. On any error the file is kept as it was."""
+    gate = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05"
+    tmp = f"{path}.trim.wav"
+    try:
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", path,
+                        "-af", f"{gate},areverse,{gate},areverse", "-c:a", "pcm_s16le", tmp],
+                       check=True, capture_output=True, timeout=60)
+        os.replace(tmp, path)
+    except Exception as e:  # noqa: BLE001 — an untrimmed narration still works (rule 14)
+        log.warning("voice: trimming the silence failed (%s); keeping it as it is", e)
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return _wav_seconds(path)
+
+
+def _hindi_style_prompt(tone: str | None) -> str:
+    raw = (config.get("VOICE_STYLE_PROMPT") or "").strip().lower()
+    if raw in _STYLE_OFF:
+        return ""
+    return _HINGLISH_SOMBER_STYLE_PROMPT if tone == "somber" else _HINGLISH_STYLE_PROMPT
+
+
+def _synthesize_hindi(text: str, out_dir: str, meta: dict | None, tone: str | None,
+                      expected_seconds: float | None) -> tuple[str, float]:
+    """The Hindi route (design 7.5): Gemini with test 4's style prompt (same-voice attempts
+    inside), then Chirp's Hindi Charon. Never edge-tts or Kokoro. Each render is trimmed and must
+    last 0.75-1.30 times `expected_seconds`, else the next voice; raises when none succeeds, and
+    the caller narrates in English."""
+    clean = _clean_tts_text(text)
+    hindi_voice = (config.get("GOOGLE_TTS_VOICE_HI") or _HINDI_CHIRP_VOICE).strip()
+    errors: list[str] = []
+    for name in ("gemini", "google"):
+        info: dict = {}
+        try:
+            if name == "gemini":
+                path, _raw = _synthesize_gemini(clean, out_dir, info, tone=tone,
+                                                style=_hindi_style_prompt(tone), hindi=True)
+            else:
+                path, _raw = _synthesize_google(clean, out_dir, voice_name=hindi_voice,
+                                                language="hi-IN")
+            duration = trim_silence(path)
+            if expected_seconds:
+                ratio = duration / expected_seconds
+                if not _LENGTH_BAND[0] <= ratio <= _LENGTH_BAND[1]:
+                    raise RuntimeError(f"{duration:.1f} s is {ratio:.2f}x the expected "
+                                       f"{expected_seconds:.1f} s")
+        except Exception as e:  # noqa: BLE001 — the next Hindi voice
+            log.warning("voice: Hindi %s failed (%s)", name, str(e)[:200])
+            errors.append(f"{name}: {str(e)[:160]}")
+            continue
+        label = f"gemini:{info['model']}" if info.get("model") else f"google:{hindi_voice}"
+        if meta is not None:
+            meta.update(engine=name, voice=label, route="hi")
+        _log_done(path, duration, label)
+        return path, duration
+    raise RuntimeError("voice: no Hindi-capable voice succeeded — " + " | ".join(errors))
+
+
 def synthesize(script_body: str, out_dir: str, meta: dict | None = None,
-               tone: str | None = None) -> tuple[str, float]:
+               tone: str | None = None,
+               expected_seconds: float | None = None) -> tuple[str, float]:
     """Return (audio_path, duration_seconds) via an ordered fallback chain (rule 11):
     google (Chirp 3 HD) → edge-tts (en-IN) → kokoro. VOICE_ENGINE picks the primary engine;
     the remaining engines follow as fallbacks. Engines are resolved by name at call time, so a
@@ -749,6 +867,9 @@ def synthesize(script_body: str, out_dir: str, meta: dict | None = None,
     if not _clean_tts_text(raw):  # tags alone are stage direction, not narration
         raise ValueError("voice.synthesize: empty script_body.")
     os.makedirs(out_dir, exist_ok=True)
+    # Routed by script before synthesis (design 7.5): Hindi text only to voices that read Hindi.
+    if _DEVANAGARI_RE.search(raw):
+        return _synthesize_hindi(raw, out_dir, meta, tone, expected_seconds)
 
     primary = str(config.get("VOICE_ENGINE", "gemini")).lower()
     primary = _ENGINE_ALIASES.get(primary, primary)
