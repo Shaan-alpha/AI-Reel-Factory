@@ -910,6 +910,33 @@ def _produce_ideas(target: int) -> list[dict]:
     return clean[:_MAX_IDEAS]
 
 
+def _enforce_mix(ranked: list[dict], n: int) -> list[dict]:
+    """Up to `n` ideas in rank order under the topic mix (design 8.4; review finding 20): at
+    most one `india-politics` idea, at most two of any one category, at most one somber story.
+    A prompt only asked for a mix; this makes it true. When the caps leave the digest short, the
+    skipped ideas fill it in rank order: the caps shape a digest, they never empty one."""
+    from src import scriptwriter  # local: tone_for is the one somber detector (rule 7)
+
+    picked, skipped, per_category, somber = [], [], {}, 0
+    for idea in ranked:
+        if len(picked) >= n:
+            break
+        category = idea.get("niche") or "world"
+        is_somber = scriptwriter.tone_for(idea) == "somber"
+        cap = 1 if category == "india-politics" else 2
+        if per_category.get(category, 0) >= cap or (is_somber and somber >= 1):
+            skipped.append(idea)
+            continue
+        picked.append(idea)
+        per_category[category] = per_category.get(category, 0) + 1
+        somber += int(is_somber)
+    for idea in skipped:
+        if len(picked) >= n:
+            break
+        picked.append(idea)
+    return picked
+
+
 def run_fallback_ideation() -> int:
     """Generate 15-20 ideas and insert them as 'pending'. Return the count inserted.
 
@@ -939,7 +966,7 @@ def generate_ideas(n: int = 3) -> int:
     request always produces fresh options (the operator picks via the digest buttons).
     """
     n = max(1, n)
-    clean = sorted(_produce_ideas(max(n * 2, 4)), key=_rank_key)[:n]
+    clean = _enforce_mix(sorted(_produce_ideas(max(n * 2, 4)), key=_rank_key), n)
     if not clean:
         raise RuntimeError("ideation: could not generate any valid idea.")
     inserted = db.insert_ideas(_to_rows(clean))
@@ -1012,15 +1039,13 @@ def seed_ideas(n: int = 3, already_pending: int = 0) -> int:
 
     def _pick(pool: list[dict]) -> list[dict]:
         pool = [i for i in pool if not _repeats_recent_story(i, recent)]
-        fresh: list[dict] = []
+        candidates: list[dict] = []
         for idea in sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key):
             # Within the batch too: the grounded pass and the top-up pitched the same Trump/Iran
             # and LPU stories twice each, sharing a source link (live, 2026-09-27).
-            if not _repeats_recent_story(idea, fresh):
-                fresh.append(idea)
-            if len(fresh) >= n:
-                break
-        return fresh
+            if not _repeats_recent_story(idea, candidates):
+                candidates.append(idea)
+        return _enforce_mix(candidates, n)
 
     routine = load_routine_ideas()
     fresh = _pick(routine) if routine else []

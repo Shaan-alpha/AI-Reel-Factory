@@ -1091,3 +1091,40 @@ def test_each_idea_stores_its_category_and_rank():
                         "demand": ["India on Wikipedia yesterday: \"T\""]}])[0]
     assert row["niche"] == "tech" and row["rank_score"] == 0.8
     assert row["demand"] == ["India on Wikipedia yesterday: \"T\""]
+
+
+# --- the topic mix, enforced in code at the final pick (design 8.4, review finding 20) --------
+
+def _ranked(*specs):
+    return [{**_idea(title), "niche": niche, "share_score": 1 - i / 100}
+            for i, (title, niche) in enumerate(specs)]
+
+
+def test_the_mix_caps_politics_categories_and_somber_stories():
+    ranked = _ranked(("Party row in Delhi", "india-politics"), ("Court notice to MPs", "india-politics"),
+                     ("New phone chip", "tech"), ("Cheaper data plans", "tech"),
+                     ("AI tutor apps", "tech"), ("Gulf shipping lanes", "world"))
+    assert [i["niche"] for i in fb._enforce_mix(ranked, 4)] == ["india-politics", "tech", "tech", "world"]
+    ranked = _ranked(("Bus crash kills 12 in Kerala", "india"), ("Floods kill 40 in Assam", "world"),
+                     ("Rupee hits a new low", "money"), ("Exam dates move", "india"))
+    titles = [i["title"] for i in fb._enforce_mix(ranked, 3)]
+    assert titles == ["Bus crash kills 12 in Kerala", "Rupee hits a new low", "Exam dates move"]
+
+
+def test_the_mix_never_empties_a_digest():
+    ranked = _ranked(*[(f"Politics story {c}", "india-politics") for c in "abcdef"])
+    out = fb._enforce_mix(ranked, 3)
+    assert [i["title"] for i in out] == ["Politics story a", "Politics story b", "Politics story c"]
+
+
+def test_seed_ideas_applies_the_mix(monkeypatch):
+    ideas = _ranked(("Party row in Delhi", "india-politics"), ("Court notice to MPs", "india-politics"),
+                    ("New phone chip", "tech"))
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda target: ideas)
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb, "_recent_ideas", lambda: [])
+    rows = []
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda r: rows.extend(r) or r)
+    fb.seed_ideas(2)
+    assert [r["niche"] for r in rows] == ["india-politics", "tech"]
