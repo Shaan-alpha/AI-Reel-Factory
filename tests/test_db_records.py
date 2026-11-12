@@ -170,3 +170,12 @@ def test_insert_script_stores_the_structure_and_survives_a_missing_column(monkey
     inserts = [c for c in fake.calls if c[0] == "insert"]
     assert len(inserts) == 2 and "structure" not in inserts[1][2][0]
     assert inserts[1][2][0]["title"] == "T" and script_id == 11
+
+
+def test_set_script_spoken_survives_a_missing_column(monkeypatch):
+    fake = _use(monkeypatch, _Fake())
+    db.set_script_spoken(5, {"language": "hi", "lines": []})
+    assert fake.calls[0][0] == "update" and fake.calls[0][2][0] == {
+        "spoken": {"language": "hi", "lines": []}}
+    _use(monkeypatch, _Fake(errors=[_NO_COLUMN]))
+    db.set_script_spoken(5, {"language": "hi", "lines": []})  # logged once, never raised

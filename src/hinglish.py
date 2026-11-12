@@ -57,8 +57,10 @@ _UNIT_WORDS = _SCALE_WORDS + ("rupees", "dollars", "people", "jobs", "students",
                               "kilometres", "kilometers", "kg", "tonnes", "tons", "units", "mw",
                               "gw", "crores", "lakhs")
 
+# The space after a currency symbol belongs to the symbol: an optional space of its own let a
+# match start at the space after a Hindi vowel sign and swallow it ("यानीtwenty-five").
 _NUMBER_RE = re.compile(
-    r"(?<![\w.,])(?P<cur>[₹$€£])?\s?(?P<num>\d{1,3}(?:,\d{2,3})+|\d+)(?P<dec>\.\d+)?"
+    r"(?<![\w.,])(?:(?P<cur>[₹$€£])\s?)?(?P<num>\d{1,3}(?:,\d{2,3})+|\d+)(?P<dec>\.\d+)?"
     r"(?:(?P<ord>st|nd|rd|th)\b|(?P<pct>%))?"
     r"(?P<scale>\s+(?:" + "|".join(_SCALE_WORDS) + r")\b)?")
 _INDIAN_GROUPS = re.compile(r"\d{1,2}(?:,\d{2})+,\d{3}")
@@ -423,3 +425,45 @@ def meaning_check(en_lines: list[str], lines: list[dict],
             failures.append(f"line {i}: the meaning differs from the English"
                             + (f" ({why})" if why else ""))
     return failures, checker
+
+
+# --- script to spoken lines ------------------------------------------------------------------
+
+def _spoken(en_lines: list[str], lines: list[dict], renderer: str, checker: str) -> dict:
+    by_number = {int(line["i"]): line for line in lines}
+    out = []
+    for i, en in enumerate(en_lines, 1):
+        hi = by_number[i]["hi"]
+        out.append({"en": en, "hi": hi, "said": say_numbers(hi),
+                    "parts": by_number[i].get("parts") or []})
+    return {"language": "hi", "lines": out, "said": " ".join(line["said"] for line in out),
+            "renderer": renderer, "checker": checker}
+
+
+def to_hinglish(body: str, title: str, tone: str) -> tuple[dict | None, str]:
+    """The fact-checked script as checked spoken Hinglish lines, or (None, why not).
+
+    One rendering, the code checks, then the meaning check; any failure sends the whole
+    rendering back once with the failures listed, and a second failure ends Hinglish for the
+    reel (design 7.3-7.4), which is then narrated in English. The record keeps each line's
+    English, its Hinglish and what the voice says (digits as words), for the script row."""
+    en = english_lines(body)
+    if not en:
+        return None, "the script has no sentences"
+    failures: list[str] | None = None
+    for attempt in (1, 2):
+        try:
+            lines, renderer = render(en, title, tone, failures)
+        except RuntimeError as e:
+            return None, str(e)
+        failures = check(en, lines)
+        checker = None
+        if not failures:
+            failures, checker = meaning_check(en, lines, renderer)
+        if not failures:
+            log.info("hinglish: %d lines rendered by %s, meaning checked by %s (attempt %d)",
+                     len(en), renderer, checker, attempt)
+            return _spoken(en, lines, renderer, checker), ""
+        log.warning("hinglish: attempt %d failed its checks: %s", attempt,
+                    " | ".join(failures[:5]))
+    return None, "two renderings failed their checks: " + "; ".join(failures[:3])

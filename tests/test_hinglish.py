@@ -121,6 +121,9 @@ def test_the_spoken_length_must_fit(monkeypatch):
     ("Voyager 1 से", "Voyager one से"),
     ("COVID-19 के बाद", "COVID-nineteen के बाद"),
     ("3.14", "three point one four"),
+    # After a Hindi vowel sign the space before a number used to be swallowed.
+    ("यानी 25.9 billion", "यानी twenty-five point nine billion"),
+    ("हर साल ₹ 500 का", "हर साल five hundred rupees का"),
 ])
 def test_say_numbers(text, said):
     assert hinglish.say_numbers(text) == said
@@ -245,3 +248,64 @@ def test_every_verdict_is_logged(monkeypatch, caplog):
         hinglish.meaning_check(EN, _lines(), "claude")
     for i in range(1, 7):
         assert f"line {i}" in caplog.text
+
+
+# --- script to spoken lines (design 7.3-7.4) -------------------------------------------------
+
+BODY = " ".join(EN[:4] + ["[serious] And here's why it matters."] + EN[5:])
+
+
+def _renders(monkeypatch, *results):
+    """render() answers from `results` in turn; each is a list of lines or an exception."""
+    calls = []
+
+    def _render(en, title, tone, failures=None):
+        calls.append(failures)
+        step = results[min(len(calls), len(results)) - 1]
+        if isinstance(step, Exception):
+            raise step
+        return step, "claude"
+
+    monkeypatch.setattr(hinglish, "render", _render)
+    return calls
+
+
+def test_to_hinglish_passes_and_speaks_numbers(monkeypatch):
+    _renders(monkeypatch, _lines())
+    monkeypatch.setattr(hinglish, "meaning_check", lambda en, lines, r: ([], "gemini"))
+    spoken, reason = hinglish.to_hinglish(BODY, "Voyager", "plain")
+    assert reason == "" and spoken["language"] == "hi"
+    assert spoken["renderer"] == "claude" and spoken["checker"] == "gemini"
+    assert [line["en"] for line in spoken["lines"]] == hinglish.english_lines(BODY)
+    assert "eighteen November" in spoken["said"]
+    assert "twenty-five point nine billion" in spoken["said"]
+    assert "nineteen seventy-seven" in spoken["said"]
+    assert spoken["lines"][1]["said"] == "यानी twenty-five point nine billion kilometres।"
+
+
+def test_one_failed_check_is_retried_with_its_failures(monkeypatch):
+    calls = _renders(monkeypatch, _lines()[:5], _lines())
+    monkeypatch.setattr(hinglish, "meaning_check", lambda en, lines, r: ([], "gemini"))
+    spoken, _ = hinglish.to_hinglish(BODY, "t", "plain")
+    assert spoken and calls[0] is None and calls[1] and "missing" in calls[1][0]
+
+
+def test_two_failed_checks_end_hinglish(monkeypatch):
+    _renders(monkeypatch, _lines()[:5], _lines()[:5])
+    spoken, reason = hinglish.to_hinglish(BODY, "t", "plain")
+    assert spoken is None and "missing" in reason
+
+
+def test_a_failed_meaning_check_is_retried_once(monkeypatch):
+    calls = _renders(monkeypatch, _lines(), _lines())
+    verdicts = iter([(["line 2: the meaning differs from the English"], "gemini"),
+                     ([], "gemini")])
+    monkeypatch.setattr(hinglish, "meaning_check", lambda en, lines, r: next(verdicts))
+    spoken, _ = hinglish.to_hinglish(BODY, "t", "plain")
+    assert spoken and "line 2" in calls[1][0]
+
+
+def test_no_renderer_ends_hinglish(monkeypatch):
+    _renders(monkeypatch, RuntimeError("hinglish: no renderer answered"))
+    spoken, reason = hinglish.to_hinglish(BODY, "t", "plain")
+    assert spoken is None and "no renderer" in reason
