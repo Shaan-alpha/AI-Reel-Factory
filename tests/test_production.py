@@ -67,6 +67,7 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     # The repair pass is a grounded rewrite: left real, a blocked reel made live model calls.
     monkeypatch.setattr(production.scriptwriter, "repair_script", lambda *a, **k: None)
     monkeypatch.setattr(production.db, "update_script_body", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "update_script_title", lambda *a, **k: None)
     return produced
 
 
@@ -722,7 +723,8 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _OK)
     saved, voiced = [], []
-    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "FIXED BODY")
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None:
+                        {"script_body": "FIXED BODY", "title": title})
     monkeypatch.setattr(production.db, "update_script_body", lambda sid, b: saved.append(b))
     monkeypatch.setattr(production.voice, "synthesize",
                         lambda body, d, meta=None, tone=None: voiced.append(body) or _fake_synth(body, d, meta))
@@ -733,7 +735,8 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
 def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _BLOCK)
-    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "STILL WRONG")
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None:
+                        {"script_body": "STILL WRONG", "title": title})
     monkeypatch.setattr(production.db, "update_script_body",
                         lambda *a: pytest.fail("a failed repair must not be saved"))
     with pytest.raises(production.FactCheckFailed):
@@ -969,3 +972,26 @@ def test_untapped_ideas_expire(monkeypatch):
                         lambda i, s, from_status=None: set_to.append((i, s, from_status)) or True)
     assert production._pass_untapped([5]) == 1
     assert set_to == [(5, "expired", "pending")]
+
+
+def test_the_recheck_sees_the_repaired_title(monkeypatch, tmp_path):
+    """The re-check used the original title, so a title the repair fixed was never verified."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: dict(SCRIPT))
+    verdicts, titles = iter([_BLOCK, _OK]), []
+
+    def _verify(body, sources=None, title="", on_screen=None):
+        titles.append(title)
+        return next(verdicts)
+
+    monkeypatch.setattr(production.factcheck, "verify", _verify)
+    monkeypatch.setattr(production.scriptwriter, "repair_script",
+                        lambda body, f, topic=None, title=None:
+                        {"script_body": "FIXED BODY", "title": "Fixed title"})
+    stored, published = [], []
+    monkeypatch.setattr(production.db, "update_script_title", lambda sid, t: stored.append(t))
+    monkeypatch.setattr(production.publish_youtube, "publish", lambda v, m, sid: published.append(
+        m["title"]) or ("VID1", "https://www.youtube.com/shorts/VID1"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert titles[1] == "Fixed title" and stored == ["Fixed title"]
+    assert published == ["Fixed title"]

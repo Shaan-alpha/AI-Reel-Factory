@@ -902,36 +902,44 @@ _REPAIR_PROMPT = """A fact-checker blocked this YouTube Shorts narration about: 
 Its findings (each quotes a claim it judged false, sometimes with what is true instead):
 {findings}
 
+TITLE: {title}
 NARRATION:
 {body}
 
 Use web search to establish what is actually true about each flagged claim, then rewrite ONLY
 those sentences so they are accurate. Keep every other sentence word for word, including its
-delivery tags. The narration must still OPEN with a complete, accurate hook sentence that says
-what happened: if the flagged claim was the opening, replace it with a corrected opening, never
-just delete it. Never start with a delivery tag or with "Because", "And", "But" or "So". Keep the
-"why it matters" turn. At most {max_words} spoken words. Plain text, no markdown.
+delivery tags. The narration must still OPEN with a complete, accurate sentence that says what
+happened: if the flagged claim was the opening, replace it with a corrected opening, never just
+delete it. Never start with a delivery tag or with "Because", "And", "But" or "So". Keep the
+"why it matters" sentence. At most {max_words} spoken words. Plain text, no markdown. Correct the
+title too when a finding is about it (at most {title_words} words and {title_chars} characters);
+otherwise return it unchanged. Use only facts the narration, the title or the findings carry.
 
 Return ONLY a JSON object, no fences. Put any quoted word in SINGLE quotes:
-{{"script_body": "the corrected narration"}}
+{{"script_body": "the corrected narration", "title": "the title"}}
 """
 
 
-def repair_script(body: str, findings: list[str], topic: str | None = None) -> str | None:
-    """Rewrite only what the fact-check blocked; None if the rewrite is unusable.
+def repair_script(body: str, findings: list[str], topic: str | None = None,
+                  title: str | None = None) -> dict | None:
+    """Rewrite only what the fact-check blocked: {"script_body", "title"}, or None if the rewrite
+    is unusable.
 
     A block used to throw the whole reel away, although the checker's findings usually say
     exactly what is true instead (idea 308: "the bill has already been signed into law"). The
-    caller re-verifies the result with the gate, so this can only ever make a reel eligible, never
-    wave a false claim through."""
+    caller re-verifies the result, title included, with the gate, so this can only ever make a
+    reel eligible, never wave a false claim through. Like every model-written rewrite it adds no
+    number or name that the body, the title, the findings and the topic lack (design 9.6)."""
     if not findings:
         return None
     max_words = _max_words()
+    title = (title or "").strip()
     # Today's date, like the writer and the gate: a grounded rewrite without it dated September
     # news to June (STATUS 2026-09-28).
     prompt = llm.today_line() + _REPAIR_PROMPT.format(topic=topic or "the news story",
                                    findings="\n".join(f"- {f}" for f in findings[:6]),
-                                   body=body, max_words=max_words)
+                                   title=title or "(none)", body=body, max_words=max_words,
+                                   title_words=_TITLE_MAX_WORDS, title_chars=_TITLE_MAX)
     try:
         # Grounded: a finding often names the false claim without saying what is true, so the
         # rewrite has to look it up. Ungrounded JSON mode is the fallback.
@@ -954,7 +962,21 @@ def repair_script(body: str, findings: list[str], topic: str | None = None) -> s
         return None
     if _WHY_IT_MATTERS_RE.search(body) and not _WHY_IT_MATTERS_RE.search(new):
         return None
-    return _ensure_delivery_tag(new)
+    source_text = "\n".join([body, title, topic or "", *map(str, findings)])
+    added = _added_facts({"script_body": new}, source_text)
+    if added:
+        log.warning("scriptwriter: repair adds %s, which nothing it was given carries; the block "
+                    "stands.", ", ".join(added))
+        return None
+    new_title = re.sub(r"\s+", " ", str(data.get("title") or "")).strip()
+    if new_title and new_title != title:
+        if _added_facts({"title": new_title}, source_text):
+            log.warning("scriptwriter: repaired title %r adds a number; keeping the title.",
+                        new_title)
+            new_title = title
+        else:
+            new_title = _shorten_title(new_title, new)
+    return {"script_body": _ensure_delivery_tag(new), "title": new_title or title}
 
 
 _DANGLING_OPENERS = ("because", "and", "but", "so", "which", "or")

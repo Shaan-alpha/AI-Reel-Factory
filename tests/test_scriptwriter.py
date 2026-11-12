@@ -617,8 +617,10 @@ def test_a_repair_with_a_corrected_opening_is_accepted(monkeypatch):
     monkeypatch.setattr(scriptwriter.llm, "generate_grounded",
                         lambda *a, **k: '{"script_body": "%s"}' % good)
     body = "The US passed a tariff law. " + " ".join(["Word"] * 45) + ". Here's why it matters: x."
-    out = scriptwriter.repair_script(body, ["the law claim is false"], topic="tariffs")
-    assert out and out.startswith("The US House passed")
+    # The corrected facts come from the finding: the repair adds nothing its inputs lack.
+    finding = "the law claim is false: the House passed a bill allowing tariffs up to 100 percent"
+    out = scriptwriter.repair_script(body, [finding], topic="tariffs")
+    assert out and out["script_body"].startswith("The US House passed")
 
 
 def test_a_story_about_deaths_gets_the_somber_note():
@@ -1016,3 +1018,45 @@ def test_a_punch_up_that_adds_a_fact_is_refused(monkeypatch):
         {"hook_score": 2, "title": "ISRO rocket lands 3 times",
          "script_body": "ISRO's rocket landed itself 3 times on Tuesday. " + "word " * 50}))
     assert scriptwriter._punch_up_hook("Old", body) == ("Old", body)
+
+
+# --- stage 1b: the repair adds no fact and may fix the title (design 9.6) --------------------
+
+_REPAIR_BODY = ("The US passed a tariff law. " + " ".join(["Word"] * 45) +
+                ". Here's why it matters: prices rise.")
+
+
+def _repair_reply(monkeypatch, body, title=None):
+    reply = {"script_body": body}
+    if title is not None:
+        reply["title"] = title
+    monkeypatch.setattr(scriptwriter.llm, "generate_grounded", lambda *a, **k: json.dumps(reply))
+    monkeypatch.setattr(scriptwriter.llm, "generate", _no_model)
+
+
+def test_a_repair_that_adds_a_fact_is_refused(monkeypatch):
+    _repair_reply(monkeypatch, "The US passed a tariff law of 75 percent. " +
+                  " ".join(["Word"] * 45) + ". Here's why it matters: prices rise.")
+    assert scriptwriter.repair_script(_REPAIR_BODY, ["the law claim is false"], topic="tariffs",
+                                      title="US tariff law passes") is None
+
+
+def test_the_repair_may_fix_the_title(monkeypatch):
+    findings = ["the title calls it a law; only the House passed the bill"]
+    fixed = ("The US House passed a tariff bill. " + " ".join(["Word"] * 45) +
+             ". Here's why it matters: prices rise.")
+    _repair_reply(monkeypatch, fixed, title="US House passes a tariff bill")
+    out = scriptwriter.repair_script(_REPAIR_BODY, findings, topic="tariffs",
+                                     title="US tariff law passes")
+    assert out["script_body"].startswith("The US House passed")
+    assert out["title"] == "US House passes a tariff bill"
+    # Held to the title limits: the shortening call fails here, so the word cut applies.
+    _repair_reply(monkeypatch, fixed, title="The US House passes a tariff bill that is not yet a law")
+    out = scriptwriter.repair_script(_REPAIR_BODY, findings, topic="tariffs",
+                                     title="US tariff law passes")
+    assert len(out["title"]) <= 44 and len(out["title"].split()) <= 7
+    # No title in the reply: the original stays.
+    _repair_reply(monkeypatch, fixed)
+    out = scriptwriter.repair_script(_REPAIR_BODY, findings, topic="tariffs",
+                                     title="US tariff law passes")
+    assert out["title"] == "US tariff law passes"

@@ -205,6 +205,12 @@ def update_script_body(script_id: int, body: str) -> None:
     get_client().table("scripts").update({"body": body}).eq("id", script_id).execute()
 
 
+def update_script_title(script_id: int, title: str) -> None:
+    """Replace a script's title (the fact-check repair corrected it). Unlike
+    backfill_script_title, this overwrites a stored title."""
+    get_client().table("scripts").update({"title": title}).eq("id", script_id).execute()
+
+
 def insert_script(idea_id: int, template: str, body: str, caption: str,
                   hashtags: list[str], title: str | None = None,
                   structure: str | None = None) -> int:

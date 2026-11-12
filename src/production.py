@@ -281,15 +281,21 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         # One repair pass, then the SAME gate again. It can only make a reel eligible: the
         # rewrite is re-verified, and a second block stands.
         fixed = scriptwriter.repair_script(script["script_body"], check["unsupported"],
-                                           topic=idea.get("title"))
+                                           topic=idea.get("title"), title=script.get("title"))
         if fixed:
-            recheck = factcheck.verify(fixed, idea.get("sources"), script.get("title") or "",
+            # The repair may correct the title too (design 9.6), so the re-check sees the
+            # repaired title, and it is the one stored and published.
+            new_title = fixed.get("title") or script.get("title") or ""
+            recheck = factcheck.verify(fixed["script_body"], idea.get("sources"), new_title,
                                        on_screen=[*(script.get("key_points") or []), summary_text])
             if recheck["ok"] and factcheck.gate_ran(recheck):
                 log.warning("produce: idea %s repaired after the fact-check block (%s)",
                             idea_id, factcheck.summary(check))
-                script["script_body"] = fixed
-                db.update_script_body(script["script_id"], fixed)
+                script["script_body"] = fixed["script_body"]
+                db.update_script_body(script["script_id"], fixed["script_body"])
+                if new_title != (script.get("title") or ""):
+                    script["title"] = new_title
+                    db.update_script_title(script["script_id"], new_title)
                 check = recheck
             else:
                 log.warning("produce: idea %s repair did not pass the gate either", idea_id)
