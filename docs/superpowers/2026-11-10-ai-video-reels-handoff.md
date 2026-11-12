@@ -27,8 +27,8 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **The Stage 0 plan is written:** `docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md`.
   One plan per stage, each written just before it is built.
 
-- **Stage 0 is built** on branch `feat/stage-0-safety-measuring` (11 commits; 786 pass, 5 skipped
-  locally), including the fixes from a fresh final review. Calls made while building it, each
+- **Stage 0 is merged** (PR #17, 2026-11-12; CI 786 pass, 5 skipped), including the fixes from a
+  fresh final review; the bot is redeployed. The operator still has to run its SQL (end of docs/03 §4). Calls made while building it, each
   with its cost if wrong (none): two old tests were updated where the behaviour moved (an "ok ..."
   fixture now opens on a subject; `make_on_demand` no longer re-sends "Published"); an India share
   of 0 for fully withheld countries was treated as a real defect, not polish; two stale docs lines
@@ -37,9 +37,8 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   asked for, not enforced; `reel_attempts.spend_usd` waits for stage 3, and a job kill leaves a
   NULL outcome (read it as "killed").
 
-**Next:** ask the operator to push and merge Stage 0, run its SQL (end of
-docs/03 §4) and approve the bot deploy; then write and build the Stage 1 plan, and so on through
-the stages in design section 14.
+**Next:** write and build the Stage 1 plan (stories and script, design Parts C and D) on branch
+`feat/stage-1-stories-script`, then stages 2-4 and the relaunch (design section 14).
 
 ## 1. What the operator wants
 

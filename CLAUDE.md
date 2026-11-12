@@ -172,7 +172,7 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 - **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
   Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
   runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day against the 4–5
-  goal. Every module in [src/](src/) is implemented and tested (786 pass, 5 skipped locally on the stage 0 branch; 741 on `main`). Since 2026-10-22 Claude
+  goal. Every module in [src/](src/) is implemented and tested (CI: 786 pass, 5 skipped). Since 2026-10-22 Claude
   (Anthropic API, $4/month cap of its own) writes each script from Gemini's grounded draft.
 - **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
   workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
@@ -181,7 +181,7 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 - **The bot** ([telegram-bot/](telegram-bot/)) is CLI-deployed to Vercel, not git-connected:
   after any bot change, run `vercel deploy --prod` from `telegram-bot/` as the `shaan-alpha`
   account (team `shaan-alphas-projects`; the operator has two Vercel accounts). Last deploy:
-  2026-10-09.
+  2026-11-12.
 - **Deadlines.** 2026-10-20: Vertex retires `gemini-2.5-flash` (and `-lite`, `-pro`); the
   pipeline no longer uses them. 2026-11-17: the Gemini Developer API shuts down
   `gemini-3.1-flash-tts-preview` and `gemini-2.5-flash-preview-tts`. Handled on 2026-11-12: the
