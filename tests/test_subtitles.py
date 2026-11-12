@@ -514,3 +514,114 @@ def test_a_card_appears_when_its_point_is_spoken():
              enumerate("the house passed a bill with tariffs of 100 percent on buyers".split())]
     cards = subtitles._card_events(["100% TARIFFS"], 10.0, 1.0, 1.8, words)
     assert cards and cards[0][0] == words[6][0]   # 'tariffs' is word 6
+
+
+
+# --- stage 2: English subtitles for Hinglish narration (design 7.7) --------------------------
+
+import json  # noqa: E402
+
+_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "hinglish_test4.json")
+
+
+def _test4():
+    with open(_FIXTURE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _spoken_lines(data, parts=None):
+    return [{"en": u["en"], "hi": u["spoken"], "said": u["spoken"],
+             "parts": (parts or {}).get(i, [])} for i, u in enumerate(data["units"])]
+
+
+def test_sentence_ends_follow_test_4s_hand_placed_ends():
+    data = _test4()
+    weights = [len(u["spoken"]) for u in data["units"]]
+    ends = subtitles.sentence_ends([tuple(x) for x in data["pauses"]], weights, data["duration"])
+    assert len(ends) == len(weights)
+    for got, want in zip(ends[:-1], data["hand_placed_ends"][:-1]):
+        assert abs(got - want) <= 0.35, (got, want)
+
+
+def test_assignment_survives_too_few_pauses():
+    ends = subtitles.sentence_ends([(5.0, 5.3), (12.0, 12.4)], [10] * 6, 30.0)
+    assert len(ends) == 6 and ends == sorted(ends)
+    starts = [0.0] + ends[:-1]
+    assert all(e - s >= 0.5 for s, e in zip(starts, ends))
+
+
+def test_parts_become_blocks_in_spoken_order():
+    data = _test4()
+    first = [{"hi": "Eighteen November को Voyager 1,", "en": "On November 18, Voyager 1"},
+             {"hi": "Earth से पूरे एक light-day दूर पहुँचने वाली, इंसान की बनाई पहली चीज़ बन "
+                    "जाएगा।", "en": "becomes the first human-made object one full light-day "
+                                    "from Earth."}]
+    blocks = subtitles.subtitle_blocks(_spoken_lines(data, {0: first}),
+                                       [tuple(x) for x in data["pauses"]], data["duration"])
+    assert blocks[0][2] == "On November 18, Voyager 1"
+    assert blocks[1][2].startswith("becomes the first human-made object")
+    assert blocks[0][1] <= blocks[1][0] < blocks[1][1] <= 7.5
+
+
+def test_bad_parts_fall_back_to_the_whole_sentence():
+    data = _test4()
+    bad = [{"hi": "यानी twenty-five point nine billion", "en": "That's a rocket"},
+           {"hi": "kilometres।", "en": "kilometres."}]
+    blocks = subtitles.subtitle_blocks(_spoken_lines(data, {1: bad}),
+                                       [tuple(x) for x in data["pauses"]], data["duration"])
+    second = [b for b in blocks if 7.0 < b[0] < 10.0]  # sentence 2 runs about 7.3-10.3 s
+    assert " ".join(b[2] for b in second) == "That's 25.9 billion kilometres."
+    dropped = [{"hi": "यानी twenty-five point nine billion kilometres।", "en": "That's kilometres."}]
+    blocks = subtitles.subtitle_blocks(_spoken_lines(data, {1: dropped}),
+                                       [tuple(x) for x in data["pauses"]], data["duration"])
+    assert any("25.9" in b[2] for b in blocks), "a part that drops the number is refused"
+
+
+def test_blocks_are_plain_white_two_lines_at_most_and_never_one_word_alone():
+    data = _test4()
+    blocks = subtitles.subtitle_blocks(_spoken_lines(data), [tuple(x) for x in data["pauses"]],
+                                       data["duration"])
+    ass = subtitles._hinglish_ass(blocks, None, data["duration"], None)
+    events = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:") and ",Sub," in ln]
+    assert events
+    for ev in events:
+        text = ev.split(",,", 1)[1].split(",", 3)[-1]
+        assert "\\k" not in text and text.count("\\N") <= 1
+        rows = text.split("\\N")
+        if len(rows) == 2:
+            assert not (len(rows[1].split()) == 1 and len(rows[0].split()) >= 3), text
+    assert "Style: Sub," in ass
+
+
+def test_burn_hinglish_needs_no_speech_recognition(monkeypatch, tmp_path):
+    data = _test4()
+    video, audio = tmp_path / "v.mp4", tmp_path / "a.wav"
+    video.write_bytes(b"v")
+    audio.write_bytes(b"a")
+    monkeypatch.setattr(subtitles, "_transcribe_words",
+                        lambda *a, **k: pytest.fail("no speech recognition on Hinglish reels"))
+    monkeypatch.setattr(subtitles, "pauses", lambda path: [tuple(x) for x in data["pauses"]])
+    monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: data["duration"])
+    burned = {}
+
+    def _burn(video_path, ass_path, out_path, cards=None):
+        burned["ass"] = open(ass_path, encoding="utf-8").read()
+        open(out_path, "wb").write(b"x")
+
+    monkeypatch.setattr(subtitles, "_burn", _burn)
+    out = subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "out.mp4"),
+                                  _spoken_lines(data), hook_text="Voyager 1 nears a light-day",
+                                  source_label="nasa.gov")
+    assert os.path.exists(out) and ",Sub," in burned["ass"] and ",Hook," in burned["ass"]
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_pauses_reads_silencedetect(tmp_path):
+    path = str(tmp_path / "beeps.wav")
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=1", "-f", "lavfi", "-i",
+                    "anullsrc=r=24000:cl=mono:d=0.5", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=1", "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1",
+                    "-ar", "24000", "-ac", "1", path], check=True, timeout=60)
+    found = subtitles.pauses(path)
+    assert any(0.9 <= s <= 1.1 and 1.4 <= e <= 1.6 for s, e in found), found

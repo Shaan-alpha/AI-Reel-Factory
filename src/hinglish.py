@@ -176,12 +176,12 @@ _NOT_NAMES = frozenset((
     "Our Your Their His Her My").split())
 
 
-def _numbers(text: str) -> set[str]:
+def numbers_in(text: str) -> set[str]:
     return {m.group(1).replace(",", "") + (m.group(2) or "")
             for m in _CHECK_NUMBER_RE.finditer(text or "")}
 
 
-def _names(en: str) -> list[str]:
+def names_in(en: str) -> list[str]:
     """Capitalised words that do not start the sentence or a clause after a colon."""
     tokens = list(re.finditer(r"[A-Za-z][A-Za-z'’\-]*", en))
     names = []
@@ -243,16 +243,16 @@ def check(en_lines: list[str], lines: list[dict], min_seconds: float | None = No
         hi = numbered.get(i)
         if not hi:
             continue
-        for n in sorted(_numbers(en) - _numbers(hi)):
+        for n in sorted(numbers_in(en) - numbers_in(hi)):
             failures.append(f"line {i}: the number {n} is missing; keep it as digits")
-        for n in sorted(_numbers(hi) - _numbers(en)):
+        for n in sorted(numbers_in(hi) - numbers_in(en)):
             failures.append(f"line {i}: the number {n} is not in the English")
         tokens = _HI_TOKEN_SPLIT.split(unicodedata.normalize("NFD", hi))
         for word in sorted({t for t in tokens if t in _HINDI_NUMBER_WORDS}):
             failures.append(f"line {i}: the Hindi number word "
                             f"{unicodedata.normalize('NFC', word)!r}; write the number as the "
                             f"English has it")
-        for name in _names(en):
+        for name in names_in(en):
             if not re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", hi):
                 failures.append(f"line {i}: the name {name!r} must appear in Latin script")
         if not _DEVANAGARI_LETTER.search(hi):
