@@ -27,8 +27,8 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **The Stage 0 plan is written:** `docs/superpowers/plans/2026-11-12-stage-0-safety-and-measuring.md`.
   One plan per stage, each written just before it is built.
 
-- **Stage 0 is built** on branch `feat/stage-0-safety-measuring` (11 commits; 786 pass, 5 skipped
-  locally), including the fixes from a fresh final review. Calls made while building it, each
+- **Stage 0 is merged** (PR #17, 2026-11-12; CI 786 pass, 5 skipped), including the fixes from a
+  fresh final review; the bot is redeployed. The operator still has to run its SQL (end of docs/03 §4). Calls made while building it, each
   with its cost if wrong (none): two old tests were updated where the behaviour moved (an "ok ..."
   fixture now opens on a subject; `make_on_demand` no longer re-sends "Published"); an India share
   of 0 for fully withheld countries was treated as a real defect, not polish; two stale docs lines
@@ -37,9 +37,29 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   asked for, not enforced; `reel_attempts.spend_usd` waits for stage 3, and a job kill leaves a
   NULL outcome (read it as "killed").
 
-**Next:** ask the operator to push and merge Stage 0, run its SQL (end of
-docs/03 §4) and approve the bot deploy; then write and build the Stage 1 plan, and so on through
-the stages in design section 14.
+- **Stage 1a (stories for Indian viewers) is built** on `feat/stage-1-stories-script` (7 tasks, 811
+  pass); **stage 1b (script and packaging) is built** on the same branch (8 tasks, 852 pass; plan
+  `docs/superpowers/plans/2026-11-12-stage-1b-script-and-packaging.md`). The calls made while
+  building 1b are listed in STATUS.md's 2026-11-12 log and the ledger. Each plan's ledger is under
+  `.superpowers/sdd/<plan name>/progress.md` (git-ignored).
+- **The final review of stage 1 is done** (8 important findings fixed test-first, 870 pass; see
+  STATUS.md). The operator asked for push and merge once the fixes were in.
+  **Deferred minors from that review:**
+  - `db.expire_stale_pending_ideas` still writes `passed`, so ideas aged out after 24 h count in
+    the 10-day story window (design 8.5 wants them `expired`);
+  - an aggregator-only description keeps one Google News link, not two;
+  - `_category` matches substrings ("Transport" maps to sport);
+  - the Wikipedia signal skips a run when yesterday's list is not yet published (use the newest
+    day);
+  - with no network, the demand fetches can add about 6.7 minutes of timeouts;
+  - the idea's stored `demand` is the model's copy, unchecked against the real lines;
+  - a title cut can end on a preposition;
+  - `_pass_untapped` and its log still say "passed";
+  - a very long line in `news.py`;
+  - 9.1's warning for six or more words copied from a prompt example is not built;
+  - "Today's Wordle solution" passes the puzzle filter.
+
+**Next:** stage 2 (Hinglish), then stages 3-4 and the relaunch (design section 14).
 
 ## 1. What the operator wants
 

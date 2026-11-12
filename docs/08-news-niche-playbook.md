@@ -117,7 +117,8 @@ Source: [fair-use guide 2026](https://joyspace.ai/copyright-proof-shorts-fair-us
 - **Factual framing; a verdict only where the evidence supports it** (§5, truth over neutrality,
   2026-07-27). No sensationalism, no unverified rumor, no "BREAKING" bait.
 - **Cite the source**, in code: the description carries one "Sources:" block built from the
-  idea's fetched sources (up to three links: one per outlet, then Google News), and the reel shows
+  idea's fetched sources (up to three, one per outlet, each as the publisher's name and its own
+  link; a Google News link only when no publisher link exists), and the reel shows
   "Source: <publisher>" on screen for its first ~3 s. The model writes no links: remembered URLs
   were often dead.
 - Prefer **established developments** over fast-moving rumors (the "daily explainer" cadence
@@ -201,8 +202,10 @@ wording:
   non-confirmation, with no word of contradiction, moves to minor. Since 2026-10-09 the waiver
   never covers a quote or statement, a court ruling, a law, or blame, cause, responsibility or
   attribution, nor a finding that says there is "no record" of something: that is how a checker
-  reports an invented quote or ruling, so those still block. A statistic the checker merely could
-  not confirm stays waived.
+  reports an invented quote or ruling, so those still block. Since 2026-11-12 it never covers a
+  forecast or consequence (for India above all: the payoff says what changes for a person there),
+  which must be stated by a source or follow directly from sourced facts. A statistic the checker
+  merely could not confirm stays waived.
 - **The findings outrank the verdict word:** "pass" with a blocking finding blocks; "fail" with
   only minor findings ships; "fail" that names nothing blocks.
 - **An off-shape reply is asked again once** (no verdict object, or JSON that cannot be read).
@@ -236,11 +239,11 @@ Everything else rests on your tap in the digest.
 |--------|------------------------|
 | **1 Ideation** ([`src/ideation_fallback.py`](../src/ideation_fallback.py), Gemini on Vertex) | Pick distinct current stories from Google News and Trends; give each an honest hook and a "why it matters" angle; attach **≥ 2 live source URLs** in code (§4); the prompts carry the sensitivity filter (§5); output `{niche, title, hook, angle, est_score, sources}`. The Claude Routine in [`routines/ideation.md`](../routines/ideation.md) is optional and has never run in production. |
 | **2 Approval** | The digest shows each idea's hook, angle and up to three source outlets as links, so you can sanity-check before approving, and flags deaths or serious harm as "⚠️ Sensitive". Up to 3 approvals a run. |
-| **3 Scriptwriter** | Template N only; **rewrite facts in own words**; the core of the script is **original "why it matters" analysis**; a verdict only where the evidence supports it (§5); the channel's sarcasm targets situations, never people, and drops out entirely for somber stories. |
+| **3 Scriptwriter** | Template N only; **rewrite facts in own words**; the core of the script is **original "why it matters" analysis**; a verdict only where the evidence supports it (§5); a plain explainer's voice with no jokes at anyone's expense (the sarcastic voice was retired on 2026-11-12), and a calm, respectful read for somber stories. |
 | **11 Fact check** | §5: two samples, one repair, idea `blocked` on fabrication, reel held under strict mode when the checker cannot run. |
 | **5 Visuals** | Our own AI illustrations (no recognizable real people) or Pexels/Pixabay stock without identifiable faces; **no broadcaster footage**; AI images never photoreal fakes of real people/events; places named in the story kept; a cut every ~3.5 s. |
 | **7 Subtitles** | Burn an on-screen **"Source: <publisher>"** citation for the first ~3 s. The frame-1 hook banner (the title) and the key-point cards are published claims, so the gate checks them too. |
-| **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; the description is summary + Sources block + disclosure line + brand footer + `#Shorts`. |
+| **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; the description is the claim + why it matters + Sources block + disclosure line + a one-line footer + at most three hashtags ending `#ButItMatters` (`#Shorts` no longer added, 2026-11-12). |
 | **10 Analytics** | Daily view snapshots; the best and worst recent titles feed the ideation prompt. Retention is not pulled: nothing calls the YouTube Analytics API, and the token would first need the `yt-analytics.readonly` scope. |
 
 ---

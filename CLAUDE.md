@@ -88,7 +88,9 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
      pass missing a real story is routine, and two sources disagreeing is not proof the script is
      wrong (both can be wrong, both can be right, or they measure different things). One
      exception, in code since 2026-10-09: the waiver never reaches a quote, ruling, law or blame
-     that the checker flags and no source records; that blocks as invented.
+     that the checker flags and no source records; that blocks as invented. Since 2026-11-12 the
+     same holds for a forecast or consequence for India that no source states (the payoff says
+     what changes for a person in India, so an unsourced one is an invented claim).
      `FACTCHECK_SEVERITY=any` restores block-on-every-discrepancy.
    - **Sensitivity filter still applies** — communal/religious incitement, anything that could
      inflame violence, rumour-as-fact, deepfakes, graphic tragedy exploitation, and medical or
@@ -172,7 +174,7 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 - **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
   Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
   runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day against the 4–5
-  goal. Every module in [src/](src/) is implemented and tested (786 pass, 5 skipped locally on the stage 0 branch; 741 on `main`). Since 2026-10-22 Claude
+  goal. Every module in [src/](src/) is implemented and tested (CI: 786 pass, 5 skipped). Since 2026-10-22 Claude
   (Anthropic API, $4/month cap of its own) writes each script from Gemini's grounded draft.
 - **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
   workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
@@ -181,19 +183,21 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 - **The bot** ([telegram-bot/](telegram-bot/)) is CLI-deployed to Vercel, not git-connected:
   after any bot change, run `vercel deploy --prod` from `telegram-bot/` as the `shaan-alpha`
   account (team `shaan-alphas-projects`; the operator has two Vercel accounts). Last deploy:
-  2026-10-09.
+  2026-11-12.
 - **Deadlines.** 2026-10-20: Vertex retires `gemini-2.5-flash` (and `-lite`, `-pro`); the
   pipeline no longer uses them. 2026-11-17: the Gemini Developer API shuts down
   `gemini-3.1-flash-tts-preview` and `gemini-2.5-flash-preview-tts`. Handled on 2026-11-12: the
   operator kept 3.1 over both `gemini-3.8-flash-tts` models by ear and asked for the move at once,
   so wherever Vertex is set up the voice comes from Vertex (billed, cents a reel) and the
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
-- **In progress since 2026-11-10, nothing built yet.** The operator chose a new format: AI-video
+- **In progress since 2026-11-10: stage 0 merged (PR #17), stage 1 built on
+  `feat/stage-1-stories-script`.** The operator chose a new format: AI-video
   shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
   for Indian viewers. Higgsfield is approved by the operator as a billed service for this
   (about $1 a reel, about 20 reels a month, **no spend cap in code by the operator's choice**),
   so it is not a rule-2 stop-and-flag; the rules above get their new wording when the format
   is built. Research and a full audit are done, the audit was checked against the code and the
-  design rewritten (2026-11-12); the build plan is next. Start at
+  design rewritten (2026-11-12); stage 1 retired the sarcastic script voice for a plain explainer
+  for Indian viewers. Start at
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.

@@ -13,6 +13,46 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Changed (2026-11-12: stage 1b, script and packaging; details: STATUS.md)
+- **A plain explainer for Indian viewers** (`scriptwriter`, `voice`): the sarcastic, roasting
+  voice is retired; sentence one carries the subject and the Indian stake, and the payoff says
+  what changes for a person in India. The prompt describes moves and carries no phrases to copy.
+  The narrator prompt is the one approved by ear on 2026-11-12, with a neutral Indian English
+  accent.
+- **Three structures** (what happened, the number, the belief), chosen per idea and stored
+  (`scripts.structure`).
+- **One title of at most 7 words and 44 characters**, which is also the banner: shortened once by
+  the model, then cut at a word. A reply without a title uses the idea's under the same limits.
+- **Length in seconds** (`SCRIPT_TARGET_SECONDS` 27, `SCRIPT_MAX_SECONDS` 33): the writer marks
+  optional sentences and its payoff, which are cut first and protected respectively. The tighten
+  rewrite and the hook judge are off by default, in code and in both workflows.
+- **The fact-check gate** thinks at the model's default with a 32,768-token budget (measured:
+  about 3,000 thinking tokens a sample, roughly two cents a reel), and asks once more at minimal
+  thinking if a reply cannot be read. An unsourced forecast for India blocks like unsupported
+  blame, and the "could not confirm" waiver never reaches one. The draft's and the gate's search
+  citations are stored (`scripts.grounding`); Claude is told the draft searched only when it has
+  citations.
+- **The repair may fix the title, the description and the cards**, keeps a "why it matters"
+  sentence, and like every model-written rewrite (the hook judge's included) is refused if it adds
+  a number or a name; the re-check, the stored caption and the upload use what it returned.
+- **The writer's marks are text**: it copies its payoff and optional sentences, and code finds
+  them by their words (it counts sentences differently from our splitter).
+- **The description**: sources as publisher names with their links (an aggregator link only when
+  nothing else exists), the disclosure line by visual source (AI video included), a one-line
+  footer with no "every day" claim, and at most three hashtags ending `#ButItMatters`. Tags: the
+  writer's six plus the brand. The category follows the story (28 or 25). `#Shorts` is no longer
+  added.
+
+### Added (2026-11-12: stage 1a, stories for Indian viewers; details: STATUS.md)
+- **Demand signals** (`src/demand.py`): Wikipedia's India list scored against each article's own
+  week, and comparable Hindi channels' Shorts pacing ahead of their norm, as lines for the picker.
+- **Ideation for Indian viewers** (`ideation_fallback`, `news`): the viewer and the rubric in both
+  prompts, no science quota; a 60-story pool with ages and India-stake searches; the category,
+  rank score and matched signals stored per idea; the topic mix enforced in code; de-duplication
+  before research, with sourced follow-ups allowed after a published story; untapped ideas
+  `expired`; an election-silence rule (polling day and the two days before, Indian dates).
+  "India" does not count as a story word. The winners block waits for `WINNERS_SINCE`.
+
 ### Added (2026-11-12: stage 0 of the AI-video design, safety and measuring; details: STATUS.md)
 - **Measuring** (`analytics`, `db`, `production`, `publish_youtube`): every post is stamped with
   its format (`posts.format`); every attempt leaves a `reel_attempts` row with the stage it ended

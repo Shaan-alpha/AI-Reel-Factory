@@ -371,7 +371,7 @@ def test_verify_spends_the_dedicated_key_when_one_is_set(monkeypatch):
     monkeypatch.setenv("FACTCHECK_API_KEY", "checker-key")
     seen = {}
 
-    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None, **_):
         seen["api_key"] = api_key
         return '{"checked": 2, "blocking": [], "minor": [], "verdict": "pass"}'
 
@@ -385,7 +385,7 @@ def test_verify_falls_back_to_the_shared_key_when_none_is_set(monkeypatch):
     monkeypatch.delenv("FACTCHECK_API_KEY", raising=False)
     seen = {}
 
-    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None, **_):
         seen["api_key"] = api_key
         return '{"checked": 1, "blocking": [], "minor": [], "verdict": "pass"}'
 
@@ -432,7 +432,7 @@ def test_a_dedicated_key_that_404s_falls_back_to_the_shared_one(monkeypatch):
     monkeypatch.setenv("FACTCHECK_API_KEY", "key-from-a-project-with-no-grounding")
     tried = []
 
-    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None, **_):
         tried.append(api_key)
         if api_key is not None:
             raise RuntimeError("404 NOT_FOUND. models/gemini-2.5-flash is no longer available")
@@ -453,7 +453,7 @@ def test_an_exhausted_dedicated_key_does_not_spend_the_shared_budget(monkeypatch
     monkeypatch.setenv("FACTCHECK_API_KEY", "checker-key")
     tried = []
 
-    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None, **_):
         tried.append(api_key)
         raise RuntimeError("429 RESOURCE_EXHAUSTED quotaValue: 20")
 
@@ -469,7 +469,7 @@ def test_no_dedicated_key_means_exactly_one_attempt(monkeypatch):
     monkeypatch.delenv("FACTCHECK_API_KEY", raising=False)
     tried = []
 
-    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None):
+    def _fake(prompt, *, max_tokens=2048, model=None, api_key=None, **_):
         tried.append(api_key)
         raise RuntimeError("404 NOT_FOUND")
 
@@ -483,7 +483,8 @@ def test_no_dedicated_key_means_exactly_one_attempt(monkeypatch):
 def _capture_prompt(monkeypatch, replies):
     seen = []
     it = iter(replies)
-    monkeypatch.setattr(factcheck, "_ask_checker", lambda p: seen.append(p) or next(it))
+    monkeypatch.setattr(factcheck, "_ask_checker",
+                        lambda p, meta=None, **_: seen.append(p) or next(it))
     return seen
 
 
@@ -590,7 +591,7 @@ def test_an_extra_sample_that_cannot_run_does_not_undo_the_first(monkeypatch):
     monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
     calls = []
 
-    def _ask(p):
+    def _ask(p, meta=None, **_):
         calls.append(p)
         if len(calls) > 1:
             raise RuntimeError("503 UNAVAILABLE")
@@ -606,3 +607,70 @@ def test_on_vertex_the_gate_runs_on_the_stronger_3_5_flash(monkeypatch):
     monkeypatch.delenv("FACTCHECK_MODEL", raising=False)
     monkeypatch.setenv("GEMINI_USE_VERTEX", "true")
     assert factcheck._model() == "gemini-3.5-flash,gemini-3.5-flash-lite"
+
+
+# --- stage 1b: room to think, forecasts about India, grounding counted (design 9.7) ----------
+
+_PASS = '{"checked": 1, "blocking": [], "minor": [], "verdict": "pass"}'
+
+
+def test_the_gate_asks_for_room_to_think(monkeypatch):
+    seen = []
+    monkeypatch.setattr(factcheck.llm, "generate_grounded",
+                        lambda prompt, **k: seen.append(k) or _PASS)
+    factcheck.verify("ISRO's rocket landed itself on Tuesday.", ["https://example.com/a"])
+    assert seen
+    for k in seen:
+        assert k.get("thinking") == "default" and k.get("max_tokens", 0) >= 8192
+
+
+def test_the_gate_counts_forecasts_about_india():
+    p = factcheck._PROMPT
+    assert "forecast or consequence for India" in p
+    assert "stated by a source or follow directly from sourced facts" in p
+
+
+def test_the_gate_reports_its_citations(monkeypatch):
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "2")
+
+    def _fake(prompt, meta=None, **k):
+        if meta is not None:
+            meta["citations"] = 4
+        return _PASS
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    out = factcheck.verify("ISRO's rocket landed itself on Tuesday.", ["https://example.com/a"])
+    assert out["ok"] and out["citations"] == [4, 4]  # one count per sample
+
+
+# --- final review of stage 1 (2026-11-12) -----------------------------------------------------
+
+def test_the_waiver_never_reaches_an_unsourced_forecast():
+    """Design 9.7: a forecast for India must be stated by a source. The checker words a missing
+    one as non-confirmation, which the waiver used to move to minor (3 of 4 phrasings)."""
+    for finding in (
+        "Could not verify the forecast that EMIs in India will fall next month; no source states it.",
+        "No source was found to confirm the prediction that petrol prices in India will rise.",
+        "Unable to confirm the claimed consequence for Indian students; nothing supports it.",
+        "Could not confirm that fares are expected to double for Indian travellers.",
+    ):
+        assert not factcheck._only_unconfirmed(finding), finding
+    # A plain unconfirmed figure is still waived.
+    assert factcheck._only_unconfirmed("Could not independently confirm the 40% figure.")
+
+
+def test_an_unreadable_gate_reply_is_asked_again_at_minimal_thinking(monkeypatch):
+    """At default thinking a reply cut off by the token limit cannot be parsed; asking again
+    the same way would fail the same way, so the second ask uses minimal thinking."""
+    monkeypatch.setenv("FACTCHECK_SAMPLES", "1")
+    calls = []
+
+    def _fake(prompt, **k):
+        calls.append(k.get("thinking"))
+        return '{"checked": 3, "blocking": ["the 40' if len(calls) == 1 else _PASS
+
+    monkeypatch.setattr(factcheck.llm, "generate_grounded", _fake)
+    out = factcheck.verify("ISRO's rocket landed itself on Tuesday.", ["https://example.com/a"])
+    assert out["ok"] and factcheck.gate_ran(out)
+    assert calls == ["default", "minimal"]
+    assert factcheck._CHECK_TOKENS >= 32768

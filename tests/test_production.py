@@ -64,9 +64,12 @@ def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     produced = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: produced.append((i, s)))
     monkeypatch.setattr(production.db, "set_script_factcheck", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "set_script_grounding", lambda *a, **k: None)
     # The repair pass is a grounded rewrite: left real, a blocked reel made live model calls.
     monkeypatch.setattr(production.scriptwriter, "repair_script", lambda *a, **k: None)
     monkeypatch.setattr(production.db, "update_script_body", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "update_script_title", lambda *a, **k: None)
+    monkeypatch.setattr(production.db, "update_script_caption", lambda *a, **k: None)
     return produced
 
 
@@ -179,7 +182,7 @@ def test_footer_is_idempotent(monkeypatch):
     monkeypatch.delenv("ENABLE_DESC_FOOTER", raising=False)
     once = production._with_footer("body text")
     twice = production._with_footer(once)            # re-applying must not double the footer
-    assert once == twice and twice.count("#ButItMatters") == 1
+    assert once == twice and twice.count(production._DEFAULT_FOOTER) == 1
 
 
 def test_footer_env_override(monkeypatch):
@@ -238,18 +241,18 @@ def test_ensure_ideas_noop_when_queue_has_work(monkeypatch):
     assert production.ensure_ideas_and_digest() == 0
 
 
-def test_build_metadata_prefers_seo_title_and_merges_tags():
+def test_build_metadata_prefers_seo_title_and_keeps_hashtags_out_of_tags():
     idea = {"title": "fallback title"}
     script = {"title": "SEO Title", "caption": "desc",
               "hashtags": ["#ISRO", "#Shorts"], "tags": ["isro", "space mission", "rocket"]}
     meta = production._build_metadata(idea, script, include_channel_tags=False)
     assert meta["title"] == "SEO Title"
-    # hashtags(#-stripped) + tags, case-insensitively de-duped, order preserved
-    assert meta["tags"] == ["ISRO", "Shorts", "space mission", "rocket"]
+    # the writer's tags only, order preserved; hashtags go on the description's last line
+    assert meta["tags"] == ["isro", "space mission", "rocket"]
 
-    # With channel tags included
+    # With channel tags included: the brand only
     meta_full = production._build_metadata(idea, script, include_channel_tags=True)
-    assert "But It Matters" in meta_full["tags"]
+    assert meta_full["tags"] == ["isro", "space mission", "rocket", "But It Matters"]
 
 
 def test_build_metadata_falls_back_to_idea_title():
@@ -722,7 +725,8 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _OK)
     saved, voiced = [], []
-    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "FIXED BODY")
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None, **_:
+                        {"script_body": "FIXED BODY", "title": title})
     monkeypatch.setattr(production.db, "update_script_body", lambda sid, b: saved.append(b))
     monkeypatch.setattr(production.voice, "synthesize",
                         lambda body, d, meta=None, tone=None: voiced.append(body) or _fake_synth(body, d, meta))
@@ -733,7 +737,8 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
 def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _BLOCK)
-    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None: "STILL WRONG")
+    monkeypatch.setattr(production.scriptwriter, "repair_script", lambda body, f, topic=None, title=None, **_:
+                        {"script_body": "STILL WRONG", "title": title})
     monkeypatch.setattr(production.db, "update_script_body",
                         lambda *a: pytest.fail("a failed repair must not be saved"))
     with pytest.raises(production.FactCheckFailed):
@@ -772,17 +777,18 @@ def test_the_cron_path_does_not_poll_telegram_in_webhook_mode(monkeypatch):
     production.run()
 
 
-def test_the_india_tag_only_goes_on_india_stories():
-    """It was on every upload, the US-only White House story included."""
+def test_no_fixed_channel_tag_but_the_brand():
+    """Design 9.9: 'News Shorts', 'Trending News' and the India tag are gone."""
     script = {"title": "T", "caption": "c", "hashtags": [], "tags": []}
     us = production._build_metadata({"title": "Networks boycott White House coverage"}, script)
     india = production._build_metadata({"title": "Rupee hits a record low against the dollar"},
                                         script)
-    assert "India News Explainer" not in us["tags"] and "India News Explainer" in india["tags"]
+    assert us["tags"] == india["tags"] == ["But It Matters"]
 
 
-def test_the_footer_matches_the_real_length():
-    assert "in 30 seconds" in production._DEFAULT_FOOTER
+def test_the_footer_names_the_channel():
+    assert "But It Matters" in production._DEFAULT_FOOTER
+    assert "@butitmatters" in production._DEFAULT_FOOTER
 
 
 def test_the_on_screen_source_is_a_publisher_not_the_aggregator():
@@ -869,7 +875,8 @@ def test_untapped_ideas_from_this_digest_are_passed(monkeypatch):
     monkeypatch.setattr(production.db, "set_idea_status",
                         lambda i, s, from_status=None: moves.append((i, s, from_status)) or i != 2)
     assert production._pass_untapped([1, 2]) == 1  # 2 was tapped meanwhile; 9 is not ours
-    assert moves == [(1, "passed", "pending"), (2, "passed", "pending")]
+    # "expired" since 2026-11-12 (design 8.5): not tapping is not a verdict on the story.
+    assert moves == [(1, "expired", "pending"), (2, "expired", "pending")]
 
 
 def test_make_on_demand_passes_untapped_ideas_before_production(monkeypatch):
@@ -957,3 +964,118 @@ def test_published_is_sent_as_each_reel_goes_live(monkeypatch, tmp_path):
     production.run_production()
     assert events[:3] == [("start", 7), ("notify", "✅ Published: https://www.youtube.com/shorts/VID1"),
                           ("start", 8)]
+
+
+def test_untapped_ideas_expire(monkeypatch):
+    """An idea the operator simply did not tap was banned from the digest for 10 days as
+    'passed'; it now ends 'expired', which the story de-duplication ignores (design 8.5)."""
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [{"id": 5}, {"id": 6}])
+    set_to = []
+    monkeypatch.setattr(production.db, "set_idea_status",
+                        lambda i, s, from_status=None: set_to.append((i, s, from_status)) or True)
+    assert production._pass_untapped([5]) == 1
+    assert set_to == [(5, "expired", "pending")]
+
+
+def test_the_recheck_sees_the_repaired_title(monkeypatch, tmp_path):
+    """The re-check used the original title, so a title the repair fixed was never verified."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: dict(SCRIPT))
+    verdicts, titles = iter([_BLOCK, _OK]), []
+
+    def _verify(body, sources=None, title="", on_screen=None):
+        titles.append(title)
+        return next(verdicts)
+
+    monkeypatch.setattr(production.factcheck, "verify", _verify)
+    monkeypatch.setattr(production.scriptwriter, "repair_script",
+                        lambda body, f, topic=None, title=None, **_:
+                        {"script_body": "FIXED BODY", "title": "Fixed title"})
+    stored, published = [], []
+    monkeypatch.setattr(production.db, "update_script_title", lambda sid, t: stored.append(t))
+    monkeypatch.setattr(production.publish_youtube, "publish", lambda v, m, sid: published.append(
+        m["title"]) or ("VID1", "https://www.youtube.com/shorts/VID1"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert titles[1] == "Fixed title" and stored == ["Fixed title"]
+    assert published == ["Fixed title"]
+
+
+def test_the_grounding_is_stored_next_to_the_verdict(monkeypatch, tmp_path):
+    """Design 9.7: what grounding did for the draft and the gate is kept on the script row."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "grounding": {"draft_citations": 3}})
+    monkeypatch.setattr(production.factcheck, "verify",
+                        lambda *a, **k: {**_OK, "citations": [5, 4]})
+    stored = []
+    monkeypatch.setattr(production.db, "set_script_grounding", lambda sid, g: stored.append((sid, g)))
+    production.produce_one(IDEA, str(tmp_path))
+    assert stored == [(SCRIPT["script_id"], {"draft_citations": 3, "gate_citations": [5, 4]})]
+
+
+# --- stage 1b: hashtags, tags, footer, category (design 9.9) --------------------------------
+
+def test_hashtags_are_three_at_most_on_the_last_line():
+    script = {"title": "T", "caption": "Line one.\nLine two.",
+              "hashtags": ["#ISRO", "#Shorts", "#viral", "#Gaganyaan", "#Space"],
+              "tags": ["isro launch"]}
+    meta = production._build_metadata({"title": "ISRO launch", "niche": "space"}, script)
+    assert meta["description"].endswith("\n\n#ISRO #Gaganyaan #ButItMatters")
+    assert meta["tags"] == ["isro launch", "But It Matters"]
+    assert production._hashtag_line(["#Space-X", "#fyp", "#ButItMatters", "#Mars"]) == \
+        "#Mars #ButItMatters"
+
+
+def test_tags_are_six_from_the_writer_plus_the_brand():
+    tags = ["ISRO", "Gaganyaan", "इसरो", "isro rocket", "reusable rocket", "space India",
+            "launch cost", "Sriharikota"]
+    script = {"title": "T", "caption": "c", "hashtags": [], "tags": tags}
+    meta = production._build_metadata({"title": "Rupee hits a record low"}, script)
+    assert meta["tags"] == tags[:6] + ["But It Matters"]
+
+
+def test_the_footer_makes_no_every_day_claim():
+    assert "every day" not in production._DEFAULT_FOOTER.lower()
+    assert "#" not in production._DEFAULT_FOOTER and "\n" not in production._DEFAULT_FOOTER
+
+
+def test_the_category_follows_the_story():
+    script = {"title": "T", "caption": "c", "hashtags": [], "tags": []}
+    for niche, category in (("tech", "28"), ("science", "28"), ("space", "28"),
+                            ("india-politics", "25"), ("money", "25"), (None, "25")):
+        meta = production._build_metadata({"title": "T", "niche": niche}, script)
+        assert meta["category_id"] == category, niche
+
+
+
+def test_the_recheck_sees_the_repaired_description_and_cards(monkeypatch, tmp_path):
+    """Design 9.6: the re-check uses the repaired description too. The description's first line
+    restates the claim, so a false main claim left there blocked the re-check every time."""
+    _wire_happy(monkeypatch)
+    caption = ("Old line.\n\nSources:\nexample.org: https://example.org/a\n\n"
+               "AI-generated narration, images and music.")
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
+        **SCRIPT, "caption": caption, "key_points": ["Old card"], "payoff": "P sentence here."})
+    verdicts, screens, asked = iter([_BLOCK, _OK]), [], {}
+
+    def _verify(body, sources=None, title="", on_screen=None):
+        screens.append(on_screen)
+        return next(verdicts)
+
+    def _repair(body, findings, **k):
+        asked.update(k)
+        return {"script_body": "FIXED BODY", "title": k.get("title"), "summary": "New line.",
+                "key_points": ["New card"], "payoff": None}
+
+    monkeypatch.setattr(production.factcheck, "verify", _verify)
+    monkeypatch.setattr(production.scriptwriter, "repair_script", _repair)
+    stored, published = [], []
+    monkeypatch.setattr(production.db, "update_script_caption", lambda sid, c: stored.append(c))
+    monkeypatch.setattr(production.publish_youtube, "publish", lambda v, m, sid: published.append(
+        m["description"]) or ("VID1", "https://www.youtube.com/shorts/VID1"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert asked["summary"] == "Old line." and asked["key_points"] == ["Old card"]
+    assert asked["payoff"] == "P sentence here."
+    assert screens[1] == ["New card", "New line."]
+    assert stored and stored[0].startswith("New line.")
+    assert published[0].startswith("New line.")

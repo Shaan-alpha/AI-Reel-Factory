@@ -20,25 +20,59 @@ import json
 import logging
 import os
 import re
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
 from urllib.parse import urljoin, urlparse
 
-from src import config, db, llm, news, trends
+from src import config, db, demand, llm, news, trends
 
 log = logging.getLogger(__name__)
 
 _MAX_IDEAS = 20
 _MIN_IDEAS = 5  # below this, treat the run as failed rather than ship a thin digest
 
-# Columns the `ideas` table actually has — `share_score` is ranking-only, never persisted.
+# Columns the `ideas` table has. `share_score` is stored as `rank_score` (design 9.8): it is what
+# ordered the digest, and it was never kept. `niche` holds the story's category.
 _ROW_KEYS = ("niche", "title", "hook", "angle", "est_score", "sources")
+
+# The fixed categories the picker chooses from (design 8.4). They drive the topic mix, the
+# YouTube category and later analysis, so a free string is never stored.
+CATEGORIES = ("india-politics", "india", "money", "world", "science", "space", "tech", "health",
+              "sport", "culture")
+# Keywords that map a stray category onto a known one, checked in this order.
+_CATEGORY_WORDS = (
+    ("india-politics", ("india politic", "indian politic", "election", "parliament", "court")),
+    ("space", ("space", "isro", "nasa", "rocket", "astronom")),
+    ("science", ("science", "climate", "environment", "research")),
+    ("tech", ("tech", " ai", "ai ", "artificial intelligence", "software", "gadget", "internet")),
+    ("money", ("money", "econom", "business", "market", "finance", "price", "job")),
+    ("health", ("health", "medic", "disease")),
+    ("sport", ("sport", "cricket", "football", "olympic", "ipl")),
+    ("culture", ("culture", "film", "movie", "music", "entertain", "celebrit")),
+    ("india", ("india",)),
+)
+
+
+def _category(raw: str) -> str:
+    """A known category for what the picker wrote; "world" when nothing matches."""
+    value = str(raw or "").strip().lower()
+    if value in CATEGORIES:
+        return value
+    padded = f" {value} "
+    for category, words in _CATEGORY_WORDS:
+        if any(w in padded for w in words):
+            return category
+    return "world"
 
 
 def _to_rows(ideas: list[dict]) -> list[dict]:
-    """Project validated ideas to the DB columns (drops ranking-only fields like share_score)."""
-    return [{k: idea[k] for k in _ROW_KEYS} for idea in ideas]
+    """Project validated ideas to the DB columns, with the score that ranked each one and the
+    demand signals its story matched."""
+    return [{**{k: idea[k] for k in _ROW_KEYS},
+             "rank_score": idea.get("share_score", idea.get("est_score")),
+             "demand": list(idea.get("demand") or [])} for idea in ideas]
 
 
 def _rank_key(idea: dict):
@@ -51,7 +85,15 @@ _STOPWORDS = {"the", "a", "an", "of", "to", "in", "for", "and", "is", "on", "wit
               "at", "by", "from", "as", "new", "today", "be", "been", "are", "was", "were",
               "could", "would", "will", "can", "may", "its", "it", "this", "that", "over",
               "into", "after", "about", "just", "now", "why", "how", "what", "has", "have",
-              "s", "t"}  # the leftovers of "India's" and "don't"
+              "s", "t",  # the leftovers of "India's" and "don't"
+              # "vs" and the hook template's stock words matched unrelated stories: 3-5 of 20
+              # replayed flags were SpaceX v Blue Origin against Korean football (design 8.5).
+              "vs", "v", "versus", "race", "heats", "showdown", "clash", "battle", "shock",
+              "shocking",
+              # The channel is for Indian viewers (design 8.1), so 'India' is in most titles and
+              # in the default searches: shared, it says nothing about the story (final review,
+              # 2026-11-12: an LPG price hike matched a petrol price hike on india+price+hike).
+              "india", "indian"}
 
 
 def _fold(token: str) -> str:
@@ -76,11 +118,21 @@ def _tokens(title: str) -> set[str]:
 # flow prefers these over the Gemini/Groq fallback. See routines/ideation.md.
 _ROUTINE_IDEAS_FILE = "data/daily-ideas.json"
 
-_PROMPT = """You are the ideation engine for "But It Matters", a channel of daily, punchy \
-**25-30 second** news/info Shorts (India + world). Turn the SELECTED stories below into {n} \
-TIMELY ideas a human will approve 4-5 of — each a single crisp on-point fact that still carries \
-one honest "why it matters" angle (not a bare summary), with strong scroll-stopping, \
-share-worthy potential.
+_PROMPT = """You are the ideation engine for "But It Matters", a channel of **25-35 second** \
+explainer Shorts for Indian viewers: Indians aged about 18-34 watching on a phone, at home in \
+Hindi and English, who care about what changes their money, jobs, exams, safety, gadgets and \
+the country's standing. Turn the SELECTED stories below into {n} TIMELY ideas a human will \
+choose from — each a single crisp on-point fact that still carries one honest "why it matters" \
+angle (not a bare summary), with strong scroll-stopping potential for that viewer.
+
+CLOSER TO THE VIEWER IS BETTER: a named Indian or Indian-origin person; a personal stake (money, \
+visas, safety, exams, jobs, prices); India beside another country; a dated event this week; the \
+unfamiliar term in the news, explained. Weaker: routine launches, macro policy, institutional \
+news, distant events with no Indian angle. The angle names the Indian viewer's stake whenever \
+the story has one.
+
+DEMAND SIGNALS (what India is looking up and watching right now; if empty, ignore):
+{demand}
 
 SELECTED DISTINCT STORIES (write EXACTLY ONE idea per story, in order; NEVER two ideas on the \
 same event):
@@ -120,7 +172,9 @@ even when that is unflattering to a government, company or party — a well-sour
 not "taking a side". You MAY reach a verdict and say plainly who is responsible, provided every \
 load-bearing fact is verifiable and cited. What you may NOT do is assert anything you cannot \
 source: an unverifiable claim is worthless however satisfying it sounds. Politics, government \
-actions and court rulings are fully in scope. EXCLUDE only: communal/religious incitement or \
+actions and court rulings are fully in scope. An allegation names the court record or official \
+order it rests on. In a live conflict, explain the terms and the mechanisms, and never take a \
+side in the fighting. EXCLUDE only: communal/religious incitement or \
 hate; anything that could inflame violence; unverified rumors/claims stated as fact; deepfakes/ \
 impersonation; graphic tragedy exploitation; medical/financial advice stated as fact.
 
@@ -136,7 +190,7 @@ and costs nothing. A guessed or pattern-matched URL is worse than none: it 404s,
 discarded, and >= {min_src} real sources are needed to ship.
 
 Return ONLY JSON:
-{{"ideas": [{{"niche": "impact-news", "title": "...", "hook": "the first 3 seconds", \
+{{"ideas": [{{"niche": "world", "title": "...", "hook": "the first 3 seconds", \
 "angle": "the original why-it-matters take", "est_score": 0.0, "share_score": 0.0, \
 "sources": ["https://...", "https://..."]}}]}}
 """
@@ -627,6 +681,10 @@ def _validate_and_clean(ideas: list[dict], existing: list[dict] | None = None) -
             continue
         if title.lower() in seen_titles:
             continue
+        if _in_election_silence(idea):
+            log.info("ideation_fallback: dropping %r (election matter inside the silence "
+                     "period, ELECTION_SILENCE)", title)
+            continue
         toks = _tokens(title)
         if toks and any(len(toks & kt) / len(toks | kt) >= 0.6 for kt in kept_tokens):
             log.debug("ideation_fallback: dropping near-duplicate %r", title)
@@ -656,46 +714,66 @@ def _validate_and_clean(ideas: list[dict], existing: list[dict] | None = None) -
 
         seen_titles.add(title.lower())
         kept_tokens.append(toks)
-        clean.append({"niche": niche, "title": title, "hook": hook, "angle": angle,
-                      "est_score": est, "share_score": share, "sources": sources})
+        # The story's category when the picker gave one (_tag_from_stories); else the setting.
+        category = (_category(idea["niche"]) if idea.get("niche") not in (None, "", niche)
+                    else _category(niche))
+        clean.append({"niche": category, "title": title, "hook": hook, "angle": angle,
+                      "est_score": est, "share_score": share, "sources": sources,
+                      "demand": list(idea.get("demand") or []),
+                      "followup": bool(idea.get("followup"))})
         if len(clean) >= _MAX_IDEAS:
             break
     return clean
 
 
-_STAGE1_PROMPT = """You are the story scout for "But It Matters", a channel of daily 25-30 \
-second news/info Shorts (India + world). From the REAL headlines below, choose the {n} MOST \
-share-worthy, DISTINCT stories to turn into Shorts today.
+_STAGE1_PROMPT = """You are the story scout for "But It Matters", a channel of 25-35 second \
+explainer Shorts for Indian viewers: Indians aged about 18-34 watching on a phone, at home in \
+Hindi and English, who care about what changes their money, jobs, exams, safety, gadgets and \
+the country's standing. From the REAL headlines below, choose the {n} stories those viewers \
+would most want explained today.
 
-PRIMARY SOURCE — REAL CURRENT HEADLINES (choose from THESE; cluster items about the same event \
-into ONE story):
+REAL CURRENT HEADLINES, each with its age in hours (choose from THESE; cluster items about the \
+same event into ONE story; a story over 48 hours old ranks lower unless it carries a new \
+development):
 {headlines}
 
-SUPPLEMENTARY TREND SIGNAL (optional flavour only; ignore generic weather/calendar/sports-score noise):
+DEMAND SIGNALS (what India is looking up and watching right now; a story that shows up here as \
+well as in the headlines ranks higher; if empty, ignore):
+{demand}
+
+SEARCH TRENDS IN INDIA (supplementary; ignore weather, calendar and sports-score noise):
 {trending}
 
-WINNING STYLES ON THIS CHANNEL (what the feed rewards; pick stories with similar pull — if empty, ignore):
+WINNING STYLES ON THIS CHANNEL (if empty, ignore):
 {winners}
 
+RANK BY CLOSENESS TO THAT VIEWER. Higher: a named Indian or Indian-origin person; a personal \
+stake (money, visas, safety, exams, jobs, prices); India beside another country; a dated event \
+this week; the factual angle on what India is already watching; an unfamiliar term in the news, \
+explained. Lower: routine launches, macro policy (the Budget as a subject, GST, tariffs), \
+institutional news, distant events with no Indian angle, abstract science. Science and \
+technology travel when they concern ordinary things or a direct stake, not "pure" space or \
+physics. No subject has a quota.
+
 RULES:
-- Pick {n} DISTINCT stories — NEVER two about the same event. Spread them across DIFFERENT \
-categories (world affairs, economy & business, science & space, technology & AI, health, \
-climate & energy, India infrastructure, government & policy, sports, notable world events).
-- Prefer stories a smart person would actually SEND TO A FRIEND: real stakes, money & power, \
-genuine surprise, big human impact. Apply a SHARE test, not a clickbait test.
+- Pick {n} DISTINCT stories — NEVER two about the same event.
+- category: exactly one of {categories}. india-politics means party politics, elections, \
+government and court procedure inside India.
+- demand: copy the DEMAND SIGNALS lines this story matches; an empty list when none does.
+- followup: true only when the story is a new, dated development of a story from the last 10 days.
 - Compliance (hard line): only real, VERIFIABLE developments — a viewpoint is fine, an \
-  unsourceable claim is not; exclude \
-communal/religious incitement, calls to violence, unverified rumour-as-fact, deepfakes, \
+unsourceable claim is not; exclude communal or religious incitement, trending terms naming a \
+faith or a communal incident, calls to violence, unverified rumour-as-fact, deepfakes, \
 graphic tragedy exploitation, medical/financial advice.
 
 Return ONLY a JSON object:
 {{"stories": [{{"story": "one-line description of the single development", "category": "...", \
-"why_shareworthy": "why someone would share this"}}]}}
+"why_it_travels": "the Indian viewer's stake, in a few words", "demand": [], "followup": false}}]}}
 """
 
 
 def _select_stories(target: int, headlines: list[str], trending: list[str],
-                    winners: list[str]) -> list[dict]:
+                    winners: list[str], demand_lines: list[str] | None = None) -> list[dict]:
     """Stage 1: cluster real headlines into `target` DISTINCT share-worthy stories.
 
     Cheap, no-web pass routed to Groq first (rule 13) so Gemini's scarce grounded RPD is
@@ -709,6 +787,8 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
         headlines="\n".join(f"- {h}" for h in headlines),
         trending="\n".join(f"- {t}" for t in trending) or "- (none)",
         winners="\n".join(f"- {w}" for w in winners) or "- (no performance data yet)",
+        demand="\n".join(f"- {d}" for d in demand_lines or []) or "- (none)",
+        categories=", ".join(CATEGORIES),
     )
     try:
         raw = llm.generate(prompt, json=True, max_tokens=2048, prefer_groq=True)
@@ -718,15 +798,31 @@ def _select_stories(target: int, headlines: list[str], trending: list[str],
         out: list[dict] = []
         for s in stories:
             if isinstance(s, dict) and str(s.get("story", "")).strip():
+                demand = s.get("demand")
                 out.append({
                     "story": str(s["story"]).strip(),
-                    "category": str(s.get("category", "")).strip(),
-                    "why_shareworthy": str(s.get("why_shareworthy", "")).strip(),
+                    # Stored on the idea (design 8.4); it used to be dropped after this stage.
+                    "category": _category(str(s.get("category", ""))),
+                    "why_shareworthy": str(s.get("why_it_travels")
+                                           or s.get("why_shareworthy", "")).strip(),
+                    "demand": [str(d) for d in demand] if isinstance(demand, list) else [],
+                    "followup": bool(s.get("followup")),
                 })
         return out[:target]
     except Exception as e:  # noqa: BLE001 — selection is best-effort; never block ideation
         log.warning("ideation: stage-1 story selection failed (%s); expanding from headlines", e)
         return []
+
+
+def _tag_from_stories(ideas: list[dict], stories: list[dict]) -> list[dict]:
+    """Give each idea its selected story's category, demand lines and follow-up flag."""
+    for idea in ideas:
+        n = _story_of(idea, stories) if stories else None
+        if n is not None:
+            story = stories[n - 1]
+            idea.update(niche=story.get("category") or idea.get("niche"),
+                        demand=story.get("demand") or [], followup=story.get("followup", False))
+    return ideas
 
 
 def _produce_ideas(target: int) -> list[dict]:
@@ -742,22 +838,42 @@ def _produce_ideas(target: int) -> list[dict]:
         "- (live trends unavailable — rely on the headlines below)"
     # Stories, not bare headlines: each carries the feed's own live article URL, which is what
     # lets an idea be cited from something we actually fetched instead of from model memory.
-    feed_stories = news.fetch_stories(int(config.get("NEWS_POOL_SIZE", "24")))
-    headlines = [s["title"] for s in feed_stories]
+    # 60, set here: the workflow does not pass NEWS_POOL_SIZE through (design 8.2). The India-stake
+    # searches follow the feeds, de-duplicated by URL.
+    feed_stories = news.fetch_stories(int(config.get("NEWS_POOL_SIZE", "60")))
+    known = {s["url"] for s in feed_stories}
+    feed_stories += [s for s in news.search_india_stakes() if s["url"] not in known]
+    # Each headline carries its age (design 8.2): parsed from pubDate and, until now, never used.
+    headlines = [f"({round(s['age_hours'])}h) {s['title']}" if s.get("age_hours") is not None
+                 else s["title"] for s in feed_stories]
     headlines_block = "\n".join(f"- {h}" for h in headlines) or \
         "- (no live headlines — use your knowledge of today's biggest REAL stories)"
-    try:
-        winners = db.top_performing_titles(6)
-        lows = db.low_performing_titles(3)
-        if lows:
-            winners = [*winners, "LOW PERFORMERS, avoid what these have in common:",
-                       *(f"(avoid) {t}" for t in lows)]
-    except Exception as e:  # noqa: BLE001 — analytics feedback is best-effort
-        log.warning("ideation: could not load past winners (%s)", e)
-        winners = []
+    # The winners block is suspended until WINNERS_SINCE (the relaunch date) is set: the old
+    # block steered toward one topic on noise, and old-format reels say nothing about the new
+    # one (design 8.4). When it returns it counts only posts since that date and at least 72
+    # hours old, and the "avoid" list is gone.
+    winners: list[str] = []
+    since = config.get("WINNERS_SINCE")
+    if since:
+        try:
+            winners = db.top_performing_titles(6, since=since)
+        except Exception as e:  # noqa: BLE001 — analytics feedback is best-effort
+            log.warning("ideation: could not load past winners (%s)", e)
     winners_block = "\n".join(f"- {w}" for w in winners) or "- (no performance data yet)"
+    demand_lines = demand.demand_lines()
+    demand_block = "\n".join(f"- {d}" for d in demand_lines) or "- (none)"
 
-    stories = _select_stories(target, headlines, topics, winners)
+    stories = _select_stories(target, headlines, topics, winners, demand_lines)
+    # Before any grounded search, not after (design 8.5): a story already pitched in the last
+    # IDEA_DEDUP_DAYS costs nothing to drop here.
+    if stories:
+        recent = _recent_ideas()
+        kept = [s for s in stories if not _repeats_recent_story(
+            {"title": s["story"], "hook": "", "followup": s.get("followup")}, recent)]
+        if len(kept) < len(stories):
+            log.info("ideation: %d picked stor%s repeat recent ideas; dropped before research.",
+                     len(stories) - len(kept), "y" if len(stories) - len(kept) == 1 else "ies")
+        stories = kept
     if stories:
         selected_block = "\n".join(
             f"- Story {i}: {s['story']}" + (f" [{s['category']}]" if s["category"] else "")
@@ -769,7 +885,8 @@ def _produce_ideas(target: int) -> list[dict]:
 
     prompt = llm.today_line() + _PROMPT.format(n=target, min_src=config.get("MIN_SOURCES", "2"),
                             selected=selected_block, trending=trending_block,
-                            headlines=headlines_block, winners=winners_block)
+                            headlines=headlines_block, winners=winners_block,
+                            demand=demand_block)
     clean: list[dict] = []
 
     # Stage 2a: research the selected stories in PROSE (where the search keeps its citations),
@@ -779,7 +896,7 @@ def _produce_ideas(target: int) -> list[dict]:
         try:
             raw = llm.generate(prompt + _NOTES_SUFFIX.format(notes=notes), json=True,
                                max_tokens=4096)
-            parsed = _parse_ideas(raw)
+            parsed = _tag_from_stories(_parse_ideas(raw), stories)
             owned = [by_story.get(_story_of(i, stories), []) for i in parsed]
             clean = _validate_and_clean(_attach_real_sources(parsed, raw, [], feed_stories,
                                                              owned=owned))
@@ -793,7 +910,7 @@ def _produce_ideas(target: int) -> list[dict]:
         try:
             raw, grounded = llm.generate_grounded_with_sources(prompt, max_tokens=8192,
                                                                model=_ideation_model())
-            parsed = _parse_ideas(raw)
+            parsed = _tag_from_stories(_parse_ideas(raw), stories)
             clean = _validate_and_clean(_attach_real_sources(parsed, raw, grounded,
                                                              feed_stories))
             if not clean:
@@ -811,11 +928,80 @@ def _produce_ideas(target: int) -> list[dict]:
     log.info("ideation: grounded pass yielded %d of %d; topping up ungrounded.", len(clean), target)
     try:
         raw = llm.generate(prompt, json=True, max_tokens=4096)
-        parsed = _attach_real_sources(_parse_ideas(raw), raw, [], feed_stories)
+        # Tagged like the other passes, or its ideas keep the model's own niche (final review,
+        # 2026-11-12: the mix cap and the YouTube category both read it).
+        parsed = _attach_real_sources(_tag_from_stories(_parse_ideas(raw), stories), raw, [],
+                                      feed_stories)
         clean = clean + _validate_and_clean(parsed, existing=clean)
     except Exception as e:  # noqa: BLE001 — the top-up is a bonus; keep what we already have
         log.warning("ideation: ungrounded top-up failed (%s); keeping %d idea(s)", e, len(clean))
     return clean[:_MAX_IDEAS]
+
+
+_ELECTION_WORDS = re.compile(r"(?i)\b(?:elections?|polls?|polling|votes?|voting|campaign|"
+                             r"candidates?|exit polls?)\b")
+
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _today_ist(now: datetime | None = None) -> date:
+    """Today's date in India, where polling days are counted."""
+    return (now or datetime.now(timezone.utc)).astimezone(_IST).date()
+
+
+def _in_election_silence(idea: dict, today: date | None = None) -> bool:
+    """True when the idea is election matter for a state inside the 48 hours before its polling
+    closes (design 8.7; section 126 of the Representation of the People Act, whose reach over an
+    independent channel is untested). ELECTION_SILENCE lists `State:YYYY-MM-DD` pairs and is
+    kept by hand. Polls close in the evening, so the 48 hours start two days before polling day:
+    the window is the polling date and the two days before, in Indian dates (it used to start
+    the day before in UTC dates, leaving the evening campaigning ends uncovered)."""
+    raw = config.get("ELECTION_SILENCE") or ""
+    if not raw.strip():
+        return False
+    today = today or _today_ist()
+    text = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
+    if not _ELECTION_WORDS.search(text):
+        return False
+    for pair in raw.split(","):
+        state, _, when = pair.partition(":")
+        try:
+            polling = date.fromisoformat(when.strip())
+        except ValueError:
+            log.warning("ideation: ELECTION_SILENCE entry %r is not State:YYYY-MM-DD", pair)
+            continue
+        if (state.strip() and re.search(rf"(?i)\b{re.escape(state.strip())}\b", text)
+                and polling - timedelta(days=2) <= today <= polling):
+            return True
+    return False
+
+
+def _enforce_mix(ranked: list[dict], n: int) -> list[dict]:
+    """Up to `n` ideas in rank order under the topic mix (design 8.4; review finding 20): at
+    most one `india-politics` idea, at most two of any one category, at most one somber story.
+    A prompt only asked for a mix; this makes it true. When the caps leave the digest short, the
+    skipped ideas fill it in rank order: the caps shape a digest, they never empty one."""
+    from src import scriptwriter  # local: tone_for is the one somber detector (rule 7)
+
+    picked, skipped, per_category, somber = [], [], {}, 0
+    for idea in ranked:
+        if len(picked) >= n:
+            break
+        category = idea.get("niche") or "world"
+        is_somber = scriptwriter.tone_for(idea) == "somber"
+        cap = 1 if category == "india-politics" else 2
+        if per_category.get(category, 0) >= cap or (is_somber and somber >= 1):
+            skipped.append(idea)
+            continue
+        picked.append(idea)
+        per_category[category] = per_category.get(category, 0) + 1
+        somber += int(is_somber)
+    for idea in skipped:
+        if len(picked) >= n:
+            break
+        picked.append(idea)
+    return picked
 
 
 def run_fallback_ideation() -> int:
@@ -847,7 +1033,7 @@ def generate_ideas(n: int = 3) -> int:
     request always produces fresh options (the operator picks via the digest buttons).
     """
     n = max(1, n)
-    clean = sorted(_produce_ideas(max(n * 2, 4)), key=_rank_key)[:n]
+    clean = _enforce_mix(sorted(_produce_ideas(max(n * 2, 4)), key=_rank_key), n)
     if not clean:
         raise RuntimeError("ideation: could not generate any valid idea.")
     inserted = db.insert_ideas(_to_rows(clean))
@@ -893,6 +1079,16 @@ def _repeats_recent_story(idea: dict, recent: list[dict]) -> bool:
         shared = mine & theirs
         same_words = (mine and theirs and len(shared) >= _STORY_MATCH_MIN_TOKENS + 1
                       and len(shared) / min(len(mine), len(theirs)) >= _STORY_MATCH_RATIO)
+        # A follow-up the picker marked as a new, dated development may come back inside the
+        # window when it cites none of the old sources (design 8.5), and only after a story that
+        # was published: the picker never sees the last 10 days, so its flag only says "this
+        # story continues", and a story that never shipped has nothing to follow up. Inside a
+        # batch (no status) two flagged ideas on one story stay one story.
+        if (same_words and not shared_src and idea.get("followup")
+                and old.get("status") == "produced"):
+            log.info("ideation: %r follows up recent idea %s with new sources; kept.",
+                     idea.get("title"), old.get("id"))
+            continue
         if shared_src or same_words:
             log.info("ideation: %r repeats recent idea %s (%s, %s); skipped.", idea.get("title"),
                      old.get("id"), old.get("status"), "same source" if shared_src else "same story")
@@ -920,15 +1116,13 @@ def seed_ideas(n: int = 3, already_pending: int = 0) -> int:
 
     def _pick(pool: list[dict]) -> list[dict]:
         pool = [i for i in pool if not _repeats_recent_story(i, recent)]
-        fresh: list[dict] = []
+        candidates: list[dict] = []
         for idea in sorted((i for i in pool if i["title"].lower() not in seen), key=_rank_key):
             # Within the batch too: the grounded pass and the top-up pitched the same Trump/Iran
             # and LPU stories twice each, sharing a source link (live, 2026-09-27).
-            if not _repeats_recent_story(idea, fresh):
-                fresh.append(idea)
-            if len(fresh) >= n:
-                break
-        return fresh
+            if not _repeats_recent_story(idea, candidates):
+                candidates.append(idea)
+        return _enforce_mix(candidates, n)
 
     routine = load_routine_ideas()
     fresh = _pick(routine) if routine else []

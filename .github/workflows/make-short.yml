@@ -149,7 +149,7 @@ jobs:
           ENABLE_HOOK_CAPTION: ${{ vars.ENABLE_HOOK_CAPTION || 'true' }}  # frame-1 title hook banner (CTR)
           HOOK_SECONDS: ${{ vars.HOOK_SECONDS || '1.8' }}            # how long the hook banner shows
           CLIP_SECONDS: ${{ vars.CLIP_SECONDS || '3.5' }}           # B-roll cut length (fast = more retention)
-          ENABLE_HOOK_JUDGE: ${{ vars.ENABLE_HOOK_JUDGE || 'true' }} # LLM punches up weak hooks/titles pre-render
+          ENABLE_HOOK_JUDGE: ${{ vars.ENABLE_HOOK_JUDGE || 'false' }} # off since 2026-11-12 (design 9.2): it rewrote the writer's opening
           KOKORO_SPEED: ${{ vars.KOKORO_SPEED || '1.0' }}           # voice speed
           ENABLE_DRAMATIC_PACING: ${{ vars.ENABLE_DRAMATIC_PACING || 'true' }}  # snappier mid-script + beat before payoff
           PAUSE_BETWEEN: ${{ vars.PAUSE_BETWEEN || '0.18' }}        # inter-sentence silence (s)
@@ -164,7 +164,7 @@ jobs:
           MUSIC_LU_BELOW_VOICE: ${{ vars.MUSIC_LU_BELOW_VOICE || '11' }}      # bed level under the voice (8 = more present)
           ENABLE_MUSIC_OFFSET: ${{ vars.ENABLE_MUSIC_OFFSET || 'true' }}      # each reel starts its bed at a different bar
           ENABLE_GRAPHIC_CARDS: ${{ vars.ENABLE_GRAPHIC_CARDS || 'false' }}  # PIL stat cards vs ASS text cards
-          ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append core channel tags after SEO tags
+          ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append the brand tag after the writer's tags
           # Optional 3rd LLM provider. GH_ prefix is REQUIRED: GitHub rejects secret/variable
           # names starting with GITHUB_. Inert unless ENABLE_GH_MODELS/PREFER_GH_MODELS is true.
           GH_MODELS_KEY: ${{ secrets.GH_MODELS_KEY }}               # PAT scoped to `models: read` only
@@ -192,8 +192,14 @@ jobs:
           FACTCHECK_SEVERITY: ${{ vars.FACTCHECK_SEVERITY || 'critical' }} # critical = only fabrication blocks; any = every discrepancy
           FACTCHECK_SAMPLES: ${{ vars.FACTCHECK_SAMPLES || '2' }}      # a finding from either of two checks blocks
           ENABLE_FACTCHECK_REPAIR: ${{ vars.ENABLE_FACTCHECK_REPAIR || 'true' }}  # rewrite blocked claims once, re-check
-          ENABLE_SCRIPT_TIGHTEN: ${{ vars.ENABLE_SCRIPT_TIGHTEN || 'true' }}  # LLM cut to the word cap before truncation
+          ENABLE_SCRIPT_TIGHTEN: ${{ vars.ENABLE_SCRIPT_TIGHTEN || 'false' }}  # retired 2026-11-12: the writer marks optional sentences
+          SCRIPT_TARGET_SECONDS: ${{ vars.SCRIPT_TARGET_SECONDS }}  # default 27 (about 59 words)
+          SCRIPT_MAX_SECONDS: ${{ vars.SCRIPT_MAX_SECONDS }}        # default 33 (about 73 words)
           IDEA_DEDUP_DAYS: ${{ vars.IDEA_DEDUP_DAYS || '10' }}           # story-level dedup window
+          WINNERS_SINCE: ${{ vars.WINNERS_SINCE }}                     # optional: the relaunch date; unset keeps the winners block off
+          ELECTION_SILENCE: ${{ vars.ELECTION_SILENCE }}               # optional: State:YYYY-MM-DD pairs, no election matter in the 48 h before
+          DEMAND_CHANNELS: ${{ vars.DEMAND_CHANNELS }}                 # optional: channel ids for the demand signal (default: the India research's sample)
+          NEWS_INDIA_QUERIES: ${{ vars.NEWS_INDIA_QUERIES }}           # optional: Google News searches for an Indian stake
           FACTCHECK_STRICT: ${{ vars.FACTCHECK_STRICT || 'false' }}    # true = block when the checker cannot run
           # Groq bills gpt-oss reasoning tokens against max_tokens; at the default effort the
           # trace eats the budget and json_object mode 400s. 'low' keeps the fallback alive.

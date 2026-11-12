@@ -73,7 +73,8 @@ SOURCES THE WRITER CLAIMS TO HAVE USED:
 
 Method — follow it exactly:
 1. Extract every LOAD-BEARING factual claim: things that happened, numbers, dates, names, \
-attributions, causal statements ("X caused Y"), and any statement assigning responsibility.
+attributions, causal statements ("X caused Y"), any statement assigning responsibility, and any \
+forecast or consequence for India (what will change for people there).
 2. Use web search to check each claim independently. Do NOT assume the script or its source list \
 is correct — the sources may not say what the writer thinks they say.
 3. Sort EVERY problem you find into exactly one of the two buckets below. This is not optional: \
@@ -88,6 +89,8 @@ exist.
 (rose vs fell), or off by more than about a quarter.
 · A blame or causation claim that NO source supports — not a weakly supported one, an \
 unsupported one.
+· A forecast or consequence for India that no source states and that does not follow directly \
+from sourced facts.
 
 MINOR — real imperfections that do NOT justify killing the story. Everything else, including:
 · Rounding, approximation, or a figure that differs because sources count it differently.
@@ -107,8 +110,10 @@ contradicts the script — not when it merely fails to line up exactly.
 
 NOT your concern: tone, sarcasm, opinion, or whether the take is harsh. A sharply worded verdict \
 that the evidence supports is FINE. You are checking facts, not manners. Opinion lines, rhetorical \
-questions, predictions and value judgements ("if the press can't show up, you don't get the \
-truth") are not factual claims: never list them in either bucket.
+questions and value judgements ("if the press can't show up, you don't get the truth") are not \
+factual claims: never list them in either bucket. A forecast or consequence for India is \
+different: it counts as a claim, and it must be stated by a source or follow directly from \
+sourced facts.
 
 Calibrate: most scripts should pass. If your only objections are precision, phrasing or \
 confidence, the verdict is "pass" and every item goes in "minor".
@@ -264,19 +269,29 @@ def _is_misconfigured(exc: Exception) -> bool:
     return any(m in text for m in _MISCONFIGURED)
 
 
-def _ask_checker(prompt: str) -> str:
+# Design 9.7: the gate thinks at the model's default instead of the minimum. Gemini 3's default
+# is high, and its thinking counts against max_output_tokens: a reply cut off there cannot be
+# parsed. Unused budget costs nothing, so the budget is generous, and an unreadable reply is
+# asked for once more at minimal thinking (`_check_once`), the setting the gate ran on before.
+_CHECK_TOKENS = 32768
+
+
+def _ask_checker(prompt: str, meta: dict | None = None, thinking: str = "default") -> str:
     """Run the grounded check on the dedicated key, falling back to the shared one if that
-    key is misconfigured (never if it is merely exhausted — see `_is_misconfigured`)."""
+    key is misconfigured (never if it is merely exhausted — see `_is_misconfigured`). `meta`
+    receives the number of search citations behind the reply."""
     key = _api_key()
     try:
-        return llm.generate_grounded(prompt, max_tokens=2048, model=_model(), api_key=key)
+        return llm.generate_grounded(prompt, max_tokens=_CHECK_TOKENS, model=_model(),
+                                     api_key=key, thinking=thinking, meta=meta)
     except Exception as e:  # noqa: BLE001 — decide fall-back-vs-propagate from the error
         if key is None or not _is_misconfigured(e):
             raise
         log.warning("factcheck: FACTCHECK_API_KEY cannot run the check (%s); falling back to "
                     "the shared GEMINI_API_KEY. That key has no grounded search — a key from a "
                     "NEW Google Cloud project does not get one.", str(e)[:160])
-        return llm.generate_grounded(prompt, max_tokens=2048, model=_model(), api_key=None)
+        return llm.generate_grounded(prompt, max_tokens=_CHECK_TOKENS, model=_model(),
+                                     api_key=None, thinking=thinking, meta=meta)
 
 
 def _samples() -> int:
@@ -313,10 +328,15 @@ _CONTRADICTION = re.compile(
 # same goes for a ruling or law, and for blame or a cause pinned on someone. A statistic the
 # checker merely could not confirm stays waived (the operator's line, 2026-08-07), and 'report'
 # is not on the list: "no report was found" is how plain non-confirmation is worded.
+# Since 2026-11-12 (design 9.7) a forecast or consequence for India must be stated by a source
+# too: the payoff says what changes for a person in India, and an unsourced one is an invented
+# claim. The checker reports a missing source for it as non-confirmation.
 _FABRICATION_SUBJECT = re.compile(
     r"(?i)\bquot(?:e|es|ed|ation)\b|\bsaid\b|\bsaying\b|\bstatements?\b|\bruling\b|\bcourt\b|"
     r"\blaws?\b|\bblam\w*|\bcaus(?:e|es|ed|ing)\b|\bresponsib\w*|\battribut\w*|"
-    r"\bno record\b|\bappears nowhere\b")
+    r"\bno record\b|\bappears nowhere\b|"
+    r"\bforecast\w*|\bpredict\w*|\bprojection\w*|\bconsequences?\b|\bwill\b|\bgoing to\b|"
+    r"\bexpected to\b|\blikely to\b")
 
 
 def _only_unconfirmed(finding: str) -> bool:
@@ -353,9 +373,10 @@ def _checker_sources(sources: list[str] | None) -> list[str]:
     return publisher + gnews
 
 
-def _check_once(prompt: str) -> tuple[dict, str]:
-    """One checker verdict and its raw reply. An unreadable reply is asked for once more."""
-    raw = _ask_checker(prompt)
+def _check_once(prompt: str, meta: dict | None = None) -> tuple[dict, str]:
+    """One checker verdict and its raw reply. An unreadable reply is asked for once more.
+    `meta` receives the citation count of the reply that was used."""
+    raw = _ask_checker(prompt, meta)
     try:
         return _parse(raw), raw
     except ValueError as e:  # JSONDecodeError included
@@ -363,15 +384,18 @@ def _check_once(prompt: str) -> tuple[dict, str]:
         # failed to parse. Falling open on it shipped idea 291 unverified (2026-09-12) with a
         # claim the gate blocks 6 times out of 6. One more ask is cheap (one grounded call,
         # inside Vertex's free Gemini 3 allowance) and far cheaper than a public false claim.
-        log.warning("factcheck: could not parse the checker's reply (%s); asking once more. "
-                    "Raw reply: %s", e, raw.strip()[:1500])
-        raw = _ask_checker(prompt)
+        # The second ask uses minimal thinking: a reply cut off by the token limit at default
+        # thinking would most likely be cut off again (final review, 2026-11-12).
+        log.warning("factcheck: could not parse the checker's reply (%s); asking once more at "
+                    "minimal thinking. Raw reply: %s", e, raw.strip()[:1500])
+        raw = _ask_checker(prompt, meta, thinking="minimal")
         return _parse(raw), raw
 
 
 def verify(script_body: str, sources: list[str] | None = None, title: str = "",
            on_screen: list[str] | None = None) -> dict:
-    """Re-check a finished script. Returns {ok, unsupported, checked, reason}.
+    """Re-check a finished script. Returns {ok, unsupported, minor, checked, reason} and, when
+    the checker ran, `citations`: the search citations behind each sample's verdict.
 
     `ok=False` means BLOCK the reel. A checker failure returns ok=True with a reason, because a
     Gemini outage must not take the day's batch down with it (rule 14) — the scriptwriter's own
@@ -402,14 +426,21 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
                             on_screen=screen_block, today=today.isoformat(), year=today.year)
 
     raw = ""
+    # What grounding did, one count per sample that ran (design 9.7): a sample with no
+    # citations judged the script without searching.
+    citations: list = []
     try:
-        data, raw = _check_once(prompt)
+        meta: dict = {}
+        data, raw = _check_once(prompt, meta)
+        citations.append(meta.get("citations"))
         for extra_sample in range(_samples() - 1):
+            meta = {}
             try:
-                more, more_raw = _check_once(prompt)
+                more, more_raw = _check_once(prompt, meta)
             except Exception as e:  # noqa: BLE001 — one verdict in hand is enough to decide on
                 log.warning("factcheck: extra sample %d could not run (%s)", extra_sample + 2, e)
                 continue
+            citations.append(meta.get("citations"))
             data = _merge_samples(data, more)
             raw = f"{raw.strip()}\n--- sample {extra_sample + 2} ---\n{more_raw.strip()}"
     except Exception as e:  # noqa: BLE001 — checker outage (rules 13, 14)
@@ -480,7 +511,7 @@ def verify(script_body: str, sources: list[str] | None = None, title: str = "",
         log.warning("factcheck: %d minor issue(s) alongside the block: %s",
                     len(minor), " | ".join(minor[:3]))
     return {"ok": ok, "unsupported": blocking, "minor": minor, "checked": checked,
-            "reason": "fail" if not ok else "pass"}
+            "reason": "fail" if not ok else "pass", "citations": citations}
 
 
 def _merge_samples(a: dict, b: dict) -> dict:

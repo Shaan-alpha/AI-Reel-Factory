@@ -22,7 +22,7 @@ def test_cap_tags_stays_within_budget():
     assert capped == many[: len(capped)] and len(capped) < len(many)
 
 
-def test_build_body_sets_disclosure_and_shorts(monkeypatch):
+def test_build_body_sets_disclosure(monkeypatch):
     monkeypatch.setenv("AI_DISCLOSURE", "true")
     body = pub._build_body({
         "title": "ISRO reusable rocket, explained — why it matters",
@@ -31,7 +31,7 @@ def test_build_body_sets_disclosure_and_shorts(monkeypatch):
     })
     assert body["status"]["containsSyntheticMedia"] is True
     assert body["status"]["selfDeclaredMadeForKids"] is False
-    assert "#Shorts" in body["snippet"]["description"]
+    assert body["snippet"]["description"] == "Cheaper launches. Sources: https://x.com"
     assert body["snippet"]["tags"] == ["ISRO", "space", "Shorts"]  # '#' stripped
     assert body["snippet"]["categoryId"] == "25"
 
@@ -40,8 +40,8 @@ def test_build_body_disclosure_can_be_disabled(monkeypatch):
     monkeypatch.setenv("AI_DISCLOSURE", "false")
     body = pub._build_body({"title": "t", "description": "d #Shorts"})
     assert body["status"]["containsSyntheticMedia"] is False
-    # already has #Shorts → not duplicated
-    assert body["snippet"]["description"].count("#Shorts") == 1
+    # the description is passed through as written
+    assert body["snippet"]["description"] == "d #Shorts"
 
 
 def test_build_body_truncates_title_and_requires_it():
@@ -200,7 +200,7 @@ def test_the_description_and_tags_are_made_acceptable_to_youtube():
     body = pub._build_body({"title": "T", "description": "Prices rose <5% -> fell\n\nAI line.",
                             "tags": ["a<b", "x,y", "#Shorts"]})
     desc = body["snippet"]["description"]
-    assert "<" not in desc and ">" not in desc and desc.endswith("#Shorts")
+    assert "<" not in desc and ">" not in desc and desc.endswith("AI line.")
     assert all("<" not in t and "," not in t for t in body["snippet"]["tags"])
 
     long = ("₹" * 3000) + "\n\nAI-generated narration, images and music.\n\n#Shorts"
@@ -326,3 +326,9 @@ def test_read_back_failure_never_fails_the_publish(monkeypatch, tmp_path):
     monkeypatch.setattr(pub, "_reader_client", _down)
     vid, url = pub.publish(str(video), {"title": "T", "description": "d"}, 9)
     assert vid == "V1" and url.endswith("V1") and seen["readback"] is None
+
+
+def test_publish_no_longer_adds_shorts():
+    """Design 9.9: #Shorts is no longer added; the description's last line is the hashtags."""
+    body = pub._build_body({"title": "t", "description": "Line one.\n\n#ISRO #ButItMatters"})
+    assert body["snippet"]["description"] == "Line one.\n\n#ISRO #ButItMatters"

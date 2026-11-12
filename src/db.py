@@ -30,7 +30,9 @@ log = logging.getLogger(__name__)
 # Telegram digest — not posted, but distinct from a hard 'rejected'.
 # 'blocked' (2026-09-27): the fact-check gate refused the story. It used to be 'rejected', which
 # made a gate verdict indistinguishable from the operator's own Reject tap.
-IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked")
+# 'expired' (2026-11-12): offered and not tapped. Unlike 'passed', the story de-duplication ignores
+# it, so a good story the operator simply did not pick can be offered again (design 8.5).
+IDEA_STATUSES = ("pending", "approved", "rejected", "passed", "produced", "blocked", "expired")
 
 
 class _RetryTransport(httpx.BaseTransport):
@@ -94,10 +96,22 @@ def get_client() -> Client:
 # --- ideas ----------------------------------------------------------------------------
 
 def insert_ideas(ideas: list[dict]) -> list[dict]:
-    """Insert ideation rows (status defaults to 'pending'). Returns the inserted rows."""
+    """Insert ideation rows (status defaults to 'pending'). Returns the inserted rows.
+
+    `rank_score` and `demand` (design section 13) are dropped and the insert retried if those
+    columns do not exist yet: ideas are the run's backbone, so a missing column costs the
+    record, never the digest. PostgREST refused the first insert, so nothing is duplicated."""
     if not ideas:
         return []
-    return get_client().table("ideas").insert(ideas).execute().data
+    try:
+        return get_client().table("ideas").insert(ideas).execute().data
+    except Exception as e:  # noqa: BLE001 — only a missing column is retried
+        if not _missing_schema(e):
+            raise
+        _warn_once("ideas.rank_score", "ideas.rank_score / ideas.demand are missing (run the SQL "
+                                       "in docs/03); ideas are stored without them")
+        bare = [{k: v for k, v in i.items() if k not in ("rank_score", "demand")} for i in ideas]
+        return get_client().table("ideas").insert(bare).execute().data
 
 
 def get_pending_ideas() -> list[dict]:
@@ -181,7 +195,7 @@ def recent_ideas(days: int = 10) -> list[dict]:
     Trump Coverage!') shipped the same claim, citing the same article."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     return (get_client().table("ideas").select("id,title,hook,sources,status")
-            .gte("created_at", since).execute().data) or []
+            .gte("created_at", since).neq("status", "expired").execute().data) or []
 
 
 # --- scripts / posts ------------------------------------------------------------------
@@ -191,24 +205,63 @@ def update_script_body(script_id: int, body: str) -> None:
     get_client().table("scripts").update({"body": body}).eq("id", script_id).execute()
 
 
+def update_script_caption(script_id: int, caption: str) -> None:
+    """Replace a script's caption (the fact-check repair corrected its description)."""
+    get_client().table("scripts").update({"caption": caption}).eq("id", script_id).execute()
+
+
+def update_script_title(script_id: int, title: str) -> None:
+    """Replace a script's title (the fact-check repair corrected it). Unlike
+    backfill_script_title, this overwrites a stored title."""
+    get_client().table("scripts").update({"title": title}).eq("id", script_id).execute()
+
+
 def insert_script(idea_id: int, template: str, body: str, caption: str,
-                  hashtags: list[str], title: str | None = None) -> int:
+                  hashtags: list[str], title: str | None = None,
+                  structure: str | None = None) -> int:
     """Persist a generated script; return its id.
 
     `title` is the punchy PUBLISHED YouTube title — stored so the analytics loop can learn
     which title STYLE wins (the dry idea title is a poor proxy; the published one is what
     viewers actually saw and tapped). Optional for back-compat with older callers/tests.
+
+    `structure` (scripts.structure, design 9.3) records which structure the script followed. If
+    the column does not exist yet, the script is stored without it (PostgREST refused the first
+    insert, so the retry cannot duplicate the row).
     """
     row = {"idea_id": idea_id, "template": template, "body": body,
            "caption": caption, "hashtags": hashtags}
     if title:
         row["title"] = title
-    return get_client().table("scripts").insert(row).execute().data[0]["id"]
+    if structure:
+        row["structure"] = structure
+    try:
+        return get_client().table("scripts").insert(row).execute().data[0]["id"]
+    except Exception as e:  # noqa: BLE001 — only a missing column is retried
+        if not (structure and _missing_schema(e)):
+            raise
+        _warn_once("scripts.structure", "scripts.structure is missing (run the SQL in docs/03); "
+                                        "scripts are stored without their structure")
+        row.pop("structure")
+        return get_client().table("scripts").insert(row).execute().data[0]["id"]
 
 
 def set_post_status(post_id: int, status: str) -> None:
     """Set a post's status (e.g. 'removed' once it is gone from the platform)."""
     get_client().table("posts").update({"status": status}).eq("id", post_id).execute()
+
+
+def set_script_grounding(script_id: int, grounding: dict) -> None:
+    """Store what grounding did for the draft and the gate (scripts.grounding, jsonb; design
+    9.7), so "the draft searched" is measured. A missing column costs the record, never a reel."""
+    try:
+        get_client().table("scripts").update({"grounding": grounding}).eq("id", script_id) \
+            .execute()
+    except Exception as e:  # noqa: BLE001 — only a missing column is tolerated
+        if not _missing_schema(e):
+            raise
+        _warn_once("scripts.grounding", "scripts.grounding is missing (run the SQL in docs/03); "
+                                        "grounding counts are not stored")
 
 
 def set_script_factcheck(script_id: int, verdict: dict) -> None:
@@ -390,17 +443,23 @@ def insert_analytics(post_id: int, views: int, likes: int | None = None,
     ).execute()
 
 
-def _ranked_recent_posts() -> list[dict]:
+def _ranked_recent_posts(since: str | None = None) -> list[dict]:
     """The newest WINNERS_WINDOW_POSTS published Shorts with their current views and title,
     best first: [{title, views}]. Shared by the winners and the low performers.
 
     Recency matters: ranked on lifetime views the list had not changed since 2026-08-26, while
-    the channel's topics and style moved on. Views now come from each post's newest snapshot."""
+    the channel's topics and style moved on. Views now come from each post's newest snapshot.
+
+    `since` (WINNERS_SINCE, the relaunch date) keeps only posts published on or after it and at
+    least 72 hours ago, when a Short's views have settled (design 8.4)."""
     client = get_client()
     window = max(5, int(_cfg("WINNERS_WINDOW_POSTS", "40")))
-    posts = (client.table("posts").select("id").eq("platform", "youtube")
-             .not_.is_("external_id", "null").neq("status", "removed")
-             .order("id", desc=True).limit(window).execute().data) or []
+    query = (client.table("posts").select("id").eq("platform", "youtube")
+             .not_.is_("external_id", "null").neq("status", "removed"))
+    if since:
+        settled = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+        query = query.gte("published_at", since).lte("published_at", settled)
+    posts = query.order("id", desc=True).limit(window).execute().data or []
     ids = [p["id"] for p in posts]
     if not ids:
         return []
@@ -437,7 +496,7 @@ def _topic_words(title: str) -> set[str]:
     return {t for t in _re.findall(r"[a-z0-9]+", title.lower()) if t not in _STOP and len(t) > 2}
 
 
-def top_performing_titles(limit: int = 8) -> list[str]:
+def top_performing_titles(limit: int = 8, since: str | None = None) -> list[str]:
     """Best-viewed Shorts as "PUBLISHED TITLE — N views" (analytics → posts → scripts → ideas).
 
     Returns the PUBLISHED YouTube title (the punchy one viewers tapped) with its view count,
@@ -461,7 +520,7 @@ def top_performing_titles(limit: int = 8) -> list[str]:
     out: list[str] = []
     chosen: list[set[str]] = []
     seen: set[str] = set()
-    for r in _ranked_recent_posts():
+    for r in _ranked_recent_posts(since):
         title, words = r["title"], _topic_words(r["title"])
         if not title or title.lower() in seen:
             continue

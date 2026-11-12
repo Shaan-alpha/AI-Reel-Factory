@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked against the code and data and the design rewritten (2026-11-12); the build plan is next. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) built** on branch `feat/stage-1-stories-script`, not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-12 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -62,11 +62,13 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - **New format:** AI-video shots, Hinglish narration, English subtitles, Indian viewers. The
   audit is checked and the design rewritten (2026-11-12,
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
-  **stage 0 is built** on `feat/stage-0-safety-measuring` (see the 2026-11-12 log). Next: merge it,
-  then plan and build stage 1 (stories and script). State and decisions are in
+  **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is built** (1a and 1b) on
+  `feat/stage-1-stories-script`. Next: the final review of stage 1, then push and a PR with the
+  operator's go-ahead; then stage 2 (Hinglish). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
-- ⚠️ **Operator, for stage 0:** run the new SQL at the end of docs/03 §4 in Supabase (two columns
-  on `posts`, tables `post_metrics` and `reel_attempts`); approve the bot deploy.
+- ⚠️ **Operator, for stages 0 and 1:** run the new SQL at the end of docs/03 §4 in Supabase (two
+  columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; two on
+  `scripts`). The code runs without it, skipping those records. The bot is already redeployed.
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
   - ~~before 2026-11-17: ear-test the 3.8 TTS models~~ Done 2026-11-12: the operator kept
     `gemini-3.1-flash-tts-preview` (Charon, Hinglish) over both 3.8 models, and the voice moved
@@ -174,8 +176,67 @@ in look and sound:
   percentage viewed, India share, traffic, the retention curve), backfilling the old Shorts as the
   baseline; checked live on one Short;
 - the bot reads the leading number of `/makeshort`.
-A fresh final review found 5 issues worth fixing (the wind-up cut could garble an opening; a sentence ending on "U.S." merged with the next; 75 old posts lacked a publish date for the metrics; the render timeout outlasted a reel's budget; the punch-up skipped the opening check), plus an India share of 0 for withheld countries; all fixed test-first. 786 pass, 5 skipped locally. **Waiting for the operator:** push and merge; the SQL in docs/03
-(the code runs without it, skipping those records); `vercel deploy --prod` for the bot.
+A fresh final review found 5 issues worth fixing (the wind-up cut could garble an opening; a sentence ending on "U.S." merged with the next; 75 old posts lacked a publish date for the metrics; the render timeout outlasted a reel's budget; the punch-up skipped the opening check), plus an India share of 0 for withheld countries; all fixed test-first. 786 pass, 5 skipped (CI run 43196062166 on the PR). **Merged as PR #17** and the bot
+redeployed the same day (`dpl_ABnQptCFzrEPdKBxQtXm3satobmb`, account shaan-alpha). **Waiting for
+the operator:** the SQL at the end of docs/03 §4 (the code runs without it, skipping those records).
+
+**Stage 1a built (stories for Indian viewers)** on branch `feat/stage-1-stories-script`
+([plan](docs/superpowers/plans/2026-11-12-stage-1a-stories-for-indian-viewers.md)): a 60-story pool with each
+story's age and Google News searches for an Indian stake (puzzle items dropped); two free demand
+signals in `src/demand.py`, Wikipedia's India list (yesterday's views over the article's own week,
+checked live: Jensen Huang 42x, Nvidia 13.6x) and comparable Hindi channels' Shorts pacing ahead of
+their norm; both ideation prompts name the Indian viewer and the rubric, with no science quota;
+each idea stores its category (`ideas.niche`), the score that ranked it and the signals it matched;
+the topic mix is enforced in code (one india-politics idea, two per category, one somber story);
+de-duplication runs before research, ignores "vs" and template words, and lets a sourced
+follow-up through; untapped ideas end `expired`, not banned; election matter is dropped inside an
+`ELECTION_SILENCE` window. The winners block is off until `WINNERS_SINCE` is set. 811 pass,
+5 skipped. SQL for it is at the end of docs/03 §4 (two `ideas` columns; the code runs without them).
+
+**Stage 1b built (script and packaging)** on the same branch
+([plan](docs/superpowers/plans/2026-11-12-stage-1b-script-and-packaging.md)):
+- the writer's brief: a plain explainer for Indian viewers (the sarcastic voice retired),
+  sentence one with the Indian stake, a payoff that says what changes for a person in India, no
+  phrases to copy; the English narrator prompt is test 3's, with a neutral Indian English accent;
+- three structures (what happened, the number, the belief), chosen by a hash of the idea id,
+  somber stories always the first, stored on the script row;
+- one title of at most 7 words and 44 characters (also the banner): one model shortening, then a
+  word cut; a reply without a title uses the idea's under the same limits;
+- length in seconds (27 s target, 33 s cap, 2.2 words a second): optional sentences the writer
+  marks go first, never sentence one or the payoff it marks (both copied as text and found by
+  their words), which also places
+  the `[serious]` tag; the tighten rewrite and the hook judge are off (code and both workflows);
+- the repair may fix the title, the re-check sees it, and every model rewrite (repair, opening,
+  hook judge) is refused if it adds a number or a name;
+- the gate thinks at the model's default (32,768 output tokens after the review; roughly two cents
+  a reel), an
+  unsourced forecast for India blocks like unsupported blame, and the draft's and the gate's
+  citation counts are stored (`scripts.grounding`); Claude hears "the draft searched" only when
+  it has citations;
+- the description: publisher names with their links, the disclosure line by visual source (an
+  AI-video line added), a one-line footer, at most three hashtags ending `#ButItMatters`, no
+  `#Shorts`; tags: the writer's six plus the brand; category 28 for science, space and tech.
+852 pass, 5 skipped; with every `.env` key blanked, 841 pass and only the known `NICHE` artifact
+fails. SQL: two `scripts` columns at the end of docs/03 §4 (the code runs without them).
+
+**Final review of stage 1 (1a and 1b)** by a fresh reviewer: no critical issue, 8 important, all
+fixed test-first:
+- an unsourced forecast for India no longer slips through the "could not confirm" waiver (rule 6
+  updated);
+- the gate's budget at default thinking is 32,768 tokens, and an unreadable reply is asked again
+  at minimal thinking. Measured on two real scripts (441, 436): about 2,800-3,100 thinking tokens,
+  finish STOP, both verdicts parsed; roughly two cents a reel;
+- the writer copies its payoff and optional sentences as text, found by their words: it counts
+  sentences its own way, so indices landed on the wrong sentence;
+- the repair keeps a payoff (or marks its rewritten one) and may fix the description and cards,
+  which the re-check, the stored caption and the upload then use;
+- a follow-up returns only after a published story;
+- "India" no longer makes two stories one;
+- the election window covers polling day and the two days before, in Indian dates;
+- top-up ideas get their story's category.
+870 pass, 5 skipped; with `.env` blanked only the `NICHE` artifact fails. The repository variables
+`ENABLE_HOOK_JUDGE`, `ENABLE_SCRIPT_TIGHTEN`, `SCRIPT_MAX_WORDS` and `VOICE_STYLE_PROMPT` are not
+set, so the new defaults apply. Deferred minors are listed in the handoff.
 
 ### 2026-11-10 — A new format chosen; design, research and a reach audit in progress (no code changed)
 

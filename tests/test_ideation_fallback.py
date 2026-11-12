@@ -71,8 +71,8 @@ def test_inserts_valid_ideas(monkeypatch):
     captured = _patch(monkeypatch, ideas)
     n = fb.run_fallback_ideation()
     assert n == 6
-    assert all(set(r) == {"niche", "title", "hook", "angle", "est_score", "sources"}
-               for r in captured["rows"])
+    assert all(set(r) == {"niche", "title", "hook", "angle", "est_score", "sources",
+                          "rank_score", "demand"} for r in captured["rows"])
 
 
 def test_drops_ideas_with_too_few_sources(monkeypatch):
@@ -277,7 +277,7 @@ def test_produce_ideas_runs_two_stages(monkeypatch):
     monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [{"title": "Real headline - PTI", "url": "https://feed.example/a", "source": "PTI"}])
     monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: [])
     calls = {"select": 0}
-    def _sel(target, headlines, trending, winners):
+    def _sel(target, headlines, trending, winners, demand_lines=None):
         calls["select"] += 1
         return [{"story": "Story X", "category": "world", "why_shareworthy": "stakes"}]
     monkeypatch.setattr(fb, "_select_stories", _sel)
@@ -383,8 +383,9 @@ def test_validate_share_score_coerced_and_clamped():
 def test_to_rows_projects_to_db_columns_only():
     ideas = fb._validate_and_clean([_idea("A", share_score=0.9)])
     rows = fb._to_rows(ideas)
-    assert set(rows[0]) == {"niche", "title", "hook", "angle", "est_score", "sources"}
-    assert "share_score" not in rows[0]
+    assert set(rows[0]) == {"niche", "title", "hook", "angle", "est_score", "sources",
+                            "rank_score", "demand"}
+    assert "share_score" not in rows[0] and rows[0]["rank_score"] == 0.9
 
 
 # --- de-hyped ideation framing ---------------------------------------------------------
@@ -949,7 +950,8 @@ def test_two_ideas_on_one_story_are_caught_despite_different_wording():
 
 
 def test_tokens_fold_plurals_and_drop_filler():
-    assert fb._tokens("India's UPI transactions could be over") == {"india", "upi", "transaction"}
+    # 'India' is a stopword for story matching since 2026-11-12: most titles carry it now.
+    assert fb._tokens("India's UPI transactions could be over") == {"upi", "transaction"}
     assert fb._tokens("press crisis") == {"press", "crisis"}  # not every final s is a plural
 
 
@@ -1034,3 +1036,219 @@ def test_ideas_written_from_research_take_their_own_storys_sources(monkeypatch):
     ideas = {i["title"]: i["sources"] for i in fb._produce_ideas(2)}
     assert ideas["RBI Cuts Repo Rate Again"] == ["https://b.com/rbi-cuts-repo-rate"]
     assert ideas["Starship Reaches Orbit"] == ["https://a.com/starship-reaches-orbit"]
+
+
+# --- stage 1a: picking for Indian viewers (design 8.1, 8.3, 8.4) ------------------------------
+
+def test_both_prompts_name_the_viewer_and_the_rubric():
+    for prompt in (fb._STAGE1_PROMPT, fb._PROMPT):
+        assert "Indians aged about 18-34" in prompt
+        assert "a named Indian or Indian-origin person" in prompt
+        assert "routine launches" in prompt
+        assert "at least half" not in prompt
+
+
+def _capture_picker(monkeypatch):
+    seen = {}
+
+    def _pick(target, headlines, trending, winners, demand_lines=None):
+        seen.update(headlines=headlines, winners=winners, demand=demand_lines)
+        return []
+
+    monkeypatch.setattr(fb, "_select_stories", _pick)
+    return seen
+
+
+def test_the_winners_block_is_off_until_winners_since(monkeypatch):
+    _patch(monkeypatch, [_idea("A story about India")])
+    monkeypatch.delenv("WINNERS_SINCE", raising=False)
+    called = []
+    monkeypatch.setattr(fb.db, "top_performing_titles", lambda *a, **k: called.append(1) or ["x"])
+    monkeypatch.setattr(fb.db, "low_performing_titles", lambda *a, **k: called.append(2) or ["y"])
+    seen = _capture_picker(monkeypatch)
+    fb._produce_ideas(2)
+    assert called == [] and seen["winners"] == []
+
+
+def test_headlines_show_their_age(monkeypatch):
+    _patch(monkeypatch, [_idea("A story about India")])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [
+        {"title": "A - P", "url": "https://a", "source": "P", "age_hours": 5.2}])
+    seen = _capture_picker(monkeypatch)
+    fb._produce_ideas(2)
+    assert "(5h) A - P" in seen["headlines"]
+
+
+def test_an_unknown_category_is_mapped_to_a_known_one():
+    assert fb._category("Geopolitics") == "world"
+    assert fb._category("Science & Space") == "space"
+    assert fb._category("India politics") == "india-politics"
+    assert fb._category("tech") == "tech"
+    assert fb._category("") == "world"
+
+
+def test_each_idea_stores_its_category_and_rank():
+    row = fb._to_rows([{**_idea("T"), "niche": "tech", "share_score": 0.8,
+                        "demand": ["India on Wikipedia yesterday: \"T\""]}])[0]
+    assert row["niche"] == "tech" and row["rank_score"] == 0.8
+    assert row["demand"] == ["India on Wikipedia yesterday: \"T\""]
+
+
+# --- the topic mix, enforced in code at the final pick (design 8.4, review finding 20) --------
+
+def _ranked(*specs):
+    return [{**_idea(title), "niche": niche, "share_score": 1 - i / 100}
+            for i, (title, niche) in enumerate(specs)]
+
+
+def test_the_mix_caps_politics_categories_and_somber_stories():
+    ranked = _ranked(("Party row in Delhi", "india-politics"), ("Court notice to MPs", "india-politics"),
+                     ("New phone chip", "tech"), ("Cheaper data plans", "tech"),
+                     ("AI tutor apps", "tech"), ("Gulf shipping lanes", "world"))
+    assert [i["niche"] for i in fb._enforce_mix(ranked, 4)] == ["india-politics", "tech", "tech", "world"]
+    ranked = _ranked(("Bus crash kills 12 in Kerala", "india"), ("Floods kill 40 in Assam", "world"),
+                     ("Rupee hits a new low", "money"), ("Exam dates move", "india"))
+    titles = [i["title"] for i in fb._enforce_mix(ranked, 3)]
+    assert titles == ["Bus crash kills 12 in Kerala", "Rupee hits a new low", "Exam dates move"]
+
+
+def test_the_mix_never_empties_a_digest():
+    ranked = _ranked(*[(f"Politics story {c}", "india-politics") for c in "abcdef"])
+    out = fb._enforce_mix(ranked, 3)
+    assert [i["title"] for i in out] == ["Politics story a", "Politics story b", "Politics story c"]
+
+
+def test_seed_ideas_applies_the_mix(monkeypatch):
+    ideas = _ranked(("Party row in Delhi", "india-politics"), ("Court notice to MPs", "india-politics"),
+                    ("New phone chip", "tech"))
+    monkeypatch.setattr(fb, "load_routine_ideas", lambda: [])
+    monkeypatch.setattr(fb, "_produce_ideas", lambda target: ideas)
+    monkeypatch.setattr(fb.db, "existing_idea_titles", lambda: set())
+    monkeypatch.setattr(fb, "_recent_ideas", lambda: [])
+    rows = []
+    monkeypatch.setattr(fb.db, "insert_ideas", lambda r: rows.extend(r) or r)
+    fb.seed_ideas(2)
+    assert [r["niche"] for r in rows] == ["india-politics", "tech"]
+
+
+# --- de-duplication before research; follow-ups (design 8.5) --------------------------------
+
+def test_a_repeat_is_dropped_before_any_research(monkeypatch):
+    _patch(monkeypatch, [_idea("Something new")])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [
+        {"story": "Chandrayaan 4 launch window confirmed by ISRO", "category": "space",
+         "why_shareworthy": "", "demand": [], "followup": False},
+        {"story": "UPI fees for large merchants from January", "category": "money",
+         "why_shareworthy": "", "demand": [], "followup": False}])
+    monkeypatch.setattr(fb, "_recent_ideas", lambda: [
+        {"id": 9, "title": "Chandrayaan 4 launch window", "hook": "ISRO confirms Chandrayaan 4",
+         "sources": [], "status": "produced"}])
+    researched = []
+    monkeypatch.setattr(fb, "_research_stories",
+                        lambda stories: researched.append(stories) or ("", {}))
+    fb._produce_ideas(2)
+    assert [s["story"] for s in researched[0]] == ["UPI fees for large merchants from January"]
+
+
+def test_vs_and_template_words_do_not_make_a_repeat():
+    old = [{"id": 1, "title": "Korea vs Japan: the race heats up in Seoul", "hook": "",
+            "sources": [], "status": "produced"}]
+    assert not fb._repeats_recent_story(
+        {"title": "SpaceX vs Blue Origin: the race heats up", "hook": ""}, old)
+
+
+def test_a_followup_with_new_sources_is_allowed():
+    old = [{"id": 2, "title": "Chandrayaan 4 launch planned", "hook": "ISRO plans Chandrayaan 4 launch",
+            "sources": ["https://old.example/b"], "status": "produced"}]
+    new = {"title": "Chandrayaan 4 launch date set for March",
+           "hook": "ISRO confirms the Chandrayaan 4 launch", "sources": ["https://new.example/a"],
+           "followup": True}
+    assert not fb._repeats_recent_story(new, old)
+    assert fb._repeats_recent_story({**new, "sources": ["https://old.example/b"]}, old)
+    assert fb._repeats_recent_story({**new, "followup": False}, old)
+
+
+# --- rules that bind selection in India (design 8.7) -----------------------------------------
+
+def test_election_matter_is_dropped_inside_the_silence(monkeypatch):
+    from datetime import date
+
+    monkeypatch.setenv("ELECTION_SILENCE", "Bihar:2026-11-14")
+    poll = {"title": "Bihar election: what the exit polls missed", "hook": "", "angle": ""}
+    flood = {"title": "Bihar floods cut off 40 villages", "hook": "", "angle": ""}
+    assert fb._in_election_silence(poll, today=date(2026, 11, 13))
+    assert fb._in_election_silence(poll, today=date(2026, 11, 14))
+    assert not fb._in_election_silence(poll, today=date(2026, 11, 16))
+    assert not fb._in_election_silence(flood, today=date(2026, 11, 13))
+    monkeypatch.delenv("ELECTION_SILENCE")
+    assert not fb._in_election_silence(poll, today=date(2026, 11, 13))
+
+
+def test_the_prompt_carries_the_india_rules():
+    assert "names the court record or official order it rests on" in fb._PROMPT
+    assert "explain the terms and the mechanisms" in fb._PROMPT
+
+
+# --- final review of stage 1 (2026-11-12) -----------------------------------------------------
+
+def test_a_followup_is_kept_only_after_a_produced_story():
+    """The picker sets 'followup' without seeing the last 10 days, so it only means 'this story
+    continues'. A follow-up of a story that never shipped is the same story again."""
+    new = {"title": "Supreme Court grills govt again over UPI transaction fees", "hook": "",
+           "sources": ["https://b.example/2"], "followup": True}
+    old = {"id": 1, "title": "Supreme Court grills govt over UPI transaction fees", "hook": "",
+           "sources": ["https://a.example/1"]}
+    for status in ("rejected", "pending", "blocked", "expired"):
+        assert fb._repeats_recent_story(new, [{**old, "status": status}]), status
+    assert not fb._repeats_recent_story(new, [{**old, "status": "produced"}])
+    # Inside one batch, two flagged ideas on one story are one story.
+    twin = {**new, "title": "UPI transaction fees: Supreme Court grills govt again",
+            "sources": ["https://c.example/3"]}
+    assert fb._repeats_recent_story(twin, [new])
+
+
+def test_india_and_its_template_words_do_not_make_a_repeat():
+    """'India' is in most titles now, and the default searches add 'price hike' and 'new rule'."""
+    lpg = {"title": "India faces an LPG price hike from December", "hook": ""}
+    petrol = [{"id": 1, "title": "Petrol Price Hike Hits India", "hook": "", "sources": [],
+               "status": "produced"}]
+    assert not fb._repeats_recent_story(lpg, petrol)
+    onion = {"title": "New rule in India caps onion export price", "hook": ""}
+    upi = [{"id": 2, "title": "New UPI rule in India from today", "hook": "", "sources": [],
+            "status": "produced"}]
+    assert not fb._repeats_recent_story(onion, upi)
+    # The same story still matches.
+    assert fb._repeats_recent_story({"title": "LPG price hike in India from December", "hook": ""},
+                                    [{**lpg, "id": 3, "sources": [], "status": "produced"}])
+
+
+def test_the_election_silence_covers_48_hours_before_polling_in_ist(monkeypatch):
+    from datetime import date, datetime, timezone
+
+    monkeypatch.setenv("ELECTION_SILENCE", "Bihar:2026-11-14")
+    poll = {"title": "Bihar election: what the exit polls missed", "hook": "", "angle": ""}
+    assert fb._in_election_silence(poll, today=date(2026, 11, 12))
+    assert not fb._in_election_silence(poll, today=date(2026, 11, 11))
+    # 23:00 UTC on the 11th is already the 12th in India.
+    assert fb._today_ist(datetime(2026, 11, 11, 23, 0, tzinfo=timezone.utc)) == date(2026, 11, 12)
+
+
+def test_top_up_ideas_take_their_storys_category(monkeypatch):
+    """The ungrounded top-up kept the model's niche ('world', the prompt's example) for its ideas,
+    so politics slipped the mix cap and science shipped under category 25."""
+    monkeypatch.setenv("ENABLE_SOURCE_CHECK", "false")
+    monkeypatch.setattr(fb.trends, "fetch_trending", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "fetch_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "search_stories", lambda *a, **k: [])
+    monkeypatch.setattr(fb.news, "search_india_stakes", lambda *a, **k: [])
+    monkeypatch.setattr(fb.db, "recent_ideas", lambda *a, **k: [])
+    monkeypatch.setattr(fb, "_select_stories", lambda *a, **k: [
+        {"story": "ISRO tests a reusable rocket stage", "category": "space", "demand": [],
+         "followup": False}])
+    monkeypatch.setattr(fb, "_research_stories", lambda stories: ("", {}))
+    monkeypatch.setattr(fb.llm, "generate_grounded_with_sources",
+                        lambda *a, **k: (json.dumps({"ideas": []}), []))
+    monkeypatch.setattr(fb.llm, "generate", lambda *a, **k: json.dumps({"ideas": [
+        _idea("ISRO's reusable rocket stage passes its test", niche="world", story=1)]}))
+    out = fb._produce_ideas(1)
+    assert out and out[0]["niche"] == "space"

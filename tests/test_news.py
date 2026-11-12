@@ -158,3 +158,46 @@ def test_the_source_search_is_limited_to_recent_days(monkeypatch):
     monkeypatch.setattr(news.requests, "get", lambda url, **k: seen.update(url=url) or _R())
     news.search_stories("India floods")
     assert "when%3A3d" in seen["url"]
+
+
+# --- stage 1a: a deeper pool, with ages and India-stake searches (design 8.2) -----------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from email.utils import format_datetime  # noqa: E402
+
+
+def test_game_help_items_are_dropped():
+    assert news._is_game_help("Quordle hints and answers for November 12")
+    assert news._is_game_help("NYT Connections hints today")
+    assert not news._is_game_help("India's rail connections to Nepal to triple")
+    rss = _SAMPLE_RSS.replace(
+        "</channel>", "<item><title>Wordle hints for today - X</title><link>https://g</link></item></channel>")
+    with mock.patch("src.news.requests.get", return_value=_resp(rss)):
+        titles = [s["title"] for s in news.fetch_stories(10)]
+    assert "Wordle hints for today - X" not in titles and len(titles) == 3
+
+
+def test_each_story_carries_its_age():
+    five_hours_ago = format_datetime(datetime.now(timezone.utc) - timedelta(hours=5))
+    rss = ("<rss><channel><item><title>A - P</title><link>https://a</link>"
+           f"<pubDate>{five_hours_ago}</pubDate></item>"
+           "<item><title>B - P</title><link>https://b</link><pubDate>not a date</pubDate></item>"
+           "<item><title>C - P</title><link>https://c</link></item></channel></rss>")
+    ages = [s.get("age_hours") for s in news._parse_stories(rss)]
+    assert abs(ages[0] - 5.0) < 0.05 and ages[1] is None and ages[2] is None
+
+
+def test_india_stake_searches_use_the_configured_queries(monkeypatch):
+    monkeypatch.setenv("NEWS_INDIA_QUERIES", "Indian students,UPI")
+    calls = []
+
+    def _search(query, limit=6, window=None):
+        calls.append((query, window))
+        return [{"title": f"{query} story", "url": "https://same" if query == "UPI" else f"https://{len(calls)}"},
+                {"title": "dup", "url": "https://same"}]
+
+    monkeypatch.setattr(news, "search_stories", _search)
+    out = news.search_india_stakes(per_query=3)
+    assert calls == [("Indian students", "2d"), ("UPI", "2d")]
+    assert [s["url"] for s in out] == ["https://1", "https://same"]
+    assert all(s["via"] == "india-search" for s in out)
