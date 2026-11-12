@@ -28,7 +28,7 @@ import subprocess
 from functools import lru_cache
 
 from src import config
-from src.assembly import BT709_TAGS, _ffmpeg, x264_args
+from src.assembly import BT709_TAGS, RENDER_TIMEOUT_SECONDS, _ffmpeg, x264_args
 from src.text import ends_clause
 
 log = logging.getLogger(__name__)
@@ -553,7 +553,12 @@ def _burn(video_path: str, ass_path: str, out_path: str,
         "-movflags", "+faststart",
         os.path.abspath(out_path),
     ]
-    proc = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True,
+                              timeout=RENDER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"subtitles: ffmpeg burn timed out after {RENDER_TIMEOUT_SECONDS} s") from e
     if proc.returncode != 0:
         raise RuntimeError(f"subtitles: ffmpeg burn failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
 

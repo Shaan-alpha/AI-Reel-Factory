@@ -44,6 +44,11 @@ _MIN_CLIP_SECONDS = 1.5       # below this it gets seizure-fast / under-covers l
 _MAX_CLIP_SECONDS = 8.0       # docs/08 §3 copyright ceiling for one continuous clip
 _MAX_SLICES = 60        # filter-graph safety cap (covers a 60s reel down to ~1.5s cuts)
 _MUSIC_EXTS = (".mp3", ".m4a", ".wav", ".ogg", ".aac")
+# Every FFmpeg call has a timeout. Without one, a stalled render waited for the job's hard kill,
+# which skips every handler and leaves the idea 'approved' with no word to the operator. A render
+# measures about 76 s on CI (with captions); a probe, under a second.
+RENDER_TIMEOUT_SECONDS = 600
+PROBE_TIMEOUT_SECONDS = 60
 
 
 # Colour tags go on the FRAMES: ffmpeg 8 writes the frame properties and ignores
@@ -175,9 +180,18 @@ def probe_duration(path: str) -> float:
     out = subprocess.run(
         [_ffprobe(), "-v", "error", "-show_entries", "format=duration",
          "-of", "default=nw=1:nk=1", path],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=PROBE_TIMEOUT_SECONDS,
     ).stdout.strip()
     return float(out)
+
+
+def _run_render(cmd: list[str]) -> subprocess.CompletedProcess | None:
+    """Run one FFmpeg render under RENDER_TIMEOUT_SECONDS; None if it timed out."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=RENDER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None
 
 
 def _safe_probe(path: str) -> float:
@@ -596,15 +610,19 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
              os.path.basename(music) if music else "none", "yes" if sfx_path else "no",
              levels.get("voice_pre", 0.0) + levels.get("voice_post", 0.0),
              f"{levels['bed']:+.1f} dB" if "bed" in levels else "fixed")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        # Fail-soft (rules 11, 14): a polished filtergraph error must never lose the reel.
-        log.warning("assembly: polished render failed (%d); retrying plain.\n%s",
-                    proc.returncode, proc.stderr[-800:])
+    proc = _run_render(cmd)
+    if proc is None or proc.returncode != 0:
+        # Fail-soft (rules 11, 14): a polished filtergraph error must never lose the reel. A
+        # timeout gets the same retry: the plain graph is the lighter render.
+        log.warning("assembly: polished render failed (%s); retrying plain.\n%s",
+                    "timed out" if proc is None else proc.returncode,
+                    "" if proc is None else proc.stderr[-800:])
         ordered_plain = _ordered_clips(clip_paths, duration, overlap=0.0)
         cmd = _build_cmd(ordered_plain, audio_path, duration, out_path,
                          music_path=music, polish=False, levels=levels)
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = _run_render(cmd)
+        if proc is None:
+            raise RuntimeError(f"assembly: ffmpeg timed out after {RENDER_TIMEOUT_SECONDS} s")
         if proc.returncode != 0:
             raise RuntimeError(f"assembly: ffmpeg failed ({proc.returncode}):\n{proc.stderr[-1500:]}")
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:

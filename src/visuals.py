@@ -397,11 +397,14 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
         "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
         + BT709_TAGS
     )
-    proc = subprocess.run(
-        [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
-         "-vf", vf, *x264_args(), "-r", "30", dest],
-        capture_output=True, text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
+             "-vf", vf, *x264_args(), "-r", "30", dest],
+            capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("ken burns timed out after 120 s") from e
     if proc.returncode != 0:
         raise RuntimeError(f"ken burns failed ({proc.returncode}): {proc.stderr[-400:]}")
 
