@@ -29,6 +29,7 @@ from src import (
     config,
     db,
     factcheck,
+    hinglish,
     ideation_fallback,
     publish_youtube,
     scriptwriter,
@@ -207,10 +208,24 @@ def _format(language: str, visual_meta: dict) -> dict:
             "shots": visual_meta.get("clips"), "structure": None}
 
 
-def _downgrades(voice_meta: dict, visual_meta: dict) -> list[str]:
-    """What fell back on this reel: another voice than the channel's, or stock video under an
-    image source."""
-    out = []
+def _wants_hinglish() -> bool:
+    """NARRATION_LANGUAGE=hinglish turns on Hinglish narration (design 7.1); `english`, the
+    default until the relaunch, keeps today's English path exactly."""
+    return str(config.get("NARRATION_LANGUAGE", "english") or "").strip().lower() == "hinglish"
+
+
+def _record_spoken(script: dict, record: dict) -> None:
+    """Keep what was spoken on the script row (scripts.spoken). Bookkeeping never costs a reel."""
+    try:
+        db.set_script_spoken(script["script_id"], record)
+    except Exception as e:  # noqa: BLE001 — rule 14
+        log.warning("produce: could not store what was spoken (%s)", e)
+
+
+def _downgrades(voice_meta: dict, visual_meta: dict, english_fallback: bool = False) -> list[str]:
+    """What fell back on this reel: English narration in place of Hinglish, another voice than
+    the channel's, or stock video under an image source."""
+    out = ["english-narration"] if english_fallback else []
     if voice_meta.get("engine") and voice_meta.get("engine") != "gemini":
         out.append("fallback-voice")
     wanted = str(config.get("VISUAL_SOURCE", "photos")).lower()
@@ -346,9 +361,40 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
     os.makedirs(work, exist_ok=True)
     try:
         spoke: dict = {}
+        # Hinglish (design 7): the fact-checked English rendered as checked spoken lines, then
+        # voiced only by Hindi-capable voices. Any failure narrates the reel in English, as
+        # today, and says so: a Hinglish failure never costs the reel (7.6).
+        language, spoken, fell_back = "en", None, None
+        if _wants_hinglish():
+            progress["stage"] = "hinglish"
+            try:
+                spoken, why = hinglish.to_hinglish(script["script_body"],
+                                                   script.get("title") or idea.get("title") or "",
+                                                   script.get("tone") or "plain")
+            except Exception as e:  # noqa: BLE001
+                spoken, why = None, f"the Hinglish step failed ({type(e).__name__}: {e})"
+            fell_back = None if spoken else why
         progress["stage"] = "voice"
-        audio, duration = voice.synthesize(script["script_body"], work, meta=spoke,
-                                           tone=script.get("tone"))
+        if spoken:
+            # The English script's words at 2.2 a second: the Hinglish must take about as long.
+            expected = len(scriptwriter._visible_words(script["script_body"])) / 2.2
+            try:
+                audio, duration = voice.synthesize(spoken["said"], work, meta=spoke,
+                                                   tone=script.get("tone"),
+                                                   expected_seconds=expected)
+                language = "hi"
+            except Exception as e:  # noqa: BLE001 — English narration (design 7.6)
+                fell_back = f"no Hindi voice succeeded ({str(e)[:200]})"
+                spoke = {}
+        if language != "hi":
+            audio, duration = voice.synthesize(script["script_body"], work, meta=spoke,
+                                               tone=script.get("tone"))
+        if _wants_hinglish():
+            _record_spoken(script, spoken if language == "hi"
+                           else {"language": "en", "reason": fell_back})
+            if fell_back:
+                _notify(f"🗣️ Idea {idea_id} ({idea.get('title')!r}) was narrated in English: "
+                        f"the Hinglish did not work ({fell_back}).")
         log.info("produce: idea %s voiced by %s", idea_id, spoke.get("voice"))
         # The channel has ONE narrator, and it lives only on the Gemini engine. Three reels in
         # September left it for Chirp's voice with nothing but a log line to show for it, which
@@ -364,22 +410,28 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         clips = visuals.fetch_broll(keywords, duration, work,
                                     setting="India" if _INDIA_RE.search(story) else None,
                                     meta=shown)
-        progress["downgrades"] = _downgrades(spoke, shown)
+        progress["downgrades"] = _downgrades(spoke, shown, english_fallback=fell_back is not None)
         progress["stage"] = "assembly"
         raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
         # Pass the punchy title so subtitles burn it as a frame-1 hook banner (the first frame
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
         hook = script.get("title") or idea.get("title")
         progress["stage"] = "subtitles"
-        final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
-                                        hook_text=hook, key_points=script.get("key_points"),
-                                        source_label=_source_domain(idea.get("sources")),
-                                        script_text=script["script_body"])
+        if language == "hi":
+            # English subtitles timed from the narration's pauses; no speech recognition (7.7).
+            final = subtitles.burn_hinglish(raw, audio, os.path.join(work, "reel_final.mp4"),
+                                            spoken["lines"], hook_text=hook,
+                                            source_label=_source_domain(idea.get("sources")))
+        else:
+            final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
+                                            hook_text=hook, key_points=script.get("key_points"),
+                                            source_label=_source_domain(idea.get("sources")),
+                                            script_text=script["script_body"])
         metadata = _build_metadata(idea, script)
         metadata["voice"] = spoke.get("voice")
-        # Every reel is narrated in English until the Hinglish stage ships (design 9.9).
-        metadata["audio_language"] = "en"
-        metadata["format"] = _format("en", shown)
+        # The audio language is what was voiced (design 9.9): hi for Hinglish, en otherwise.
+        metadata["audio_language"] = language
+        metadata["format"] = _format(language, shown)
         progress["stage"] = "upload"
         video_id, url = publish_youtube.publish(final, metadata, script["script_id"])
         _mark_produced(idea_id, url)

@@ -116,6 +116,11 @@ jobs:
           VOICE_ENGINE: ${{ vars.VOICE_ENGINE || 'gemini' }}          # gemini | google | edge | kokoro (chain)
           GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}       # Chirp 3 HD; empty -> falls back to edge-tts
           GOOGLE_TTS_VOICE: ${{ vars.GOOGLE_TTS_VOICE }}              # an en-IN Chirp3-HD voice name
+          GOOGLE_TTS_VOICE_HI: ${{ vars.GOOGLE_TTS_VOICE_HI }}        # the Hindi Chirp voice (default hi-IN-Chirp3-HD-Charon)
+          NARRATION_LANGUAGE: ${{ vars.NARRATION_LANGUAGE }}          # english (default) | hinglish (design 7)
+          HINGLISH_STRICT: ${{ vars.HINGLISH_STRICT }}                # true (default): a meaning check that cannot run fails
+          HINGLISH_MIN_SECONDS: ${{ vars.HINGLISH_MIN_SECONDS }}      # spoken-length band (default 24)
+          HINGLISH_MAX_SECONDS: ${{ vars.HINGLISH_MAX_SECONDS }}      # spoken-length band (default 36)
           GOOGLE_TTS_LANGUAGE: ${{ vars.GOOGLE_TTS_LANGUAGE || 'en-IN' }}
           ENABLE_HUMAN_ANGLE: ${{ vars.ENABLE_HUMAN_ANGLE || 'true' }}  # require a genuine why-it-matters take
           CAPTION_FONT: ${{ vars.CAPTION_FONT || 'Montserrat' }}

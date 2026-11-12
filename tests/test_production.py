@@ -38,7 +38,9 @@ def _fake_synth(body, d, meta=None, tone=None):
 
 def _wire_happy(monkeypatch, existing_post=None, factcheck_ok=True):
     """Mock the whole chain so produce_one runs without side effects."""
-    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: SCRIPT)
+    # A fresh copy per reel: production writes into the script dict (a repair replaces the
+    # body), and the shared SCRIPT used to carry one test's repair into every later test.
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: dict(SCRIPT))
     # MUST be mocked: factcheck.verify() calls grounded Gemini. Left real, the suite makes live
     # network calls and burns the shared 20/day grounded quota (rule 13) — and passes for the
     # wrong reason, because a 429 takes the fail-open path.
@@ -1079,3 +1081,88 @@ def test_the_recheck_sees_the_repaired_description_and_cards(monkeypatch, tmp_pa
     assert screens[1] == ["New card", "New line."]
     assert stored and stored[0].startswith("New line.")
     assert published[0].startswith("New line.")
+
+
+# --- stage 2: Hinglish reels behind NARRATION_LANGUAGE, English as the fallback (design 7.6) ---
+
+_SPOKEN = {"language": "hi", "said": "ISRO का rocket अब खुद land करता है।",
+           "lines": [{"en": "ISRO's rocket lands itself.", "hi": "ISRO का rocket अब खुद land करता है।",
+                      "said": "ISRO का rocket अब खुद land करता है।", "parts": []}],
+           "renderer": "claude", "checker": "gemini"}
+
+
+def _hinglish_wiring(monkeypatch, spoken=(_SPOKEN, ""), hindi_voice_ok=True):
+    _wire_happy(monkeypatch)
+    monkeypatch.setenv("NARRATION_LANGUAGE", "hinglish")
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: dict(SCRIPT))
+    seen = {"voiced": [], "notes": [], "stored": [], "meta": None, "attempt": None}
+    monkeypatch.setattr(production.hinglish, "to_hinglish", lambda body, title, tone: spoken)
+
+    def _synth(body, d, meta=None, tone=None, expected_seconds=None):
+        seen["voiced"].append((body, expected_seconds))
+        if "का" in body and not hindi_voice_ok:
+            raise RuntimeError("voice: no Hindi-capable voice succeeded")
+        if meta is not None:
+            meta.update(engine="gemini", voice="gemini:x@vertex",
+                        **({"route": "hi"} if "का" in body else {}))
+        return "a.wav", 30.0
+
+    monkeypatch.setattr(production.voice, "synthesize", _synth)
+    monkeypatch.setattr(production.subtitles, "burn_hinglish",
+                        lambda v, a, o, lines, **k: seen.update(hinglish_lines=lines) or o)
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: seen.update(english_captions=True) or o)
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: seen.update(meta=m) or ("VID1", "https://y/VID1"))
+    monkeypatch.setattr(production, "_notify", seen["notes"].append)
+    monkeypatch.setattr(production.db, "set_script_spoken",
+                        lambda sid, rec: seen["stored"].append(rec))
+    monkeypatch.setattr(production.db, "finish_attempt",
+                        lambda *a, **k: seen.update(attempt=k))
+    return seen
+
+
+def test_english_is_unchanged_by_default(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    monkeypatch.delenv("NARRATION_LANGUAGE", raising=False)
+    monkeypatch.setattr(production.hinglish, "to_hinglish",
+                        lambda *a: pytest.fail("no Hinglish without NARRATION_LANGUAGE"))
+    monkeypatch.setattr(production.db, "set_script_spoken",
+                        lambda *a: pytest.fail("nothing stored on an English-only run"))
+    meta = {}
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: meta.update(m) or ("VID1", "https://y/VID1"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert meta["audio_language"] == "en" and meta["format"]["language"] == "en"
+
+
+def test_a_hinglish_reel_is_voiced_captioned_and_uploaded_as_hindi(monkeypatch, tmp_path):
+    seen = _hinglish_wiring(monkeypatch)
+    production.produce_one(IDEA, str(tmp_path))
+    body, expected = seen["voiced"][0]
+    assert body == _SPOKEN["said"] and len(seen["voiced"]) == 1
+    assert expected == pytest.approx(40 / 2.2)  # SCRIPT's 40 English words at 2.2 a second
+    assert seen["hinglish_lines"] == _SPOKEN["lines"] and "english_captions" not in seen
+    assert seen["meta"]["audio_language"] == "hi" and seen["meta"]["format"]["language"] == "hi"
+    assert seen["stored"] == [_SPOKEN] and seen["notes"] == []
+    assert "english-narration" not in (seen["attempt"]["downgrades"] or [])
+
+
+def test_a_hinglish_render_failure_narrates_in_english_and_says_so(monkeypatch, tmp_path):
+    seen = _hinglish_wiring(monkeypatch, spoken=(None, "two renderings failed their checks"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["voiced"] == [(SCRIPT["script_body"], None)]
+    assert seen["english_captions"] and seen["meta"]["audio_language"] == "en"
+    assert "english-narration" in seen["attempt"]["downgrades"]
+    assert any("English" in n and "two renderings failed" in n for n in seen["notes"])
+    assert seen["stored"] == [{"language": "en", "reason": "two renderings failed their checks"}]
+
+
+def test_no_hindi_voice_narrates_in_english(monkeypatch, tmp_path):
+    seen = _hinglish_wiring(monkeypatch, hindi_voice_ok=False)
+    production.produce_one(IDEA, str(tmp_path))
+    assert [b for b, _e in seen["voiced"]] == [_SPOKEN["said"], SCRIPT["script_body"]]
+    assert seen["meta"]["audio_language"] == "en" and seen["english_captions"]
+    assert "english-narration" in seen["attempt"]["downgrades"]
+    assert any("English" in n for n in seen["notes"])
+    assert seen["stored"][0]["language"] == "en" and "Hindi" in seen["stored"][0]["reason"]
