@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from src import config, db, higgsfield, llm, text, visuals
+from src import assembly, config, db, higgsfield, llm, text, visuals
 
 log = logging.getLogger(__name__)
 
@@ -603,3 +604,114 @@ def _buy(req: ReelRequest, positions: list[int], pictures: list[Picture], plan: 
         jobs.append(job)
         _submit(job, pictures[shot], plan[shot]["motion"], model, phase_end)
     return jobs
+
+
+# --- Waiting, settling and the clips (design 6.2 steps 8-10) --------------------------------
+
+_POLL_FIRST, _POLL_GROWTH, _POLL_MAX = 2.0, 1.5, 10.0
+
+
+def _jitter() -> float:
+    return random.uniform(0.0, 0.5)
+
+
+def _check_clip(path: str, seconds: float) -> bool:
+    """Stage 4's clip gate (black or frozen stretches) plugs in here. In 3b a clip passes when it
+    covers its whole shot: a shorter one would move every later cut off its pause."""
+    try:
+        return assembly.probe_duration(path) + 1e-3 >= seconds
+    except Exception:  # noqa: BLE001 — an unreadable clip is no clip
+        return False
+
+
+def _fetch_clip(job: Job, url: str, seconds: float, out_dir: str, grace_end: float) -> str | None:
+    """Download a finished clip (without the key) and check it covers its shot; None means the
+    shot becomes a still. Either way the row stays `completed`: it was paid for, so it is never
+    bought again, and a later reel of the same idea may reuse it."""
+    dest = os.path.join(out_dir, f"clip_{job.shot:02d}.mp4")
+    # Never longer than the time left in the reel's grace, but never zero: the clip is paid for.
+    timeout = max(5.0, min(180.0, grace_end - _clock()))
+    try:
+        higgsfield.download(url, dest, timeout=timeout)
+    except higgsfield.HiggsfieldError as e:
+        log.warning("ai_video: shot %d's clip did not download (%s); it becomes a still",
+                    job.shot, e)
+        return None
+    if not _check_clip(dest, seconds):
+        log.warning("ai_video: shot %d's clip failed its check; it becomes a still", job.shot)
+        return None
+    return dest
+
+
+def _finish(job: Job, state: dict, lengths: list[float], out_dir: str, grace_end: float) -> None:
+    """Record a job Higgsfield reports as finished: `completed` keeps its cost and gains its URL
+    and clip; `failed`, `nsfw` and `canceled` are not charged."""
+    status = state.get("status")
+    if status == "completed":
+        url = (state.get("video") or {}).get("url")
+        job.status = "completed"
+        _record(job, status="completed", seconds=round(_clock() - (job.submitted_at or 0), 1),
+                result_url=url, settled_at=_now())
+        if url:
+            job.clip = _fetch_clip(job, url, lengths[job.shot], out_dir, grace_end)
+        return
+    job.status, job.cost = status, 0.0
+    _record(job, status=status, cost_usd=0, settled_at=_now())
+
+
+def _read(job: Job) -> dict | None:
+    """One status read; None when it fails (it is read again on the next tick)."""
+    try:
+        return higgsfield.status(job.request_id)
+    except higgsfield.HiggsfieldError as e:
+        log.info("ai_video: shot %d's status read failed (%s); trying again", job.shot, e)
+        return None
+
+
+def _poll(live: list[Job], last: dict, until: float, delay: float, lengths: list[float],
+          out_dir: str, grace_end: float) -> float:
+    """Poll every live job until each is finished or `until` passes (2 s, then x1.5 up to 10 s,
+    with jitter). Finished jobs leave `live`. Returns the next delay."""
+    while live and _clock() < until:
+        _sleep(min(delay + _jitter(), until - _clock()))
+        delay = min(delay * _POLL_GROWTH, _POLL_MAX)
+        for job in list(live):
+            state = _read(job)
+            if state is None:
+                continue
+            last[job.shot] = state.get("status")
+            if state.get("status") in higgsfield.TERMINAL:
+                _finish(job, state, lengths, out_dir, grace_end)
+                live.remove(job)
+    return delay
+
+
+def _settle_jobs(jobs: list[Job], phase_end: float, grace_end: float, lengths: list[float],
+                 out_dir: str) -> None:
+    """Wait for this reel's jobs and settle each in the ledger (design 6.2 steps 8-10).
+
+    Until `phase_end`, every job is polled. At it, a job still `queued` is cancelled, and counts
+    as `canceled` at no cost only when Higgsfield confirms it or a fresh read says so; an
+    unconfirmed one is waited out like a running job. A job already running is paid for, so it
+    gets until `grace_end`, and is used if it arrives. Whatever is still unfinished then is
+    `late`, at its quote: its shot becomes a still, and the sweep settles it later."""
+    live = [j for j in jobs if j.status == "submitted" and j.request_id]
+    last: dict[int, str | None] = {}
+    delay = _poll(live, last, phase_end, _POLL_FIRST, lengths, out_dir, grace_end)
+    for job in list(live):
+        if last.get(job.shot, "queued") != "queued":
+            continue
+        if higgsfield.cancel(job.request_id):
+            _finish(job, {"status": "canceled"}, lengths, out_dir, grace_end)
+            live.remove(job)
+            continue
+        state = _read(job)
+        if state and state.get("status") in higgsfield.TERMINAL:
+            _finish(job, state, lengths, out_dir, grace_end)
+            live.remove(job)
+    _poll(live, last, grace_end, delay, lengths, out_dir, grace_end)
+    for job in live:
+        job.status = "late"
+        log.warning("ai_video: shot %d's clip was not ready in time; it is paid for and its shot "
+                    "becomes a still", job.shot)
+        _record(job, status="late")

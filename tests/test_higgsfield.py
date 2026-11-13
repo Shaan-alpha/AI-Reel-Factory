@@ -249,6 +249,14 @@ def test_download_writes_the_file(monkeypatch, tmp_path):
     assert fake.calls[0][2]["stream"] is True and fake.calls[0][2]["timeout"] == 180
 
 
+def test_download_timeout_is_passed_through(monkeypatch, tmp_path):
+    """The reel's phase deadline bounds a clip's download (3a's M-9: 180 s is per read)."""
+    fake = _use(monkeypatch, lambda m, u, k: _Resp(200, content=b"mp4-bytes"))
+    higgsfield.download("https://cdn.example/v.mp4", str(tmp_path / "a.mp4"), timeout=12.5)
+    higgsfield.download("https://cdn.example/v.mp4", str(tmp_path / "b.mp4"))
+    assert [call[2]["timeout"] for call in fake.calls] == [12.5, 180]
+
+
 @pytest.mark.parametrize("answer", [_Resp(403), _Resp(200, content=b"")])
 def test_a_failed_download_leaves_no_file(monkeypatch, tmp_path, answer):
     _use(monkeypatch, lambda m, u, k: answer)

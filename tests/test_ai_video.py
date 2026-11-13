@@ -624,3 +624,145 @@ def test_a_still_that_cannot_animate_is_not_bought(monkeypatch, tmp_path, fresh_
                          _stills(tmp_path, animatable=(0, 1, 2, 3, 4)), PLAN6, PRICE,
                          fresh_run.now + 300)
     assert [j.shot for j in jobs] == [0] and ("reserve", 5) not in _kinds(events)
+
+
+# --- Stage 3b: waiting, settling and the clips (design 6.2 steps 8-10) ---------------------------
+
+from src import assembly  # noqa: E402
+
+LENGTHS = [4.906, 5.0, 4.6, 4.654, 5.0, 4.049]
+
+
+def _job(shot: int, clock) -> "ai_video.Job":
+    return ai_video.Job(shot=shot, row_id=100 + shot, key=f"key-{shot}",
+                        request_id=f"req-{shot:04d}-abcd", status="submitted", cost=PRICE,
+                        submitted_at=clock.now)
+
+
+def _watch(monkeypatch, states: dict, cancels: dict | None = None, probe: float = 5.04,
+           download_error: Exception | None = None) -> dict:
+    """Higgsfield's status, cancel and download, and the ledger, replaced. states[request_id]
+    is a list of answers in turn (the last repeats; an Exception is raised). Returns the calls."""
+    seen = {"status": [], "cancel": [], "download": [], "update": []}
+    turns: dict[str, int] = {}
+
+    def status(request_id):
+        seen["status"].append(request_id)
+        turns[request_id] = turns.get(request_id, 0) + 1
+        seq = states[request_id]
+        answer = seq[min(turns[request_id], len(seq)) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    def cancel(request_id):
+        seen["cancel"].append(request_id)
+        return (cancels or {}).get(request_id, False)
+
+    def download(url, dest, timeout=None):
+        seen["download"].append((url, os.path.basename(dest), timeout))
+        if download_error:
+            raise download_error
+        with open(dest, "wb") as f:
+            f.write(b"mp4")
+        return dest
+
+    monkeypatch.setattr(higgsfield, "status", status)
+    monkeypatch.setattr(higgsfield, "cancel", cancel)
+    monkeypatch.setattr(higgsfield, "download", download)
+    monkeypatch.setattr(db, "update_ai_video_job",
+                        lambda row_id, **fields: seen["update"].append((row_id - 100, fields)))
+    monkeypatch.setattr(assembly, "probe_duration", lambda path: probe)
+    monkeypatch.setattr(ai_video, "_jitter", lambda: 0.0)
+    return seen
+
+
+def _done(i: int) -> dict:
+    return {"status": "completed", "video": {"url": f"https://cdn.example/clip{i}.mp4"}}
+
+
+QUEUED, RUNNING = {"status": "queued"}, {"status": "in_progress"}
+
+
+def test_jobs_are_polled_until_they_finish(monkeypatch, tmp_path, fresh_run):
+    jobs = [_job(i, fresh_run) for i in range(3)]
+    seen = _watch(monkeypatch, {
+        "req-0000-abcd": [QUEUED, RUNNING, RUNNING, _done(0)],
+        "req-0001-abcd": [RUNNING, RUNNING, {"status": "failed"}],
+        "req-0002-abcd": [{"status": "nsfw"}]})
+    start = fresh_run.now
+    ai_video._settle_jobs(jobs, start + 300, start + 420, LENGTHS, str(tmp_path))
+    assert fresh_run.slept == [2, 3, 4.5, 6.75]
+    assert jobs[0].status == "completed" and jobs[0].clip == str(tmp_path / "clip_00.mp4")
+    done = next(fields for shot, fields in seen["update"] if shot == 0)
+    assert done["status"] == "completed" and done["seconds"] == pytest.approx(16.2, abs=0.1)
+    assert done["result_url"] == "https://cdn.example/clip0.mp4" and done["settled_at"]
+    assert seen["download"][0][:2] == ("https://cdn.example/clip0.mp4", "clip_00.mp4")
+    assert [(j.status, j.cost, j.clip) for j in jobs[1:]] == [("failed", 0.0, None),
+                                                               ("nsfw", 0.0, None)]
+    assert {shot: fields["cost_usd"] for shot, fields in seen["update"] if shot} == {1: 0, 2: 0}
+    assert seen["cancel"] == []
+
+    jobs = [_job(i, fresh_run) for i in range(1)]
+    _watch(monkeypatch, {"req-0000-abcd": [RUNNING] * 9 + [_done(0)]})
+    fresh_run.slept.clear()
+    ai_video._settle_jobs(jobs, fresh_run.now + 300, fresh_run.now + 420, LENGTHS, str(tmp_path))
+    assert fresh_run.slept[:6] == [2, 3, 4.5, 6.75, 10, 10]  # x1.5 up to 10 s
+
+
+def test_a_status_error_is_retried_next_tick(monkeypatch, tmp_path, fresh_run):
+    (job,) = jobs = [_job(0, fresh_run)]
+    seen = _watch(monkeypatch, {"req-0000-abcd": [
+        higgsfield.HiggsfieldError("unavailable", "status: ReadTimeout"), _done(0)]})
+    ai_video._settle_jobs(jobs, fresh_run.now + 300, fresh_run.now + 420, LENGTHS,
+                          str(tmp_path))
+    assert seen["status"] == ["req-0000-abcd"] * 2 and job.clip
+
+
+def test_at_the_deadline_a_queued_job_is_cancelled(monkeypatch, tmp_path, fresh_run):
+    jobs = [_job(i, fresh_run) for i in range(3)]
+    seen = _watch(monkeypatch, {
+        "req-0000-abcd": [QUEUED],
+        "req-0001-abcd": [QUEUED, QUEUED, QUEUED, QUEUED, {"status": "canceled"}],
+        "req-0002-abcd": [QUEUED, QUEUED, QUEUED, QUEUED, RUNNING, RUNNING, _done(2)]},
+        cancels={"req-0000-abcd": True})
+    start = fresh_run.now
+    ai_video._settle_jobs(jobs, start + 12, start + 130, LENGTHS, str(tmp_path))
+    assert seen["cancel"] == ["req-0000-abcd", "req-0001-abcd", "req-0002-abcd"]
+    assert [(j.status, j.cost) for j in jobs[:2]] == [("canceled", 0.0), ("canceled", 0.0)]
+    assert {shot: fields for shot, fields in seen["update"]}[1]["cost_usd"] == 0
+    assert jobs[2].status == "completed" and jobs[2].clip  # an unconfirmed cancel is waited out
+
+
+def test_a_running_job_gets_the_grace_period(monkeypatch, tmp_path, fresh_run):
+    jobs = [_job(i, fresh_run) for i in range(2)]
+    seen = _watch(monkeypatch, {"req-0000-abcd": [RUNNING] * 8 + [_done(0)],
+                                "req-0001-abcd": [RUNNING]})
+    start = fresh_run.now
+    ai_video._settle_jobs(jobs, start + 30, start + 60, LENGTHS, str(tmp_path))
+    assert jobs[0].status == "completed" and jobs[0].clip  # it arrived inside the grace
+    assert (jobs[1].status, jobs[1].cost, jobs[1].clip) == ("late", PRICE, None)
+    assert {shot: fields for shot, fields in seen["update"]}[1] == {"status": "late"}
+    assert seen["cancel"] == []  # a running job is paid for: it is never cancelled
+    assert fresh_run.now <= start + 60 + 1e-6
+
+
+def test_a_clip_too_short_for_its_shot_becomes_a_still(monkeypatch, tmp_path, fresh_run):
+    """Review Focus 3: a clip shorter than its shot would move every later cut off its pause."""
+    (job,) = jobs = [_job(2, fresh_run)]
+    seen = _watch(monkeypatch, {"req-0002-abcd": [_done(2)]}, probe=3.9)
+    ai_video._settle_jobs(jobs, fresh_run.now + 300, fresh_run.now + 420, LENGTHS,
+                          str(tmp_path))
+    assert job.status == "completed" and job.clip is None
+    assert [fields["status"] for _shot, fields in seen["update"]] == ["completed"]
+
+
+def test_a_failed_download_leaves_the_row_completed(monkeypatch, tmp_path, fresh_run):
+    (job,) = jobs = [_job(0, fresh_run)]
+    seen = _watch(monkeypatch, {"req-0000-abcd": [_done(0)]},
+                  download_error=higgsfield.HiggsfieldError("unavailable", "download: reset"))
+    ai_video._settle_jobs(jobs, fresh_run.now + 300, fresh_run.now + 420, LENGTHS,
+                          str(tmp_path))
+    assert job.status == "completed" and job.clip is None
+    assert [fields["status"] for _shot, fields in seen["update"]] == ["completed"]
+    assert 0 < seen["download"][0][2] <= 180  # bounded by the time to grace_end

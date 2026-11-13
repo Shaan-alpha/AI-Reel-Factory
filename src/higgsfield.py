@@ -266,9 +266,10 @@ def cancel(request_id: str) -> bool:
     return r.status_code == 202
 
 
-def download(url: str, dest: str) -> str:
-    """Fetch a finished clip to `dest`. A failure leaves no partial file behind."""
-    r = _send("GET", url, auth=False, timeout=_FILE_TIMEOUT, stream=True)
+def download(url: str, dest: str, timeout: float | None = None) -> str:
+    """Fetch a finished clip to `dest`. A failure leaves no partial file behind. `timeout`
+    (default 180 s) is per read: the caller passes what is left of its own deadline."""
+    r = _send("GET", url, auth=False, timeout=timeout or _FILE_TIMEOUT, stream=True)
     try:
         _check(r, "download", api=False)
         size = 0
