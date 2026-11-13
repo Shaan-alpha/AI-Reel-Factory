@@ -453,3 +453,29 @@ def test_kenburns_paces_to_its_length_at_24_fps(monkeypatch):
     assert "zoom-0.001125," in zoom_out
     assert [cmd[cmd.index("-r") + 1] for cmd in captured] == ["24", "24", "30"]
     assert "d=210:" in today and ":fps=30," in today and "zoom+0.001," in today
+
+
+def test_ai_still_names_the_model_that_drew_it(monkeypatch, tmp_path):
+    """Only a klein still may be animated (design 6.2 step 5), so the caller must know which
+    model drew it: klein first, with the shot's seed, then schnell."""
+    monkeypatch.setenv("CF_API_TOKEN", "token")
+    monkeypatch.setenv("CF_ACCOUNT_ID", "acct")
+    works, calls = set(), []
+
+    def run(model, prompt, dest, token, acct, seed):
+        calls.append((model, seed))
+        return model in works
+
+    monkeypatch.setattr(visuals, "_cloudflare_run", run)
+    dest = str(tmp_path / "still.jpg")
+    works.add(visuals._KLEIN)
+    assert visuals.ai_still("a capsule", dest, 42) == "klein"
+    assert calls == [(visuals._KLEIN, 42)]
+    works.clear(), works.add(visuals._SCHNELL), calls.clear()
+    assert visuals.ai_still("a capsule", dest, 42) == "schnell"
+    assert [model for model, _seed in calls] == [visuals._KLEIN, visuals._SCHNELL]
+    works.clear()
+    assert visuals.ai_still("a capsule", dest, 42) is None
+    calls.clear()
+    monkeypatch.delenv("CF_API_TOKEN")
+    assert visuals.ai_still("a capsule", dest, 42) is None and calls == []

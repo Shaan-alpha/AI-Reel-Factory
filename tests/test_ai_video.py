@@ -340,3 +340,81 @@ def test_search_words_never_come_from_the_still(monkeypatch):
     plan, ok = ai_video.plan_shots(_req(), DUR6)
     words = visuals._keywords_heuristic(ai_video._plain(SCRIPT), 6)
     assert ok and [s["search"] for s in plan] == [words[i % len(words)] for i in range(6)]
+
+
+# --- Stage 3b: a picture for every shot (design 6.2 step 5, 6.9) ----------------------------------
+
+import os  # noqa: E402
+import re  # noqa: E402
+
+PLAN6 = [{"still": f"Still prompt {i}: a capsule on the sea.", "motion": "It rocks.",
+          "search": f"search words {i}"} for i in range(6)]
+
+
+def _draws(monkeypatch, klein=(), schnell=(), photos=()) -> dict:
+    """visuals.ai_still and stock_photo replaced: shot i is drawn by klein or schnell, or found
+    as a stock photo, when its index is in that set. Returns what was asked."""
+    asked = {"still": [], "photo": []}
+
+    def ai_still(prompt, dest, seed):
+        i = int(re.search(r"(\d+)\.\w+$", dest).group(1))
+        asked["still"].append((i, prompt, seed))
+        if i in klein or i in schnell:
+            with open(dest, "wb") as f:
+                f.write(b"img")
+            return "klein" if i in klein else "schnell"
+        return None
+
+    def stock_photo(query, dest, variant, index):
+        asked["photo"].append((index, query, variant))
+        if index in photos:
+            with open(dest, "wb") as f:
+                f.write(b"img")
+            return True
+        return False
+
+    monkeypatch.setattr(visuals, "ai_still", ai_still)
+    monkeypatch.setattr(visuals, "stock_photo", stock_photo)
+    return asked
+
+
+def test_only_a_klein_still_is_animatable(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein={0, 1, 2}, schnell={3, 4, 5})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert [p.animatable for p in pics] == [True, True, True, False, False, False]
+    assert all(os.path.exists(p.path) for p in pics)
+    assert sorted((i, seed) for i, _prompt, seed in asked["still"]) == [
+        (i, visuals._image_seed("idea_7", i)) for i in range(6)]
+    assert asked["photo"] == []
+
+
+def test_a_shot_without_ai_falls_back_to_its_search_words(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein={0, 1, 2, 4, 5}, photos={3})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert asked["photo"] == [(3, "search words 3", "idea_7")]  # never the still prompt
+    assert not pics[3].animatable and pics[3].path not in {p.path for p in pics[:3]}
+
+
+def test_a_shot_with_nothing_borrows_its_neighbour(monkeypatch, tmp_path):
+    _draws(monkeypatch, klein={1, 2, 4, 5})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert pics[3].path == pics[2].path and not pics[3].animatable
+    assert pics[0].path == pics[1].path and not pics[0].animatable
+    assert pics[1].animatable and pics[2].animatable
+
+
+def test_no_picture_at_all_is_no_shots(monkeypatch, tmp_path):
+    _draws(monkeypatch)
+    with pytest.raises(ai_video.NoShots):
+        ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+
+
+def test_a_still_clip_covers_its_shot_at_24_fps(monkeypatch, tmp_path):
+    made = []
+    monkeypatch.setattr(visuals, "_image_to_kenburns_clip",
+                        lambda image, dest, seconds, index=0, fps=30: made.append(
+                            (image, dest, seconds, index, fps)))
+    pic = ai_video.Picture(str(tmp_path / "still_02.jpg"), True)
+    out = ai_video._still_clip(pic, str(tmp_path / "shot_02.mp4"), 4.654, 2)
+    assert out == str(tmp_path / "shot_02.mp4")
+    assert made == [(pic.path, out, pytest.approx(4.754), 2, 24)]

@@ -18,7 +18,9 @@ in the ledger before it is bought, and every dollar is reported. These lines are
 from __future__ import annotations
 
 import logging
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -378,3 +380,67 @@ def plan_shots(req: ReelRequest, durations: list[float]) -> tuple[list[dict], bo
             shot["search"] = shot["search"] or words[i % len(words)]
         return shots, True
     return _fallback_plan(req, m), False
+
+
+# --- A picture for every shot (design 6.2 step 5, 6.9) -----------------------------------------
+
+FPS = 24  # an ai_video reel's rate end to end: Kling's own, so no clip is converted (11.1)
+
+
+class NoShots(RuntimeError):
+    """Not one shot has a picture: the reel falls back to today's `ai` path (design 6.2 step 11)."""
+
+
+@dataclass(frozen=True)
+class Picture:
+    """One shot's still."""
+
+    path: str
+    animatable: bool  # a FLUX.2 klein still (portrait, seeded): the only kind Kling is given
+
+
+def _check_still(path: str) -> bool:
+    """Stage 4's still gate (stray lettering, a dark subject) plugs in here; in 3b every still
+    passes."""
+    return True
+
+
+def _picture(req: ReelRequest, shot: dict, i: int) -> Picture | None:
+    """Shot i's still: klein, then schnell, then a Pexels photo found with the planner's search
+    words, never with the still prompt (design 6.9). None when all three fail."""
+    variant = f"idea_{req.idea_id}"
+    still = os.path.join(req.work_dir, f"still_{i:02d}.jpg")
+    drew = visuals.ai_still(shot["still"], still, visuals._image_seed(variant, i))
+    if drew and _check_still(still):
+        return Picture(still, drew == "klein")
+    photo = os.path.join(req.work_dir, f"photo_{i:02d}.jpg")
+    if visuals.stock_photo(shot["search"], photo, variant, i):
+        return Picture(photo, False)
+    return None
+
+
+def _pictures(req: ReelRequest, plan: list[dict]) -> list[Picture]:
+    """One picture per shot, drawn in parallel. A shot with none shows its neighbour's (the shot
+    before, or for the first shot the next that has one), never animated: a shot is never
+    dropped, since the cut list is fixed. NoShots when no shot has a picture at all."""
+    os.makedirs(req.work_dir, exist_ok=True)
+    workers = max(1, min(len(plan), visuals._visual_workers()))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        got = list(pool.map(lambda i: _picture(req, plan[i], i), range(len(plan))))
+    if not any(got):
+        raise NoShots(f"no picture for any of the {len(plan)} shots")
+    pictures: list[Picture] = []
+    for i, pic in enumerate(got):
+        if pic is None:
+            near = pictures[-1] if pictures else next(p for p in got if p)
+            log.warning("ai_video: shot %d has no picture of its own; it shows its neighbour's", i)
+            pic = Picture(near.path, False)
+        pictures.append(pic)
+    return pictures
+
+
+def _still_clip(picture: Picture, dest: str, seconds: float, index: int) -> str:
+    """A Ken Burns move over the shot's still, at the reel's 24 fps, a little longer than the
+    shot so its last frame is never short (review finding 7: pace the move to the shot)."""
+    visuals._image_to_kenburns_clip(picture.path, dest, seconds + 0.1, index=index, fps=FPS)
+    return dest

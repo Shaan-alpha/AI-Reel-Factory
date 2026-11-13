@@ -352,6 +352,36 @@ def _cloudflare_run(model: str, prompt: str, dest: str, token: str, acct: str,
         return False
 
 
+def ai_still(prompt: str, dest: str, seed: int) -> str | None:
+    """One AI still at dest for an ai_video shot: FLUX.2 klein at 768x1344 with this seed, then
+    FLUX.1 schnell. Returns which model drew it ("klein" or "schnell"), or None.
+
+    The caller must know: only a klein still is animated (design 6.2 step 5), since schnell's is
+    square and unseeded."""
+    token, acct = config.get("CF_API_TOKEN"), config.get("CF_ACCOUNT_ID")
+    if not (token and acct):
+        return None
+    for name, model in (("klein", _KLEIN), ("schnell", _SCHNELL)):
+        if _cloudflare_run(model, prompt, dest, token, acct, seed):
+            return name
+    return None
+
+
+def stock_photo(query: str, dest: str, variant: str = "", index: int = 0) -> bool:
+    """A Pexels portrait photo for `query` at dest. Deterministic per (variant, index): a retry
+    re-renders the same reel, and two reels sharing a query start at different photos."""
+    urls = _pexels_photo_urls(query)
+    if not urls:
+        return False
+    offset = int(hashlib.sha1(str(variant).encode("utf-8")).hexdigest()[:8], 16) if variant else 0
+    try:
+        _download(urls[(index + offset) % len(urls)], dest)
+        return os.path.getsize(dest) > 1000
+    except Exception as e:  # noqa: BLE001
+        log.warning("visuals: photo download failed for %r (%s)", query, e)
+        return False
+
+
 def _fetch_image(keyword: str, dest: str, seed: int, source: str,
                  variant: str = "", setting: str | None = None) -> bool:
     """Put one image at dest: AI (if source='ai' and CF set) else a Pexels photo. Bool = success.
@@ -366,16 +396,7 @@ def _fetch_image(keyword: str, dest: str, seed: int, source: str,
     if source == "ai" and _cloudflare_image(_img_prompt(keyword, seed, setting), dest,
                                             seed=_image_seed(variant, seed)):
         return True
-    urls = _pexels_photo_urls(keyword)
-    if not urls:
-        return False
-    offset = int(hashlib.sha1(str(variant).encode("utf-8")).hexdigest()[:8], 16) if variant else 0
-    try:
-        _download(urls[(seed + offset) % len(urls)], dest)
-        return os.path.getsize(dest) > 1000
-    except Exception as e:  # noqa: BLE001
-        log.warning("visuals: photo download failed for %r (%s)", keyword, e)
-        return False
+    return stock_photo(keyword, dest, variant, seed)
 
 
 def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: int = 0,
