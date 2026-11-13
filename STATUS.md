@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); stage 4b (the text on screen and the sound) on `feat/stage-4b-text-sound`. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); **stage 4b (the text on screen and the sound) built** on `feat/stage-4b-text-sound`, not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -69,9 +69,9 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   merged** (PR #21), behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13 log). The test renders
   are done and their fixes merged (PR #22). Stage 4 comes in two plans: **4a, the picture gates,
   is merged** (PR #23; see the 2026-11-13 log); **4b** (the key-number card, the banner hold, the
-  source line and logo, the music level, the vignette and the stings) is next, on
-  `feat/stage-4b-text-sound` (plan `docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`).
-  State and decisions are in
+  source line and logo, the music level, the vignette and the stings) **is built** on
+  `feat/stage-4b-text-sound` (see the 2026-11-14 log); next is its final review, then the
+  relaunch's steps (design 14-15). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ~~**Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4~~ Done 2026-11-13 at the
   operator's request, through the Supabase CLI (`supabase db query --linked`): every table and
@@ -144,6 +144,51 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 ---
 
 ## Log
+
+### 2026-11-14 — Stage 4b: the text on screen and the sound (built on `feat/stage-4b-text-sound`)
+
+Plan `docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`, 5 tasks, test-first, built
+inline. Design Part F's remaining items:
+- **the sound:** no cut stings (`ENABLE_SFX=false`) and the music bed 4 LU under the voice, not 11
+  (`MUSIC_LU_BELOW_VOICE=4`), in the code and in both workflows' fallbacks;
+- **the look:** no vignette (`ENABLE_VIGNETTE=false`); the key-point cards are off
+  (`ENABLE_TEXT_CARDS=false`): one key number replaces them;
+- **the banner** (the title) holds until the first sentence ends, between 1.8 s and 4.0 s
+  (`HOOK_MAX_SECONDS`): the English burn finds the end in its aligned words, the Hinglish burn
+  in the same sentence times its subtitles use;
+- **the source line** ("Source: <publisher>") shows with the first sentence, top-anchored under
+  the banner's real height; at y 1480 the Shorts interface covered it;
+- **the subtitles** sit inside Google's vertical safe box (x 48-888, bottom at y 1248); the logo
+  is 96 px tall (was 150);
+- **one key number:** the writer names it (`key_number`); code keeps it only when it is copied
+  exactly from the narration, as a whole phrase ("2" never counts inside "2,000"), and checks it
+  again after a fact-check repair. It shows large in the upper middle (150 px, a 0.18 s
+  scale-in from 70%) from the moment it is said, for 1.5-2.5 s;
+- `tools/try_ai_video.py --key-number` lets an older script show the card.
+
+**The render** (script 441, the six paid clips reused: $0.00 of Higgsfield; Claude cents):
+- banner to 4.0 s, the source line to the end of line 1 (past 5 s), subtitles inside the safe
+  box, the smaller logo; the reel check passed;
+- the log shows `sfx=no` and the bed's gain at +4.9 dB, 7 dB above what 11 LU gave; the
+  quietest 5% of the mix rose from -21.9 to -19.7 LUFS while the median held (-14.7, -14.5);
+- the number card, burned over the render as a sample (script 441 has no number): it scales in
+  from 70% at 8.02 s, is full size by 8.4 s, and reads clearly over a busy picture;
+- the still check worked inside a reel: shot 5's still measured just under 60 and was redrawn;
+  the redraw was worse (fake lettering, darker, letterbox bars), so the first was kept;
+- the fake caption and the laptop of code are still in the clips bought in render 1, before
+  the gate: reused clips are shown as they are.
+
+**Found by the render and fixed test-first:** the planner's prompt told it why the frame's top
+and bottom stay calm ("a title and subtitles sit there"), and it wrote that into its stills
+("room for the title and subtitles", "free of text"). The 4a lettering check therefore refused
+nearly every plan, and FLUX may draw what it reads (render 1's fake caption sat exactly where
+subtitles go). The reason is gone, the planner is told never to name text even to exclude it,
+the retry says the same, and "display" left the word list (a live false alarm: "on display").
+Three live plans afterwards: one clean at once, one fixed by its retry (a real "notebook"), one
+flagged only for "display". Also: the darkness message shows the measured value ("59.6 < 60").
+
+Suite: **1207 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
+Next: the final review, then the push with the operator's go-ahead.
 
 ### 2026-11-13 — Stage 4a: the picture gates (merged as PR #23 on 2026-11-14)
 

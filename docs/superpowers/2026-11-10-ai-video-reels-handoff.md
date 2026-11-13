@@ -138,11 +138,16 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **Stage 4a is merged** (PR #23, 2026-11-14; CI 1171 pass, Tesseract and FFmpeg proven on
   Ubuntu).
 
-**Next:** stage 4b on `feat/stage-4b-text-sound` (plan
-`docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`):
-the key-number card, the banner hold, the source line and the logo, the subtitles' safe zone,
-the music level 4 LU, the vignette and the stings off, the key-point cards off. Then the
-relaunch (design section 14).
+- **Stage 4b is built** on `feat/stage-4b-text-sound` (5 tasks; plan
+  `docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`; not yet pushed): no stings, the
+  bed 4 LU under the voice, no vignette, no key-point cards; the banner held for the first
+  sentence (1.8-4.0 s), the source line with it under the banner, subtitles in the safe box, a
+  96 px logo; one key number from the writer, shown when said. Its render (script 441, $0 of
+  clips) also fixed the planner echoing "title and subtitles" into its stills.
+
+**Next:** stage 4b's final review, then its push and PR with the operator's go-ahead. Then the
+relaunch (design sections 14-15): the repository variables, one real reel end to end,
+`WINNERS_SINCE`.
 
 ## 1. What the operator wants
 
