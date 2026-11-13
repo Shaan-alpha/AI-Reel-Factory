@@ -792,6 +792,9 @@ def _watch(monkeypatch, states: dict, cancels: dict | None = None, probe: float 
     monkeypatch.setattr(db, "update_ai_video_job",
                         lambda row_id, **fields: seen["update"].append((row_id - 100, fields)))
     monkeypatch.setattr(assembly, "probe_duration", lambda path: probe)
+    # The clip check's probe answers with `probe`; its black and frozen pass finds nothing.
+    monkeypatch.setattr(gates, "_probe", lambda path: gates.Media(probe, True, False))
+    monkeypatch.setattr(gates, "_stretches", lambda *a, **k: ([], []))
     monkeypatch.setattr(ai_video, "_jitter", lambda: 0.0)
     return seen
 

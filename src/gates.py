@@ -12,16 +12,18 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 
 from PIL import Image, ImageStat
 
-from src import config
+from src import assembly, config
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +32,12 @@ TEXT_LETTERS = 3       # ...when it has at least this many letters
 DARK_BELOW = 60        # mean brightness (0-255) of the middle half; clean stills measured 83+
 BAR_MEAN = 16          # letterbox bars: the top and bottom sixteenths both this dark...
 BAR_STDDEV = 6         # ...and this flat
+CLIP_MIN_SECONDS = 4.5  # a clip's floor (design 11.6); it must also cover its whole shot
+CLIP_BLACK = 0.5       # a clip's black stretch this long or longer fails it
+CLIP_FROZEN = 1.5      # ...and a frozen one
 
 _OCR_TIMEOUT = 60
+_DETECT_TIMEOUT = 120
 _WINDOWS_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 _warned_no_tesseract = False
 
@@ -118,3 +124,85 @@ def still_problems(path: str) -> list[str]:
     if all(s.mean[0] < BAR_MEAN and s.stddev[0] < BAR_STDDEV for s in edges):
         problems.append("letterbox bars")
     return problems
+
+
+# --- Clips and reels -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Media:
+    """What ffprobe says about a file."""
+
+    duration: float
+    video: bool
+    audio: bool
+
+
+def _probe(path: str) -> Media:
+    """One ffprobe call; raises when the file cannot be read."""
+    out = subprocess.run([assembly._ffprobe(), "-v", "error", "-show_entries",
+                          "format=duration:stream=codec_type", "-of", "json", path],
+                         capture_output=True, check=True,
+                         timeout=assembly.PROBE_TIMEOUT_SECONDS).stdout
+    data = json.loads(out.decode("utf-8", "replace") if isinstance(out, bytes) else out)
+    kinds = {stream.get("codec_type") for stream in data.get("streams") or []}
+    return Media(float(data["format"]["duration"]), "video" in kinds, "audio" in kinds)
+
+
+_BLACK = re.compile(r"black_start:\s*([\d.]+)\s+black_end:\s*([\d.]+)")
+_FREEZE_START = re.compile(r"freeze_start:\s*([\d.]+)")
+_FREEZE_END = re.compile(r"freeze_end:\s*([\d.]+)")
+
+
+def _stretches(path: str, black_min: float, frozen_min: float,
+               duration: float) -> tuple[list[float], list[float]]:
+    """The lengths of the black stretches (at least black_min) and the frozen ones (at least
+    frozen_min), from one FFmpeg pass. A freeze still running at the end has no end in the log:
+    it lasts to `duration`."""
+    proc = subprocess.run([assembly._ffmpeg(), "-hide_banner", "-nostats", "-i", path, "-vf",
+                           f"blackdetect=d={black_min}:pix_th=0.10,"
+                           f"freezedetect=n=-60dB:d={frozen_min}",
+                           "-an", "-f", "null", "-"], capture_output=True,
+                          timeout=_DETECT_TIMEOUT)
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg exited {proc.returncode}")
+    err = proc.stderr
+    log_text = err.decode("utf-8", "replace") if isinstance(err, bytes) else str(err or "")
+    black = [float(end) - float(start) for start, end in _BLACK.findall(log_text)]
+    starts = [float(x) for x in _FREEZE_START.findall(log_text)]
+    ends = [float(x) for x in _FREEZE_END.findall(log_text)]
+    frozen = [(ends[i] if i < len(ends) else duration) - start for i, start in enumerate(starts)]
+    return black, frozen
+
+
+def _stretch_problems(path: str, black_min: float, frozen_min: float,
+                      duration: float) -> list[str]:
+    """The black and frozen stretches as problems; a pass that cannot run is skipped."""
+    try:
+        black, frozen = _stretches(path, black_min, frozen_min, duration)
+    except Exception as e:  # noqa: BLE001 — a check that cannot run never costs the picture
+        log.warning("gates: the black and frozen check could not run on %s (%s: %s); skipped",
+                    os.path.basename(path), type(e).__name__, e)
+        return []
+    problems = []
+    if black:
+        problems.append("black: " + ", ".join(f"{d:.1f} s" for d in black))
+    if frozen:
+        problems.append("frozen: " + ", ".join(f"{d:.1f} s" for d in frozen))
+    return problems
+
+
+def clip_problems(path: str, seconds: float) -> list[str]:
+    """What is wrong with a bought clip for a shot of `seconds` (design 11.6): unreadable, no
+    video stream, shorter than 4.5 s or than its shot, a black stretch of 0.5 s or more, a
+    frozen stretch of 1.5 s or more. Empty when it passes."""
+    try:
+        media = _probe(path)
+    except Exception as e:  # noqa: BLE001
+        return [f"unreadable: {type(e).__name__}: {e}"]
+    if not media.video:
+        return ["no video stream"]
+    problems = []
+    need = max(CLIP_MIN_SECONDS, seconds)
+    if media.duration + 1e-3 < need:
+        problems.append(f"short: {media.duration:.2f} s < {need:.2f} s")
+    return problems + _stretch_problems(path, CLIP_BLACK, CLIP_FROZEN, media.duration)

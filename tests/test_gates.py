@@ -144,3 +144,111 @@ def test_real_tesseract_reads_lettering(tmp_path):
     smooth = tmp_path / "smooth.jpg"
     gradient.convert("RGB").save(smooth, quality=92)
     assert gates.still_problems(str(smooth)) == []
+
+
+# --- Clips --------------------------------------------------------------------------------------
+
+def _media(monkeypatch, duration=5.04, video=True, audio=False, black=(), frozen=(), fails=None):
+    """The gate's probe and its one FFmpeg detection pass, replaced."""
+    def probe(path):
+        if isinstance(fails, Exception):
+            raise fails
+        return gates.Media(duration, video, audio)
+
+    def stretches(path, black_min, frozen_min, total):
+        if fails == "stretches":
+            raise subprocess.TimeoutExpired(["ffmpeg"], 120)
+        return list(black), list(frozen)
+
+    monkeypatch.setattr(gates, "_probe", probe)
+    monkeypatch.setattr(gates, "_stretches", stretches)
+
+
+def test_a_clip_that_covers_its_shot_passes(monkeypatch):
+    _media(monkeypatch)
+    assert gates.clip_problems("clip.mp4", 5.0) == []
+
+
+def test_a_clip_shorter_than_4_5_s(monkeypatch):
+    _media(monkeypatch, duration=4.2)
+    assert gates.clip_problems("clip.mp4", 3.0) == ["short: 4.20 s < 4.50 s"]
+
+
+def test_a_clip_shorter_than_its_shot(monkeypatch):
+    _media(monkeypatch, duration=4.9)
+    assert gates.clip_problems("clip.mp4", 5.0) == ["short: 4.90 s < 5.00 s"]
+
+
+def test_a_clip_without_video(monkeypatch):
+    _media(monkeypatch, video=False, audio=True)
+    assert gates.clip_problems("clip.mp4", 5.0) == ["no video stream"]
+
+
+def test_an_unreadable_clip(monkeypatch):
+    _media(monkeypatch, fails=subprocess.CalledProcessError(1, ["ffprobe"]))
+    (problem,) = gates.clip_problems("clip.mp4", 5.0)
+    assert problem.startswith("unreadable:")
+
+
+def test_a_black_stretch(monkeypatch):
+    _media(monkeypatch, black=[0.8])
+    assert gates.clip_problems("clip.mp4", 5.0) == ["black: 0.8 s"]
+
+
+def test_a_frozen_stretch(monkeypatch):
+    _media(monkeypatch, frozen=[1.6])
+    assert gates.clip_problems("clip.mp4", 5.0) == ["frozen: 1.6 s"]
+
+
+def test_a_stretch_pass_that_fails_is_skipped(monkeypatch, caplog):
+    """The clip is paid for: a detection pass that cannot run does not throw it away."""
+    _media(monkeypatch, fails="stretches")
+    with caplog.at_level(logging.WARNING, logger="src.gates"):
+        assert gates.clip_problems("clip.mp4", 5.0) == []
+    assert any("could not" in r.getMessage() for r in caplog.records)
+
+
+def _ffmpeg_or_skip() -> str:
+    from src import assembly
+    try:
+        return assembly._ffmpeg()
+    except RuntimeError as e:
+        pytest.skip(f"no FFmpeg: {e}")
+
+
+def _render(tmp_path, name: str, *graph: str) -> str:
+    """A small 24 fps test clip from lavfi sources, concatenated in order."""
+    ffmpeg = _ffmpeg_or_skip()
+    cmd = [ffmpeg, "-v", "error", "-y"]
+    for source in graph:
+        cmd += ["-f", "lavfi", "-i", source]
+    n = len(graph)
+    cmd += ["-filter_complex", "".join(f"[{i}:v]" for i in range(n)) + f"concat=n={n}:v=1:a=0[v]",
+            "-map", "[v]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "24",
+            str(tmp_path / name)]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+    return str(tmp_path / name)
+
+
+SIZE = "s=320x568:r=24"
+
+
+def test_real_ffmpeg_a_moving_clip_passes(tmp_path):
+    clip = _render(tmp_path, "moving.mp4", f"testsrc2={SIZE}:d=5")
+    assert gates.clip_problems(clip, 5.0) == []
+
+
+def test_real_ffmpeg_finds_a_black_second(tmp_path):
+    clip = _render(tmp_path, "black.mp4", f"testsrc2={SIZE}:d=2", f"color=c=black:{SIZE}:d=1",
+                   f"testsrc2={SIZE}:d=2")
+    problems = gates.clip_problems(clip, 5.0)
+    assert len(problems) == 1 and problems[0].startswith("black: 1.0")
+
+
+def test_real_ffmpeg_a_freeze_to_the_end_counts(tmp_path):
+    """Review Focus 3: freezedetect logs a start and no end when the clip ends frozen."""
+    clip = _render(tmp_path, "frozen.mp4",
+                   f"testsrc2={SIZE}:d=2.5,tpad=stop_mode=clone:stop_duration=2.5")
+    problems = gates.clip_problems(clip, 5.0)
+    assert len(problems) == 1 and problems[0].startswith("frozen: ")
+    assert 2.0 <= float(problems[0].split()[1]) <= 2.6

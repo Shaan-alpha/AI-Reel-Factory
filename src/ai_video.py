@@ -693,12 +693,14 @@ def _jitter() -> float:
 
 
 def _check_clip(path: str, seconds: float) -> bool:
-    """Stage 4's clip gate (black or frozen stretches) plugs in here. In 3b a clip passes when it
-    covers its whole shot: a shorter one would move every later cut off its pause."""
-    try:
-        return assembly.probe_duration(path) + 1e-3 >= seconds
-    except Exception:  # noqa: BLE001 — an unreadable clip is no clip
-        return False
+    """A clip passes its check (design 11.6) when it is a readable video at least 4.5 s long
+    that covers its whole shot (a shorter one would move every later cut off its pause), with
+    no black or frozen stretch. A clip that fails becomes a still; its problems are logged."""
+    problems = gates.clip_problems(path, seconds)
+    if problems:
+        log.warning("ai_video: %s failed its check (%s)", os.path.basename(path),
+                    "; ".join(problems))
+    return not problems
 
 
 def _fetch_clip(job: Job, url: str, seconds: float, out_dir: str, grace_end: float) -> str | None:
