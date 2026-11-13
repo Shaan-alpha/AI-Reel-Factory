@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import math
 import os
 import re
 import subprocess
@@ -377,22 +378,25 @@ def _fetch_image(keyword: str, dest: str, seed: int, source: str,
         return False
 
 
-def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: int = 0) -> None:
+def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: int = 0,
+                            fps: int = 30) -> None:
     """Render a slow Ken Burns move over an image → 1080x1920 mp4 clip (FFmpeg).
 
     Motion alternates by index for variety (rule 16): even = slow zoom IN, odd = slow zoom OUT.
-    Deterministic per index so cron retries are stable (rule 12)."""
+    Deterministic per index so cron retries are stable (rule 12). `fps` is the reel's rate (24
+    for ai_video, design 11.1); the zoom moves as far a second at any rate, and zoompan is
+    asked for every frame the clip lasts, so its move never restarts before the end."""
     from src.assembly import BT709_TAGS, _ffmpeg, x264_args
 
-    frames = int(seconds * 30)
+    frames = math.ceil(seconds * fps - 1e-9)
     if index % 2 == 0:
-        z = "min(zoom+0.0010,1.12)"                      # slow zoom IN
+        z = f"min(zoom+{0.030 / fps:.6g},1.12)"                   # slow zoom IN
     else:
-        z = "if(eq(on,0),1.12,max(zoom-0.0009,1.0))"     # slow zoom OUT (start zoomed, pull back)
+        z = f"if(eq(on,0),1.12,max(zoom-{0.027 / fps:.6g},1.0))"  # slow zoom OUT (pull back)
     vf = (
         "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
         f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={frames}:s=1080x1920:fps=30,setsar=1,"
+        f"d={frames}:s=1080x1920:fps={fps},setsar=1,"
         # RGB stills -> YUV with the BT.709 matrix the tags declare (swscale defaults to 601).
         "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
         + BT709_TAGS
@@ -400,7 +404,7 @@ def _image_to_kenburns_clip(image_path: str, dest: str, seconds: float, index: i
     try:
         proc = subprocess.run(
             [_ffmpeg(), "-y", "-loop", "1", "-i", image_path, "-t", f"{seconds:.2f}",
-             "-vf", vf, *x264_args(), "-r", "30", dest],
+             "-vf", vf, *x264_args(), "-r", str(fps), dest],
             capture_output=True, text=True, timeout=120,
         )
     except subprocess.TimeoutExpired as e:

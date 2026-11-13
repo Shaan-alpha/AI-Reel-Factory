@@ -718,3 +718,128 @@ def test_a_reframe_snaps_to_a_pause_near_the_middle():
     assert [seg.start for seg in near] == [0.0, 2.9]
     far = assembly.cut_list(5.0, [(3.35, 3.45)])  # 0.9 s away: ignored
     assert [seg.start for seg in far] == [0.0, 2.5]
+
+
+# --- a cut list rendered at 24 fps (design 11.1, 11.2) --------------------------------------------
+
+def _capture_assemble(monkeypatch, tmp_path, duration, shots, fail_first=False, **kw):
+    """assemble() with the render, the probes and the stings replaced: returns the FFmpeg
+    commands it ran, the shot files and the stings it asked for."""
+    from src import audio_sfx
+
+    audio = tmp_path / "narr.wav"
+    audio.write_bytes(b"wav")
+    clips = []
+    for i in range(shots):
+        path = tmp_path / f"shot{i}.mp4"
+        path.write_bytes(b"mp4")
+        clips.append(str(path))
+    cmds, stings = [], []
+
+    def fake_render(cmd):
+        cmds.append(cmd)
+        if fail_first and len(cmds) == 1:
+            return subprocess.CompletedProcess(cmd, 1, "", "polished graph failed")
+        with open(cmd[-1], "wb") as f:
+            f.write(b"mp4")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(assembly, "_run_render", fake_render)
+    monkeypatch.setattr(assembly, "probe_duration", lambda path: duration)
+    monkeypatch.setattr(assembly, "_measure_levels", lambda a, m, d: {})
+    monkeypatch.setattr(assembly, "_pick_music", lambda a: None)
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(audio_sfx, "mix_sfx_events", lambda *a, **k: stings.append(a))
+    assembly.assemble(str(audio), clips, str(tmp_path / "out.mp4"), **kw)
+    return cmds, clips, stings
+
+
+def _frame_trims(cuts, fps):
+    """What each segment must keep, on the reel's frame grid: frame-exact, so eleven segments
+    cannot drift off their pauses or off the narration's length."""
+    out = []
+    for seg in cuts:
+        first = round(seg.offset * fps)
+        out.append((first, first + round(seg.end * fps) - round(seg.start * fps)))
+    return out
+
+
+def test_a_cut_list_render_is_hard_cuts_at_24_fps(monkeypatch, tmp_path):
+    duration, pauses = _test4_trimmed()
+    cuts = assembly.cut_list(duration, pauses)
+    cmds, clips, stings = _capture_assemble(monkeypatch, tmp_path, duration, 6, cuts=cuts, fps=24)
+    (cmd,) = cmds
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade" not in graph and f"concat=n={len(cuts)}:v=1:a=0" in graph
+    assert stings == []  # no cut stings on a cut list
+    inputs = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-i"][:len(cuts)]
+    assert inputs == [clips[seg.shot] for seg in cuts]
+    zoomed = "scale=trunc(iw*1.15/2)*2:trunc(ih*1.15/2)*2,crop=1080:1920"
+    for k, (seg, (first, last)) in enumerate(zip(cuts, _frame_trims(cuts, 24))):
+        head = f"[{k}:v]fps=24,trim=start_frame={first}:end_frame={last},setpts=PTS-STARTPTS,"
+        assert head in graph
+        piece = graph.split(head, 1)[1].split(f"[v{k}]", 1)[0]
+        assert (zoomed in piece) == (seg.zoom > 1)
+    assert sum(b - a for a, b in _frame_trims(cuts, 24)) == round(duration * 24)
+    assert cmd[cmd.index("-r") + 1] == "24"
+
+
+def test_a_failed_cut_list_render_retries_plain_with_the_same_cuts(monkeypatch, tmp_path):
+    duration, pauses = _test4_trimmed()
+    cuts = assembly.cut_list(duration, pauses)
+    cmds, _clips, _stings = _capture_assemble(monkeypatch, tmp_path, duration, 6,
+                                              fail_first=True, cuts=cuts, fps=24)
+    assert len(cmds) == 2
+    plain = cmds[1][cmds[1].index("-filter_complex") + 1]
+    for k, (first, last) in enumerate(_frame_trims(cuts, 24)):
+        assert f"[{k}:v]fps=24,trim=start_frame={first}:end_frame={last}," in plain
+    assert "eq=contrast" not in plain and "overlay" not in plain
+
+
+def test_a_cut_list_needs_one_file_per_shot(monkeypatch, tmp_path):
+    cuts = assembly.cut_list(9.0, [])  # two shots
+    with pytest.raises(ValueError):
+        _capture_assemble(monkeypatch, tmp_path, 9.0, 3, cuts=cuts, fps=24)
+
+
+def test_the_final_gop_is_half_the_frame_rate():
+    final24 = assembly.x264_args(final=True, fps=24)
+    assert final24[final24.index("-g") + 1] == "12"
+    final = assembly.x264_args(final=True)
+    assert final[final.index("-g") + 1] == "15"
+    assert "-g" not in assembly.x264_args()  # the intermediates set none
+
+
+def test_a_cut_list_reel_keeps_every_frame(monkeypatch, tmp_path):
+    """Real FFmpeg: Kling-shaped clips (724x1268, 24 fps, 5.04 s) cut on a cut list come out at
+    24 fps with every frame the narration needs, no more and no fewer."""
+    import json
+    import shutil
+
+    ff, fp = shutil.which("ffmpeg"), shutil.which("ffprobe")
+    if not (ff and fp):
+        pytest.skip("needs ffmpeg and ffprobe")
+    clips = []
+    for i, pattern in enumerate(("testsrc2", "smptebars")):
+        path = str(tmp_path / f"kling{i}.mp4")
+        subprocess.run([ff, "-y", "-f", "lavfi", "-i", f"{pattern}=size=724x1268:rate=24",
+                        "-t", "5.04", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt",
+                        "yuv420p", path], check=True, capture_output=True, timeout=120)
+        clips.append(path)
+    narr = str(tmp_path / "narr.wav")
+    subprocess.run([ff, "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=24000:duration=9",
+                    "-ac", "1", narr], check=True, capture_output=True, timeout=60)
+    for key, value in {"ENABLE_SFX": "false", "ENABLE_BRAND_BUG": "false",
+                       "MUSIC_DIR": str(tmp_path / "no-music")}.items():
+        monkeypatch.setenv(key, value)
+    cuts = assembly.cut_list(9.0, [])
+    assert {seg.shot for seg in cuts} == {0, 1}
+    out = assembly.assemble(narr, clips, str(tmp_path / "reel.mp4"), cuts=cuts, fps=24)
+    probe = json.loads(subprocess.run(
+        [fp, "-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries",
+         "stream=r_frame_rate,nb_read_frames:format=duration", "-of", "json", out],
+        check=True, capture_output=True, text=True, timeout=120).stdout)
+    stream = probe["streams"][0]
+    assert stream["r_frame_rate"] == "24/1"
+    assert abs(float(probe["format"]["duration"]) - 9.0) <= 0.1
+    assert abs(int(stream["nb_read_frames"]) - 216) <= 2

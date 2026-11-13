@@ -426,3 +426,30 @@ def test_fetch_broll_reports_the_source_it_used(monkeypatch, tmp_path):
     meta: dict = {}
     paths = visuals.fetch_broll(["a"], target_seconds=12, out_dir=str(tmp_path), meta=meta)
     assert meta == {"source": "video", "clips": len(paths)}
+
+
+def test_kenburns_paces_to_its_length_at_24_fps(monkeypatch):
+    """An ai_video still covers its whole shot at the reel's 24 fps (design 11.1), moving as far
+    a second as today's 30 fps stills do."""
+    from src import assembly
+
+    captured = []
+
+    def fake_run(cmd, **kw):
+        captured.append(cmd)
+
+        class R:
+            returncode = 0
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(visuals.subprocess, "run", fake_run)
+    visuals._image_to_kenburns_clip("in.jpg", "in24.mp4", 4.2, index=0, fps=24)
+    visuals._image_to_kenburns_clip("in.jpg", "out24.mp4", 4.2, index=1, fps=24)
+    visuals._image_to_kenburns_clip("in.jpg", "in30.mp4", 7.0, index=0)
+    (zoom_in, zoom_out, today) = [cmd[cmd.index("-vf") + 1] for cmd in captured]
+    assert "d=101:" in zoom_in and ":fps=24," in zoom_in and "zoom+0.00125," in zoom_in
+    assert "zoom-0.001125," in zoom_out
+    assert [cmd[cmd.index("-r") + 1] for cmd in captured] == ["24", "24", "30"]
+    assert "d=210:" in today and ":fps=30," in today and "zoom+0.001," in today

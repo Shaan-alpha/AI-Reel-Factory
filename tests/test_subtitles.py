@@ -166,7 +166,7 @@ def test_burn_captions_writes_ass_and_calls_burn(monkeypatch, tmp_path):
                         lambda p: [(0.0, 0.3, "Reusable"), (0.3, 0.7, "rockets")])
     burned = {}
 
-    def fake_burn(video_path, ass_path, out_path, cards=None):
+    def fake_burn(video_path, ass_path, out_path, cards=None, **kw):
         burned["ass"] = ass_path
         burned["cards"] = cards
         with open(out_path, "wb") as f:
@@ -232,7 +232,7 @@ def test_ass_omits_text_cards_when_png_cards_are_used(monkeypatch, tmp_path):
                         lambda p: [(0.0, 4.0, "hi"), (4.0, 9.0, "there")])
     seen = {}
 
-    def fake_burn(video_path, ass_path, out_path, cards=None):
+    def fake_burn(video_path, ass_path, out_path, cards=None, **kw):
         seen["cards"] = cards
         seen["ass"] = open(ass_path, encoding="utf-8").read()
         open(out_path, "wb").write(b"\x00" * 5000)
@@ -252,7 +252,7 @@ def test_burn_captions_retries_with_text_cards_when_overlay_fails(monkeypatch, t
                         lambda p: [(0.0, 4.0, "hi"), (4.0, 9.0, "there")])
     calls = []
 
-    def flaky_burn(video_path, ass_path, out_path, cards=None):
+    def flaky_burn(video_path, ass_path, out_path, cards=None, **kw):
         calls.append(cards)
         if cards:
             raise RuntimeError("overlay filtergraph failed")
@@ -604,7 +604,7 @@ def test_burn_hinglish_needs_no_speech_recognition(monkeypatch, tmp_path):
     monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: data["duration"])
     burned = {}
 
-    def _burn(video_path, ass_path, out_path, cards=None):
+    def _burn(video_path, ass_path, out_path, cards=None, **kw):
         burned["ass"] = open(ass_path, encoding="utf-8").read()
         open(out_path, "wb").write(b"x")
 
@@ -653,3 +653,29 @@ def test_pauses_that_cannot_be_read_mean_estimate_timing(monkeypatch):
 
     monkeypatch.setattr(subtitles.subprocess, "run", _hang)
     assert subtitles.pauses("narration.wav") == []
+
+
+def test_burns_keep_the_reels_frame_rate(monkeypatch, tmp_path):
+    """An ai_video reel is 24 fps end to end (design 11.1): the caption burn keeps its rate and
+    sets its keyframe interval to half of it."""
+    video, audio = tmp_path / "raw.mp4", tmp_path / "narr.wav"
+    video.write_bytes(b"mp4")
+    audio.write_bytes(b"wav")
+    monkeypatch.setattr(subtitles, "pauses", lambda path: [])
+    monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: 6.0)
+    monkeypatch.setattr(subtitles, "_ffmpeg", lambda: "ffmpeg")
+    cmds = []
+
+    def fake_run(cmd, **kw):
+        cmds.append(cmd)
+        with open(cmd[-1], "wb") as f:
+            f.write(b"mp4")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subtitles.subprocess, "run", fake_run)
+    lines = [{"en": "Prices rose.", "hi": "दाम बढ़े।", "said": "दाम बढ़े।"}]
+    subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "final.mp4"), lines,
+                            hook_text="Prices rose", fps=24)
+    subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "final30.mp4"), lines,
+                            hook_text="Prices rose")
+    assert [cmd[cmd.index("-g") + 1] for cmd in cmds] == ["12", "15"]

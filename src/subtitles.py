@@ -525,13 +525,14 @@ def _stage_font(dest_dir: str) -> None:
 
 
 def _burn(video_path: str, ass_path: str, out_path: str,
-          cards: list[tuple[float, float, str]] | None = None) -> None:
+          cards: list[tuple[float, float, str]] | None = None, fps: int = 30) -> None:
     """Burn the .ass onto the video with FFmpeg. Runs in the subtitle's dir so the filter
     arg is a bare filename — avoids Windows drive-colon/backslash escaping in libass.
 
     `cards` are PIL stat-card PNGs composited centre-frame for their window. Each is a `-loop 1`
     still (so it exists at its timestamps, mirroring assembly's brand-bug pattern) gated by
-    `enable='between(t,...)'`; `-shortest` keeps those infinite inputs from extending the reel."""
+    `enable='between(t,...)'`; `-shortest` keeps those infinite inputs from extending the reel.
+    `fps` is the reel's own rate: the output keeps it, with a keyframe every half second."""
     work_dir = os.path.dirname(os.path.abspath(ass_path))
     _stage_font(work_dir)  # so libass resolves CAPTION_FONT via a relative fontsdir
     cards = cards or []
@@ -554,7 +555,7 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 
     cmd += [
         "-c:a", "copy",
-        *x264_args(final=True),
+        *x264_args(final=True, fps=fps),
         "-movflags", "+faststart",
         os.path.abspath(out_path),
     ]
@@ -570,7 +571,8 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 
 def burn_captions(video_path: str, audio_path: str, out_path: str,
                   hook_text: str | None = None, key_points: list[str] | None = None,
-                  source_label: str | None = None, script_text: str | None = None) -> str:
+                  source_label: str | None = None, script_text: str | None = None,
+                  fps: int = 30) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
@@ -615,12 +617,12 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     log.info("subtitles: burning %d word events into %s (graphic cards=%d)",
              len(words), out_path, len(cards))
     try:
-        _burn(video_path, ass_path, out_path, cards=cards)
+        _burn(video_path, ass_path, out_path, cards=cards, fps=fps)
     except RuntimeError:
         if not fallback_ass:
             raise
         log.warning("subtitles: card-overlay burn failed; retrying with ASS text cards.")
-        _burn(video_path, fallback_ass, out_path, cards=None)
+        _burn(video_path, fallback_ass, out_path, cards=None, fps=fps)
 
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
@@ -859,7 +861,8 @@ def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
 
 
 def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[dict],
-                  hook_text: str | None = None, source_label: str | None = None) -> str:
+                  hook_text: str | None = None, source_label: str | None = None,
+                  fps: int = 30) -> str:
     """Burn English subtitles for a Hinglish narration: no speech recognition; the timing comes
     from the narration's pauses and the text from the checked lines (design 7.7)."""
     if not os.path.exists(video_path):
@@ -876,7 +879,7 @@ def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[d
         f.write(_hinglish_ass(blocks, hook_text, duration, source_label))
     log.info("subtitles: burning %d English blocks for a Hinglish narration into %s",
              len(blocks), out_path)
-    _burn(video_path, ass_path, out_path)
+    _burn(video_path, ass_path, out_path, fps=fps)
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
     return out_path
