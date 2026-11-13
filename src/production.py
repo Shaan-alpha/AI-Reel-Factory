@@ -211,11 +211,12 @@ def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True)
 FORMAT_VERSION = 2
 
 
-def _format(language: str, visual_meta: dict) -> dict:
-    """The post's format stamp, from what the chain actually did."""
+def _format(language: str, visual_meta: dict, structure: str | None = None) -> dict:
+    """The post's format stamp, from what the chain actually did, with the structure the script
+    followed (design 10.1)."""
     return {"version": FORMAT_VERSION, "language": language,
             "visuals": visual_meta.get("source"), "video_shots": visual_meta.get("video_shots", 0),
-            "shots": visual_meta.get("clips"), "structure": None}
+            "shots": visual_meta.get("clips"), "structure": structure}
 
 
 def _wants_hinglish() -> bool:
@@ -480,7 +481,7 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         metadata["voice"] = spoke.get("voice")
         # The audio language is what was voiced (design 9.9): hi for Hinglish, en otherwise.
         metadata["audio_language"] = language
-        metadata["format"] = _format(language, shown)
+        metadata["format"] = _format(language, shown, script.get("structure"))
         # Nothing looks at a reel before it is public, so this does (design 11.6).
         progress["stage"] = "check"
         problems = gates.reel_problems(final, duration)

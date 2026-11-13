@@ -971,6 +971,20 @@ def test_format_stamp_reaches_publish(monkeypatch, tmp_path):
     assert seen["format"]["visuals"] == "ai" and seen["audio_language"] == "en"
 
 
+def test_the_format_stamp_names_the_scripts_structure(monkeypatch, tmp_path):
+    """Design 10.1: the stamp records the structure the script followed; the first two
+    relaunch posts carried "structure": null."""
+    _wire_happy(monkeypatch)
+    _attempts(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "structure": "number"})
+    seen = {}
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: seen.update(m) or ("VID1", "url"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["format"]["structure"] == "number"
+
+
 def test_a_failed_attempt_is_recorded_with_its_stage(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     calls = _attempts(monkeypatch)
