@@ -80,11 +80,44 @@ def test_estimate_reads_the_quote(monkeypatch):
     assert sent["timeout"] == 30
 
 
-@pytest.mark.parametrize("body", [{"usd": "free"}, {"usd": float("nan")}, {}, ["usd"]])
+# What /estimate answered for Kling on 2026-11-13 (the live check): a rate, not a total.
+_RATE_TEXT = ("Standard self-serve rates in USD per video second: 720p: $0.0315. Total price = "
+              "selected rate × output duration in seconds.")
+
+
+@pytest.mark.parametrize("text, seconds, usd", [
+    (_RATE_TEXT, 5, 0.1575),
+    (_RATE_TEXT, 10, 0.315),
+    # Several rates: the 720p one, which is what Kling 2.5 Turbo Standard makes (724x1268).
+    ("Rates in USD per video second: 480p: $0.02, 720p: $0.0315, 1080p: $0.05.", 5, 0.1575),
+    # No 720p rate: the highest listed, so the log over-reports rather than under-reports.
+    ("Rates in USD per video second: 480p: $0.02, 1080p: $0.05.", 5, 0.25),
+])
+def test_estimate_reads_a_per_second_rate(monkeypatch, text, seconds, usd):
+    _use(monkeypatch, lambda m, u, k: _Resp(200, {"type": "description",
+                                                    "pricing_description": text}))
+    args = {"prompt": "a slow pan", "image_url": "https://cdn.example/in.png",
+            "duration": seconds}
+    assert higgsfield.estimate(higgsfield.KLING, args) == pytest.approx(usd)
+
+
+@pytest.mark.parametrize("body", [{"usd": "free"}, {"usd": float("nan")}, {}, ["usd"],
+                                  {"type": "description", "pricing_description": "Contact sales."},
+                                  {"type": "description",
+                                   "pricing_description": "USD per image: $0.03."}])
 def test_a_quote_without_a_price_is_unavailable(monkeypatch, body):
     _use(monkeypatch, lambda m, u, k: _Resp(200, body))
     with pytest.raises(higgsfield.HiggsfieldError) as err:
-        higgsfield.estimate(higgsfield.KLING, {})
+        higgsfield.estimate(higgsfield.KLING, {"duration": 5})
+    assert err.value.kind == "unavailable"
+
+
+def test_a_per_second_rate_needs_the_duration(monkeypatch):
+    """A rate cannot become a price without the clip's length: no guess."""
+    _use(monkeypatch, lambda m, u, k: _Resp(200, {"type": "description",
+                                                    "pricing_description": _RATE_TEXT}))
+    with pytest.raises(higgsfield.HiggsfieldError) as err:
+        higgsfield.estimate(higgsfield.KLING, {"prompt": "p"})
     assert err.value.kind == "unavailable"
 
 

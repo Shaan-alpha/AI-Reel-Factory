@@ -185,13 +185,37 @@ def _request_id(request_id: str) -> str:
     return request_id
 
 
+_PER_SECOND = re.compile(r"(?i)\bper (?:video )?second\b")
+_RATE = re.compile(r"(\d{3,4})p:\s*\$(\d+(?:\.\d+)?)")
+
+
+def _per_second_price(text: str, args: dict) -> float:
+    """A price from a rate description, which is what /estimate answered for Kling on 2026-11-13
+    ("rates in USD per video second: 720p: $0.0315. Total price = selected rate x output
+    duration"): the 720p rate, which is what Kling 2.5 Turbo Standard makes, else the highest
+    listed, times the job's `duration`. NaN when the text holds no per-second rate."""
+    if not _PER_SECOND.search(text):
+        return math.nan
+    rates = {res: float(usd) for res, usd in _RATE.findall(text)}
+    if not rates:
+        return math.nan
+    try:
+        seconds = float(args["duration"])
+    except (KeyError, TypeError, ValueError):
+        return math.nan
+    return rates.get("720", max(rates.values())) * seconds
+
+
 def estimate(endpoint: str, args: dict) -> float:
-    """What one job with these arguments costs, in USD (free to ask)."""
+    """What one job with these arguments costs, in USD (free to ask). The answer is either a
+    total (`usd`) or, for a model priced by the second, a rate description that is multiplied by
+    the job's `duration`."""
     data = _api("POST", f"estimate/{endpoint}", "estimate", body=args)
     try:
         usd = float(data["usd"])
     except (KeyError, TypeError, ValueError):
-        usd = math.nan
+        text = data.get("pricing_description")
+        usd = _per_second_price(text, args) if isinstance(text, str) else math.nan
     if not math.isfinite(usd):
         raise HiggsfieldError("unavailable", "estimate: no price in the answer")
     return usd
