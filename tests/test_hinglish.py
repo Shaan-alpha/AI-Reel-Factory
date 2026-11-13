@@ -364,3 +364,42 @@ def test_the_number_guard_sees_rupees_after_rs():
 ])
 def test_a_number_before_the_hindi_full_stop_is_read(text, said):
     assert hinglish.say_numbers(text) == said
+
+
+# --- names after the first AI-video test render (2026-11-13, script 441) -------------------------
+
+_SPY = ("A U.S. intelligence memo reportedly says Nvidia's Jensen Huang met a suspected spy.")
+
+
+def _name_failures(en: str, hi: str) -> list[str]:
+    return [f for f in hinglish.check([en], [{"i": 1, "hi": hi}], 0, 999) if "name" in f]
+
+
+def test_a_dotted_abbreviation_is_one_name():
+    """"U.S." was read as the names "U" and "S": "US", the usual Hinglish, failed, and the retry
+    was told to write a "U" in Latin script, which it could not act on."""
+    names = hinglish.names_in(_SPY)
+    assert "U.S." in names and "U" not in names and "S" not in names
+    for hi in ("एक US intelligence memo के मुताबिक Nvidia के Jensen Huang एक suspected spy से मिले।",
+               "एक U.S. intelligence memo के मुताबिक Nvidia के Jensen Huang एक suspected spy से मिले।"):
+        assert _name_failures(_SPY, hi) == [], hi
+    dropped = "Nvidia के Jensen Huang एक suspected spy से मिले।"  # what attempt 1 really wrote
+    assert _name_failures(_SPY, dropped) == [
+        "line 1: the name 'U.S.' must appear in Latin script"]
+
+
+def test_a_name_in_other_capitals_is_still_in_latin_script():
+    """The check is for the script, not the capitals: "NVIDIA" is the brand's own spelling."""
+    en = "The officials met Nvidia's chief."  # mid-sentence: a sentence's first word is no name
+    assert _name_failures(en, "Officials ने NVIDIA के chief से मुलाकात की।") == []
+    assert _name_failures(en, "Officials ने एनवीडिया के chief से मुलाकात की।") == [
+        "line 1: the name 'Nvidia' must appear in Latin script"]
+
+
+def test_the_retry_asks_for_every_line_again():
+    """Told only about line 1, the retry sent back line 1 alone (lines 2-5 missing)."""
+    prompt = hinglish._render_prompt(["One.", "Two.", "Three."], "t", "plain",
+                                     ["line 1: the name 'U.S.' must appear in Latin script"])
+    assert "all 3 lines" in prompt
+    assert "all 3 lines" not in hinglish._render_prompt(["One.", "Two.", "Three."], "t", "plain",
+                                                        None)

@@ -217,18 +217,38 @@ def numbers_in(text: str) -> set[str]:
             for m in _CHECK_NUMBER_RE.finditer(text or "")}
 
 
+# "U.S." is one name, not the names "U" and "S" (2026-11-13: the retry was told to write a
+# "U" in Latin script and could not act on it, and "US" failed).
+_ABBREVIATION = re.compile(r"(?:[A-Z]\.){2,}")
+_NAME_TOKEN = re.compile(r"(?:[A-Z]\.){2,}|[A-Za-z][A-Za-z'’\-]*")
+
+
 def names_in(en: str) -> list[str]:
-    """Capitalised words that do not start the sentence or a clause after a colon."""
-    tokens = list(re.finditer(r"[A-Za-z][A-Za-z'’\-]*", en))
+    """Capitalised words that do not start the sentence or a clause after a colon; a dotted
+    abbreviation ("U.S.") is one name."""
+    tokens = list(_NAME_TOKEN.finditer(en))
     names = []
     for k, m in enumerate(tokens):
         if k == 0 or ":" in en[tokens[k - 1].end():m.start()]:
+            continue
+        if _ABBREVIATION.fullmatch(m.group(0)):
+            names.append(m.group(0))
             continue
         for piece in m.group(0).split("-"):
             piece = re.sub(r"['’]s$", "", piece)
             if piece and piece[0].isupper() and piece not in _NOT_NAMES:
                 names.append(piece)
     return names
+
+
+def _name_written(name: str, hi: str) -> bool:
+    """Whether `name` stands in `hi` in Latin script. Capitals do not count ("NVIDIA" is the
+    brand's own spelling of Nvidia) and an abbreviation's dots are optional ("US" is "U.S.")."""
+    if _ABBREVIATION.fullmatch(name):
+        body = r"\.?".join(re.escape(c) for c in name.replace(".", "")) + r"\.?"
+    else:
+        body = re.escape(name)
+    return re.search(rf"(?<![A-Za-z]){body}(?![A-Za-z])", hi, re.IGNORECASE) is not None
 
 
 def _bad_characters(hi: str) -> list[str]:
@@ -293,7 +313,7 @@ def check(en_lines: list[str], lines: list[dict], min_seconds: float | None = No
                             f"{unicodedata.normalize('NFC', word)!r}; write the number as the "
                             f"English has it")
         for name in names_in(en):
-            if not re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", hi):
+            if not _name_written(name, hi):
                 failures.append(f"line {i}: the name {name!r} must appear in Latin script")
         if not _DEVANAGARI_LETTER.search(hi):
             failures.append(f"line {i}: no Devanagari; write the Hindi words in Devanagari")
@@ -366,7 +386,9 @@ Return ONLY a JSON object: {{"lines": [{{"i": 1, "hi": "...", "parts": [{{"hi": 
 def _render_prompt(en_lines: list[str], title: str, tone: str,
                    failures: list[str] | None) -> str:
     numbered = "\n".join(f"{i}. {line}" for i, line in enumerate(en_lines, 1))
-    fixes = ("\nYOUR LAST VERSION FAILED THESE CHECKS; fix every one:\n"
+    # "all N lines": told only about line 1, a retry once sent back line 1 alone (2026-11-13).
+    fixes = (f"\nYOUR LAST VERSION FAILED THESE CHECKS; fix every one, and return all "
+             f"{len(en_lines)} lines again, not only the lines named:\n"
              + "\n".join(f"- {f}" for f in failures) + "\n") if failures else ""
     return _RENDER_PROMPT.format(title=title or "(untitled)", tone=_TONES.get(tone, _TONES["plain"]),
                                  lines=numbered, failures=fixes)
