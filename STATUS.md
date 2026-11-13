@@ -65,16 +65,15 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
   fresh final review and its fixes); **stage 2 (Hinglish) is merged** (PR #19, behind
   `NARRATION_LANGUAGE`). Stage 3 (AI video) comes in two plans: **3a (the Higgsfield client,
-  the ledger, the sweep) is built** on `feat/stage-3-ai-video` (see the 2026-11-13 log); 3b (the
+  the ledger, the sweep) is built and reviewed** (PR #20; see the 2026-11-13 log); 3b (the
   shots, the cut list, the wiring) is next. State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ⚠️ **Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4 in Supabase (two
   columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; three on
   `scripts`; the `ai_video_jobs` table). The code runs without it, skipping those records, and
   buys nothing from Higgsfield until `ai_video_jobs` exists. The bot is already redeployed.
-- ⚠️ **Operator, before the relaunch** (design section 15, each on your go-ahead): add
-  `HF_API_KEY` as a repository secret (from the local `.env`, never printed), and allow one live
-  check, `python tools/verify_higgsfield.py --yes-spend` (at most $0.18).
+- ~~**Operator, before the relaunch:** the `HF_API_KEY` secret and the live check~~ Both done
+  2026-11-13 with the operator's go-ahead (design 15 steps 2-3; result in docs/04 and the log).
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
   - ~~before 2026-11-17: ear-test the 3.8 TTS models~~ Done 2026-11-12: the operator kept
     `gemini-3.1-flash-tts-preview` (Charon, Hinglish) over both 3.8 models, and the voice moved
@@ -205,6 +204,20 @@ calls follow redirects; `_FILE_TIMEOUT` is per read, not a total, so 3b's phase 
 rely on it (carried to 3b).
 
 Suite after the fixes: **1028 passed, 5 skipped**.
+
+**Operator go-ahead, the same day:** push and merge (PR #20), the `HF_API_KEY` repository secret
+(piped from the local `.env`, never printed), and the live check (design 15, steps 2-3):
+
+- **The first run bought nothing.** `/estimate` now answers Kling with a rate, not a total: "720p:
+  $0.0315 per video second. Total price = selected rate × output duration". The client read only
+  `usd`, so every reel would have refused to buy. It now takes the 720p rate (else the highest
+  listed) times the job's `duration`: **$0.1575 a clip**, against $0.179 quoted on 11-10. The
+  estimate needs an `image_url` in its body, but any URL will do.
+- **The second run:** two submits with one idempotency key returned **the same `request_id`**: a
+  repeat is one job and one charge, so 3b may retry a submit that got no answer.
+- The job was `in_progress` a second or two after the submit, so the immediate cancel was refused
+  (HTTP 400). The clip finished and downloaded without the key (1.66 MB). **Spent: one clip,
+  $0.1575.** Whether cancelling a queued job is free stays unmeasured: jobs barely queue here.
 
 ### 2026-11-12 — The voice moves to Vertex now; the audit checked; the design rewritten
 
