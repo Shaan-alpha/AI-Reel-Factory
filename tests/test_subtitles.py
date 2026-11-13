@@ -494,9 +494,11 @@ def test_a_short_hook_banner_keeps_its_full_size():
 
 
 def test_the_source_line_sits_above_the_shorts_bottom_ui():
+    """It sat at y 1480, which the Shorts interface covers; it is top-anchored now, under the
+    banner (design 11.5)."""
     header = subtitles._ass_header()
     source = next(ln for ln in header.splitlines() if ln.startswith("Style: Source"))
-    assert int(source.split(",")[-2]) >= 400
+    assert source.split(",")[18] == "8"  # alignment: top centre
 
 
 def test_a_long_seven_word_title_still_fits_without_an_ellipsis():
@@ -744,3 +746,112 @@ def test_key_point_cards_are_off_by_default(monkeypatch):
     monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")
     ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
     assert ass.count(",Card,,") == 2
+
+
+# --- Stage 4b: the banner, the source line and the subtitles in the safe area (design 11.5) ---
+
+import re  # noqa: E402
+
+TITLE = "Back after 286 days"
+WORDS = [(0.1, 0.5, "Sunita"), (0.5, 0.9, "Williams"), (0.9, 1.4, "returned"), (1.4, 1.6, "to"),
+         (1.6, 3.1, "Earth."), (3.4, 3.8, "NASA"), (3.8, 4.2, "says"), (4.2, 5.0, "so.")]
+
+
+def _event(ass: str, style: str) -> tuple[str, str, list[str]]:
+    """(start, end, fields) of the first Dialogue line in `style`."""
+    line = next(ln for ln in ass.splitlines()
+                if ln.startswith("Dialogue:") and ln.split(",")[3] == style)
+    fields = line.split(",", 9)
+    return fields[1], fields[2], fields
+
+
+def test_the_banner_holds_for_the_first_sentence(monkeypatch):
+    for k in ("HOOK_SECONDS", "HOOK_MAX_SECONDS"):
+        monkeypatch.delenv(k, raising=False)
+    ass = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=5.0, first_end=3.1)
+    assert _event(ass, "Hook")[:2] == ("0:00:00.00", "0:00:03.10")
+
+
+def test_the_banner_holds_between_1_8_and_4_0(monkeypatch):
+    for k in ("HOOK_SECONDS", "HOOK_MAX_SECONDS"):
+        monkeypatch.delenv(k, raising=False)
+    short = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=5.0, first_end=1.2)
+    long = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=9.0, first_end=6.9)
+    assert _event(short, "Hook")[1] == "0:00:01.80"
+    assert _event(long, "Hook")[1] == "0:00:04.00"
+
+
+def test_the_source_line_shows_with_the_first_sentence(monkeypatch):
+    """Review Focus 1: the opening claims ran to 6.6-7.3 s; the banner leaves at 4.0 s, the
+    source line stays with the claim it supports."""
+    monkeypatch.delenv("ENABLE_SOURCE_CITE", raising=False)
+    ass = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=9.0, source_label="nasa.gov",
+                               first_end=6.9)
+    assert _event(ass, "Source")[:2] == ("0:00:00.00", "0:00:06.90")
+    assert _event(ass, "Hook")[1] == "0:00:04.00"
+
+
+def test_the_source_line_sits_under_the_banner(monkeypatch):
+    """Review Focus 5: a long title fills three rows at a smaller size; the source line goes
+    under the banner's real height, and straight under the top edge when there is no banner."""
+    monkeypatch.delenv("ENABLE_SOURCE_CITE", raising=False)
+    title = "Networks Boycott Trump: An Unprecedented Media Blackout"
+    banner = subtitles._hook_banner_text(title)
+    rows = banner.count("\\N") + 1
+    size = int(re.search(r"\\fs(\d+)", banner).group(1)) if "\\fs" in banner else 94
+    ass = subtitles._build_ass(WORDS, hook_text=title, total_dur=5.0, source_label="nasa.gov",
+                               first_end=3.1)
+    margin = int(_event(ass, "Source")[2][7])
+    assert 300 + rows * size * 1.2 <= margin <= 300 + rows * size * 1.4 + 40
+    bare = subtitles._build_ass(WORDS, total_dur=5.0, source_label="nasa.gov", first_end=3.1)
+    assert int(_event(bare, "Source")[2][7]) == 300
+
+
+def test_subtitles_sit_inside_the_safe_box():
+    """Google's vertical overlay: clear of the left 48, right 192 and bottom 672 px."""
+    header = subtitles._ass_header()
+    for name in ("Karaoke", "Sub"):
+        style = next(ln for ln in header.splitlines() if ln.startswith(f"Style: {name},"))
+        margin_l, margin_r, margin_v = (int(v) for v in style.split(",")[19:22])
+        assert (margin_l, margin_r, margin_v) == (48, 192, 672)
+
+
+def test_no_words_keeps_the_1_8_s_banner(monkeypatch):
+    """Review Focus 4: without the first sentence's end the banner keeps its old 1.8 s and the
+    source line its SOURCE_CITE_SECONDS."""
+    for k in ("HOOK_SECONDS", "HOOK_MAX_SECONDS", "SOURCE_CITE_SECONDS", "ENABLE_SOURCE_CITE"):
+        monkeypatch.delenv(k, raising=False)
+    ass = subtitles._build_ass([], hook_text=TITLE, total_dur=5.0, source_label="nasa.gov")
+    assert _event(ass, "Hook")[1] == "0:00:01.80" and _event(ass, "Source")[1] == "0:00:03.00"
+
+
+def test_first_sentence_end_from_aligned_words():
+    script = "Sunita Williams returned to Earth. NASA says so."
+    assert subtitles._first_sentence_end(WORDS, script) == 3.1
+    tagged = "Sunita Williams [short pause] returned to\u2014Earth. NASA says so."
+    words = WORDS[:3] + [(1.4, 1.6, "to"), (1.6, 3.1, "Earth."), (3.4, 3.8, "NASA")]
+    assert subtitles._first_sentence_end(words, tagged) == 3.1
+    assert subtitles._first_sentence_end([], script) is None
+    assert subtitles._first_sentence_end(WORDS, None) is None
+
+
+def test_hinglish_banner_ends_with_line_one(monkeypatch, tmp_path):
+    """The Hinglish burn holds the banner to line 1's end from the same sentence times its
+    subtitles use."""
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.wav"; audio.write_bytes(b"\x00" * 100)
+    lines = [{"en": "Sunita Williams is back.", "hi": "सुनीता विलियम्स लौट आईं।", "said": "a" * 30},
+             {"en": "Here is why it matters.", "hi": "इसका मतलब यह है।", "said": "b" * 30}]
+    pause_list = [(3.0, 3.3)]
+    monkeypatch.setattr(subtitles, "pauses", lambda path: pause_list)
+    monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: 7.0)
+    seen = {}
+    monkeypatch.setattr(subtitles, "_burn",
+                        lambda v, ass, out, cards=None, fps=30: seen.update(
+                            ass=open(ass, encoding="utf-8").read()) or open(out, "wb").write(b"x"))
+    monkeypatch.delenv("HOOK_MAX_SECONDS", raising=False)
+    subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "out.mp4"), lines,
+                            hook_text=TITLE)
+    weights = [subtitles._spoken_chars(line["said"]) for line in lines]
+    first = subtitles.sentence_ends(pause_list, weights, 7.0)[0]
+    assert _event(seen["ass"], "Hook")[1] == subtitles._format_ts(min(4.0, max(1.8, first)))

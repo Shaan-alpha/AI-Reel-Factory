@@ -879,3 +879,15 @@ def test_the_music_bed_sits_4_lu_under_the_voice(monkeypatch):
     monkeypatch.setenv("MUSIC_LU_BELOW_VOICE", "11")
     reads = iter([-21.0, -24.5, -12.0])
     assert assembly._measure_levels("n.wav", "bed.mp3", 20.0)["bed"] == -14.0 - 11.0 - (-12.0)
+
+
+
+def test_the_logo_is_smaller_by_default(monkeypatch, tmp_path):
+    """Design 11.5: the logo shrinks (150 px tall before stage 4b)."""
+    logo = tmp_path / "logo.png"; logo.write_bytes(b"\x89PNG\r\n")
+    monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setenv("BRAND_LOGO", str(logo))
+    for k in ("ENABLE_BRAND_BUG", "BRAND_LOGO_HEIGHT"):
+        monkeypatch.delenv(k, raising=False)
+    cmd = assembly._build_cmd([("c0.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
+    assert "scale=-1:96," in cmd[cmd.index("-filter_complex") + 1]

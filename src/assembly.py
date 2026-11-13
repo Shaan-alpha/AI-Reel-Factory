@@ -664,7 +664,7 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
     if logo_path:
         logo_idx = curr_idx + 1
         cmd += ["-loop", "1", "-i", logo_path]
-        h = config.get("BRAND_LOGO_HEIGHT", "150")
+        h = config.get("BRAND_LOGO_HEIGHT", "96")  # 150 before stage 4b (design 11.5)
         op = config.get("BRAND_LOGO_OPACITY", "0.55")
         m = config.get("BRAND_LOGO_MARGIN", "44")
         # Below the Shorts player's top-right icons (search, camera, menu), which covered the
