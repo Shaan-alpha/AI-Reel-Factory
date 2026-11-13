@@ -130,8 +130,9 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Open decisions
 
-- **Cadence vs the goal:** about 0.7 Shorts a day against 4–5, with at most 3 approvals a run.
-  Run more often, or restate the goal and the Phase-1 exit criteria for on-demand runs?
+- ~~**Cadence vs the goal**~~ **Decided 2026-11-14 (operator):** no 4–5-a-day milestone for
+  now. One channel first, until its reach earns (the YouTube Partner Program); then full power
+  (more reels a day, more channels). About 20 reels a month meanwhile.
 - **Sources:** should model-written source URLs count toward `MIN_SOURCES` (invented TOI / The
   Hindu links pass the liveness probe)? Does one outlet twice, or the subject's own site (idea
   475 cited three imf.org pages), count as two independent sources?
