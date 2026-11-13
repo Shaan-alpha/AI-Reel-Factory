@@ -1222,3 +1222,21 @@ def test_english_text_takes_todays_chain(monkeypatch, tmp_path):
     voice.synthesize("ISRO's rocket landed itself.", str(tmp_path), meta=meta,
                      expected_seconds=99)
     assert calls == ["gemini"] and "route" not in meta
+
+
+# --- final review of stage 2 (2026-11-12) -----------------------------------------------------
+
+def test_the_suite_runs_as_if_before_the_tts_shutdown():
+    """The daily test run would turn red on 2026-11-17 by the calendar alone: the Developer API
+    tests ran on today's date. They run as on 2026-11-12; shutdown tests pass their own date."""
+    assert voice._today() < _date(*voice._DEV_TTS_SHUTDOWN)
+
+
+def test_a_retired_model_without_vertex_says_so(monkeypatch, tmp_path):
+    monkeypatch.setattr(voice, "_today", lambda: _date(2026, 12, 1))
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "false")
+    for k in ("GEMINI_TTS_MODEL", "GEMINI_TTS_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(RuntimeError, match="retired"):
+        voice._synthesize_gemini("Hello there.", str(tmp_path))

@@ -405,6 +405,13 @@ def _vertex_tts_enabled() -> bool:
             and config.get_bool("GEMINI_USE_VERTEX", False) and bool(config.get("GCP_PROJECT")))
 
 
+def _today():
+    """Today's date in UTC; the tests pin it (conftest) so the suite does not change by date."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).date()
+
+
 def _gemini_tts_attempts(model: str, have_key: bool, today=None) -> list[tuple[str, str]]:
     """(backend, model) pairs to try, in order. Every one speaks with the same voice.
 
@@ -413,10 +420,10 @@ def _gemini_tts_attempts(model: str, have_key: bool, today=None) -> list[tuple[s
     serve still goes to the Developer API first. Without Vertex: the Developer API's model, then
     its stable preview. Vertex has capacity of its own: the 2026-09-15 reels lost the channel voice
     to Chirp when the Developer API 503'd on BOTH its models at once."""
-    from datetime import date, datetime, timezone
+    from datetime import date
 
     vertex = _vertex_tts_enabled()
-    gone = (today or datetime.now(timezone.utc).date()) >= date(*_DEV_TTS_SHUTDOWN)
+    gone = (today or _today()) >= date(*_DEV_TTS_SHUTDOWN)
 
     def dev(m: str) -> bool:
         return have_key and not ((vertex or gone) and m in _DEV_TTS_RETIRING)
@@ -486,6 +493,9 @@ def _synthesize_gemini(text: str, out_dir: str, meta: dict | None = None,
     model = config.get("GEMINI_TTS_MODEL", _GEMINI_TTS_PRIMARY)
     attempts = _gemini_tts_attempts(model, have_key=bool(key))
     if not attempts:
+        if key and model in _DEV_TTS_RETIRING:
+            raise RuntimeError(f"gemini tts: the Developer API retired {model} on 2026-11-17; set "
+                               f"up Vertex (GEMINI_USE_VERTEX, GCP_PROJECT) to keep this voice")
         raise RuntimeError("gemini tts: GEMINI_TTS_API_KEY / GEMINI_API_KEY not set")
 
     # Keep style tags, degrade pause tags to an ellipsis; Hinglish text carries no tags at all.
