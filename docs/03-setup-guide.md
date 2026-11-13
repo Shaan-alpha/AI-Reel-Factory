@@ -22,8 +22,13 @@ can run headless.
   `base` model (Hugging Face cache).
 - The **Google Cloud CLI** (`gcloud`) for the Vertex login (§2b), and the **Vercel CLI**
   (`npm i -g vercel`) for the bot (§5b).
+- **Tesseract OCR**, optional locally: the still check for AI-video reels reads each still with it
+  (`src/gates.py`). Windows: `winget install UB-Mannheim.TesseractOCR` (it asks for admin rights;
+  the code also finds it in `C:\Program Files\Tesseract-OCR`). Or set `TESSERACT_BINARY`.
+  Without it the text check is skipped with one warning.
 
-CI uses GitHub's `ubuntu-24.04` runner with Python 3.12 and apt's `ffmpeg` and `espeak-ng`.
+CI uses GitHub's `ubuntu-24.04` runner with Python 3.12 and apt's `ffmpeg`, `espeak-ng` and
+`tesseract-ocr` (cached between runs).
 
 ---
 
@@ -380,10 +385,12 @@ a fresh fork without the variable uses stock until you set it.
 
 ## 6d. Google Cloud Text-to-Speech — Chirp 3 HD (billed, first voice fallback) ★ recommended
 
-The channel voice is Gemini TTS (`gemini-3.1-flash-tts-preview`, Zubenelgenubi): the §2 key first,
-then the same voice on Vertex (§2b), with no extra setup. Chirp 3 HD is the next link, reading as
-the same narrator (`en-IN-Chirp3-HD-Zubenelgenubi`). Billed service: 1M characters/month free,
-then $30 per 1M; the budget in §2b covers it.
+The channel voice is Gemini TTS (`gemini-3.1-flash-tts-preview`, Zubenelgenubi until the
+relaunch, **Charon** from it): on Vertex (§2b) since 2026-11-12, with no extra setup. Chirp 3 HD
+is the next link, reading as the same narrator (`en-IN-Chirp3-HD-Zubenelgenubi`, and
+`en-IN-Chirp3-HD-Charon` from the relaunch); Hinglish narration uses its Hindi voice,
+`hi-IN-Chirp3-HD-Charon` (`GOOGLE_TTS_VOICE_HI`, the default). Billed service: 1M
+characters/month free, then $30 per 1M; the budget in §2b covers it.
 
 1. In `but-it-matters-tts`, enable the **Cloud Text-to-Speech API** and create an **API key**
    restricted to that API. Save as `GOOGLE_TTS_API_KEY`. (The live key was created with the project
@@ -394,6 +401,26 @@ then $30 per 1M; the budget in §2b covers it.
 
 Without a key or voice the chain moves on to edge-tts (`en-IN-PrabhatNeural`), then Kokoro
 (`am_michael`): male voices all the way down.
+
+---
+
+## 6e. Higgsfield — AI-video clips (billed, operator-approved) ★ for the new format
+
+The AI-video format animates each shot's FLUX still with **Kling 2.5 Turbo** through Higgsfield
+(design Part A). The operator approved it as a billed service on 2026-11-10: up to $1.10 a reel
+(`AI_VIDEO_BUDGET_USD`), about $0.95 for six 5 s clips at $0.1575, with no cap in code. Every job
+is reserved in the `ai_video_jobs` table (§4's SQL) before it is bought, and every dollar is
+reported on Telegram with the month-to-date.
+
+1. Create an API key in the Higgsfield console and top up the prepaid balance. The console's key
+   is already `id:secret`: save it whole as `HF_API_KEY` in `.env`.
+2. Add it as the repository secret `HF_API_KEY` (done 2026-11-13).
+3. Optional live check, one clip ($0.1575): `python tools/verify_higgsfield.py --yes-spend`
+   (result in docs/04). A test render that never uploads: `python tools/try_ai_video.py
+   --yes-spend` (about $0.95 of clips; an idea's paid clips are reused at $0 for 7 days).
+
+Without the key, AI-video reels use stills and each run says so once. When the balance runs
+out, buying stops for the run with one alert, and reels revert to stills.
 
 ---
 
@@ -439,7 +466,7 @@ Without a key or voice the chain moves on to edge-tts (`en-IN-PrabhatNeural`), t
    `GEMINI_API_KEY`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `TELEGRAM_BOT_TOKEN`,
    `TELEGRAM_CHAT_ID`, `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`,
    `GOOGLE_TTS_API_KEY`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`,
-   `ANTHROPIC_API_KEY` (§1, added 2026-10-22).
+   `ANTHROPIC_API_KEY` (§1, added 2026-10-22), `HF_API_KEY` (§6e, added 2026-11-13).
    Nothing for Vertex: it is keyless (§2b). The workflows also read `GEMINI_TTS_API_KEY`,
    `FACTCHECK_API_KEY` and `GH_MODELS_KEY`; none is set or needed (on Vertex the fact-check key
    is ignored, and GitHub Models is retired).
@@ -453,6 +480,19 @@ Without a key or voice the chain moves on to edge-tts (`en-IN-PrabhatNeural`), t
    | `GOOGLE_TTS_VOICE` | `en-IN-Chirp3-HD-Zubenelgenubi` | No default; without it the Chirp fallback is skipped |
 
    Everything else uses the defaults written into `make-short.yml` and `production.yml`.
+
+   **At the relaunch** (design section 15, each with the operator's go-ahead), the secret
+   `HF_API_KEY` (§6e, set) and these variables switch the new format on:
+
+   | Variable | Value | Why |
+   |----------|-------|-----|
+   | `NARRATION_LANGUAGE` | `hinglish` | Hinglish narration with English subtitles (default `english`) |
+   | `VISUAL_SOURCE` | `ai_video` | Kling clips through Higgsfield (was `ai`) |
+   | `GEMINI_TTS_VOICE` | `Charon` | The new narrator (was Zubenelgenubi) |
+   | `GOOGLE_TTS_VOICE` | `en-IN-Chirp3-HD-Charon` | The English Chirp fallback, the same narrator |
+   | `WINNERS_SINCE` | the relaunch date | Turns the winners block back on, for new reels only |
+
+   `VISUAL_SOURCE=ai` and `NARRATION_LANGUAGE=english` switch the new format off at once.
 4. The workflows (all on `ubuntu-24.04` with Python 3.12; times are UTC, rule 15):
    - `make-short`: the pipeline, **on demand only**. Run it from the Actions tab (inputs `ideas`,
      default 3, and `wait_min`, default 20) or send `/makeshort [n]` to the bot (n from 1 to 8,

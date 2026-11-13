@@ -7,6 +7,8 @@ Don't advance a phase until the previous one's exit criteria hold.
 
 ## Phase 1 — MVP ⭐ ✅ **BUILT & PUBLISHING LIVE** (exit criteria not met yet)
 **Goal:** 4–5 **captioned** YouTube Shorts/day, fully automated except one Telegram tap.
+*From the relaunch:* about 20 reels a month in the new format (design 18.4, the operator's own
+budget figure).
 
 - Ideation: **Gemini on Vertex** (`src/ideation_fallback.py`): a Groq story scout picks from Google
   News and Trends, grounded prose research, ≥ 2 live sources per idea. The Claude Routine
@@ -22,9 +24,17 @@ Don't advance a phase until the previous one's exit criteria hold.
   on Vercel (`/makeshort`, `/stats`, …); Template N, FFmpeg, Supabase, GitHub Actions, Vertex AI.
 - **Trigger:** on demand only: `/makeshort N` in Telegram or the `make-short` workflow's Run
   button. The scheduled digests were removed on 2026-09-29 (GitHub started them 6.5–7 h late).
+- **The new format (built 2026-11-10 → 11-14, PRs #17-#24):** AI-video shots (FLUX stills
+  animated by Kling 2.5 Turbo through Higgsfield, up to $1.10 a reel), Hinglish narration with
+  English subtitles, stories chosen for Indian viewers, a plain explainer script, automatic
+  checks on every still, clip and reel, and one key number on screen. It is live from the
+  relaunch (design sections 14-15) and judged on its first 20 reels (design 10.2). Design:
+  [superpowers/specs/2026-11-10-ai-video-reels-design.md](superpowers/specs/2026-11-10-ai-video-reels-design.md).
 - **Exit:** 7 consecutive days of reliable auto-publishing with only approval taps. **Not met.**
   Gaps as of 2026-10-09:
   - **Cadence:** about 0.7 Shorts a day on average (about 81 public Shorts live), against 4–5.
+    The relaunch's goal is about 20 a month; this exit criterion still assumes the old daily goal
+    and is the operator's to restate.
   - **Trigger:** every run starts with `/makeshort` or a button press, then the taps; nothing
     publishes on its own. The exit criterion assumes a scheduled daily run and has not been
     restated for on-demand.
@@ -33,9 +43,10 @@ Don't advance a phase until the previous one's exit criteria hold.
   - **Reliability:** every reel from 2026-10-01 died at captions (a PyAV 19 release), so no Short
     shipped between 2026-09-28 and 2026-10-09, when it was fixed.
 - **Model deadlines:** the Developer API shuts down both TTS models behind the channel voice on
-  **2026-11-17**. Pick the `gemini-3.8-flash-tts` / `gemini-3.8-flash-lite-tts` successor by ear
-  before then, or every reel moves to the billed Vertex path. Vertex retires `gemini-2.5-flash`,
-  `-flash-lite` and `-pro` on **2026-10-20**; the pipeline no longer uses them.
+  **2026-11-17**. Settled on 2026-11-12: the operator kept `gemini-3.1-flash-tts-preview` over
+  both 3.8 models by ear, and the voice moved to Vertex (billed, cents a reel). Vertex retired
+  `gemini-2.5-flash`, `-flash-lite` and `-pro` on **2026-10-20**; the pipeline no longer uses
+  them.
 
 See [02-implementation-plan.md](02-implementation-plan.md) for the step-by-step build and
 [STATUS.md](../STATUS.md) for the live state.

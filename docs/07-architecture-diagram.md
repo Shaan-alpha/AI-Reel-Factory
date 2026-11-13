@@ -79,19 +79,28 @@ Only `tests.yml` and `analytics.yml` run on a schedule; `production.yml`
                    (a Claude Routine, routines/ideation.md, is optional and has never run)
 2  Approval      → Telegram digest (Approve / Reject / Pass); the Vercel bot writes each tap to
                    Supabase; at most 3 approvals per run (APPROVAL_CAP)
-3  Scriptwriter  → Template N (25–30 s, 80-word cap, hook-judge punch-up); grounded write on
-                   Gemini (Vertex), Groq failover; source links + disclosure line added in code
+3  Scriptwriter  → Template N, a plain explainer (about 27 s, at most 33; three structures):
+                   Gemini's grounded draft (Vertex) → Claude writes the final script ($4/month
+                   cap) → Groq failover; names one key number; links + disclosure added in code
 11 Fact check    → Gemini on Vertex with grounded search, 2 samples; blocks fabrication, waives
                    imprecision; one repair pass, then a re-check; runs BEFORE the voice
-4  Voice         → Gemini TTS, voice Zubenelgenubi: Developer API → Vertex → the 2.5 models (same
-                   voice) → Chirp 3 HD → edge-tts en-IN-PrabhatNeural → Kokoro am_michael
-5  Visuals       → VISUAL_SOURCE=ai: Cloudflare Workers AI FLUX.2 klein → FLUX.1 schnell, else a
+4  Voice         → Gemini TTS on Vertex (Zubenelgenubi; Charon from the relaunch) → the 2.5 model
+                   (same voice) → Chirp 3 HD → edge-tts en-IN-PrabhatNeural → Kokoro am_michael.
+                   Hinglish (NARRATION_LANGUAGE): Claude renders each sentence, an independent
+                   model checks the meaning, Hindi-capable voices only, else English
+5  Visuals       → VISUAL_SOURCE=ai_video: a shot plan, a FLUX.2 klein still per shot (checked:
+                   lettering, darkness, letterbox; redrawn once), Kling 2.5 Turbo clips through
+                   Higgsfield (≤ $1.10 a reel, each reserved in ai_video_jobs, each checked).
+                   VISUAL_SOURCE=ai: Cloudflare Workers AI FLUX.2 klein → FLUX.1 schnell, else a
                    Pexels photo (Ken Burns on both) → Pexels/Pixabay stock video (not CC0)
-6  Assembly      → FFmpeg 1080×1920 H.264 — crossfades · grade · vignette · music bed + ducking ·
-                   a click every 2nd cut · -14 LUFS · brand-logo bug · loop-friendly ending
-                   (all toggle-gated, fail-soft)
-7  Subtitles     → faster-whisper (base) word timings, caption text from the approved script —
-                   karaoke + frame-1 hook + key-point cards + "Source:" lower-third (libass)
+6  Assembly      → FFmpeg 1080×1920 H.264 — ai_video: hard cuts on the narration's pauses at
+                   24 fps; else crossfades and a loop-friendly ending · grade · music bed 4 LU
+                   under the voice + ducking · -14 LUFS · brand-logo bug (vignette and clicks
+                   off since stage 4b; all toggle-gated, fail-soft)
+7  Subtitles     → English: faster-whisper (base) word timings on the script's own text —
+                   karaoke; Hinglish: English subtitles timed from the narration's pauses. Both:
+                   the title held for sentence one, "Source:" under it, one key number when said,
+                   inside the Shorts safe area (libass); then the reel check before the upload
 8  Thumbnail     → Pillow / FFmpeg                                              (Phase 2)
 9  Publish       → YouTube Data API videos.insert (containsSyntheticMedia + disclosure line);
                    IG/TikTok                                                    (Phase 3)
@@ -108,12 +117,13 @@ Only `tests.yml` and `analytics.yml` run on a schedule; `production.yml`
 | Grounded script write and repair | `GEMINI_GROUNDED_MODEL` | `gemini-3.5-flash-lite` → `gemini-3.5-flash` |
 | Fact check (grounded) | `FACTCHECK_MODEL` | `gemini-3.5-flash` → `gemini-3.5-flash-lite` |
 | Story selection, hook punch-up, tighten pass, keywords (Groq first); failover for every other ungrounded call | `GROQ_MODEL` | `openai/gpt-oss-120b` |
-| Narration | `GEMINI_TTS_MODEL` · `GEMINI_TTS_VOICE` | `gemini-3.1-flash-tts-preview` · `Zubenelgenubi` |
+| Narration | `GEMINI_TTS_MODEL` · `GEMINI_TTS_VOICE` | `gemini-3.1-flash-tts-preview` · `Zubenelgenubi` (`Charon` from the relaunch) |
 
 The Gemini text models run on Vertex AI in CI (`GEMINI_USE_VERTEX=true`). A comma-separated
 setting is an ordered chain: a model the backend no longer serves moves the call down the chain.
 Grounded calls are Gemini-only, because Groq has no grounded search. The Developer API shuts
-down both of its TTS models on 2026-11-17; see STATUS.md for the replacement plan.
+down both of its TTS models on 2026-11-17; the voice moved to Vertex on 2026-11-12 (the operator
+kept 3.1 over both 3.8 models by ear).
 
 ---
 
@@ -130,9 +140,11 @@ gate      fact check → pass: continue
                      → block: one repair + re-check → still blocked: ideas.status = blocked,
                        Telegram alert, stop
           verdict → scripts.factcheck
-media     narration.wav (Gemini TTS, Zubenelgenubi) + AI images / stock clips
-          → reel_raw.mp4 (grade · music bed · ducking · logo · loop)
-          → captions + hook banner + key-point cards + "Source:" → reel_final.mp4
+media     narration.wav (Gemini TTS; Hinglish lines for the new format → scripts.spoken)
+          + Kling clips (ai_video_jobs) / AI images / stock clips
+          → reel_raw.mp4 (cuts · grade · music bed · ducking · logo)
+          → captions or English subtitles + banner + "Source:" + key number → reel_final.mp4
+          → the reel check (length, sound, black and frozen stretches)
 publish   → YouTube (synthetic-content flag) → posts (published, external_id, url, voice)
           → ideas.status = produced → "✅ Published <link>" on Telegram
           → local files deleted (asset policy)

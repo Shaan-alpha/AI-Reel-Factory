@@ -4,6 +4,12 @@
 > Current state: [STATUS.md](../STATUS.md); operating rules: [CLAUDE.md](../CLAUDE.md); shipped
 > changes: [CHANGELOG.md](../CHANGELOG.md). To set the system up, follow
 > [03-setup-guide.md](03-setup-guide.md) and `.env.example`, not this checklist.
+>
+> **A new format followed (2026-11):** AI-video shots, Hinglish narration with English subtitles,
+> for Indian viewers, about 20 reels a month. Its design is
+> [superpowers/specs/2026-11-10-ai-video-reels-design.md](superpowers/specs/2026-11-10-ai-video-reels-design.md);
+> it was built in stages 0-4 from the plans in [superpowers/plans/](superpowers/plans/) (PRs
+> #17-#24). This document does not describe it.
 
 Every module below is built, tested and publishing captioned Shorts to
 **[@butitmatters](https://www.youtube.com/channel/UC5rDIoOPYLrHaf2IQ5hRlRw)**. The build departed from this plan in

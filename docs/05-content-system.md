@@ -71,9 +71,12 @@ Narrative; strong for "how this unfolded" backstories.
   (`ENABLE_HOOK_JUDGE=false`); switched on, its rewrite is refused if it adds a number or a name.
 - **Title ≤ 7 words and 44 characters**, the searchable name first. Over either limit the model
   is asked once to shorten it, then code cuts it at a word. The title is also the frame-1 banner,
-  so it must be true to the video.
-- **2–3 key-point cards** (≤ 4 words each) burned on screen. They are published claims, so the
-  fact check covers them too.
+  so it must be true to the video. It holds until the first sentence ends (1.8-4.0 s).
+- **One key number** (since stage 4b, 2026-11-14): the writer names the number that carries the
+  story, copied exactly from the narration with its unit or sign ("286 days", "Rs 2,000 crore",
+  "40%"). Code keeps it only when the narration says it exactly that way; it shows large while it
+  is said, and the fact check sees it as on-screen text. The **2–3 key-point cards** (≤ 4 words
+  each) it replaced are off (`ENABLE_TEXT_CARDS=false`); switched back on, they are checked too.
 - **Add genuine analysis**, not just facts (the originality requirement — non-negotiable).
 - **Truth over neutrality:** a verdict only where the evidence supports it; the sharper the
   verdict, the more certain its facts. No sensationalism or unverified claims. Every finished
