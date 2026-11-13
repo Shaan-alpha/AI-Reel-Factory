@@ -436,3 +436,13 @@ def test_the_meaning_check_fails_over_to_another_independent_checker(monkeypatch
     monkeypatch.setenv("HINGLISH_STRICT", "true")
     failures, _checker = hinglish.meaning_check(en, lines, "claude")
     assert failures and "could not run" in failures[0]
+
+
+def test_line_one_is_never_shortened_by_dropping_meaning():
+    """2026-11-13: 31 of the 40 newest English first sentences run over 12 words (median 17),
+    and a hard 12-word cap on Hinglish line 1 contradicted "nothing dropped": the renderer cut
+    "A U.S. intelligence memo reportedly says", the checks refused it, and the reel went to
+    English. Saying all of it comes first; the line is as short as that allows."""
+    prompt = hinglish._render_prompt(["A long first sentence of the script."], "t", "plain", None)
+    assert "at most 12 words when" in prompt
+    assert "Line 1 has at most 12 words" not in prompt

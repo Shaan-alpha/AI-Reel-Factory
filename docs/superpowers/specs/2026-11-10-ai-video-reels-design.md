@@ -453,8 +453,12 @@ Rules for `hi`:
   softening or sharpening of a claim.
 - Numbers stay as digits exactly as in the English (7.3). Names stay in Latin script exactly as in
   the English.
-- Sentence one: at most 12 words; the subject or the surprise inside the first four; never a date,
-  a place or a greeting first; no "kya aap jaante hain".
+- Sentence one: the subject or the surprise inside the first four words; as short as saying all of
+  its English allows, at most 12 words when the English is that short, never a word of its meaning
+  dropped to get there; never a date, a place or a greeting first; no "kya aap jaante hain".
+  (2026-11-13: a hard 12-word cap contradicted "nothing dropped". 31 of the 40 newest English first
+  sentences run over 12 words, median 17, and the first test render's Hinglish cut a clause to
+  comply, was refused by the checks, and fell back to English.)
 - End each line with the Hindi full stop `।` or a question mark.
 
 ### 7.3 Spoken form and the code checks

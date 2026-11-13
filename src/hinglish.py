@@ -368,8 +368,10 @@ sharpened.
 - Keep every number exactly as the English writes it: digits stay digits, with their %, ₹ or $, \
 and a number the English spells as a word stays that English word. Never a Hindi number word.
 - Names, places, months, organisations and brands stay in Latin script exactly as in the English.
-- Line 1 has at most 12 words, with its subject or its surprise inside the first four; it never \
-opens on a date, a place or a greeting, nor on a question about whether the viewer knows.
+- Line 1 has its subject or its surprise inside the first four words, and is as short as saying \
+ALL of its English line allows: at most 12 words when the English line is that short, never a \
+word of its meaning dropped to get there. It never opens on a date, a place or a greeting, nor \
+on a question about whether the viewer knows.
 - End each line with the Hindi full stop । or a question mark. No delivery tags, no emoji.
 
 ALSO give each line its "parts", in spoken order, for the English subtitles: each part pairs a \
