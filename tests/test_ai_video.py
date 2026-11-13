@@ -766,3 +766,163 @@ def test_a_failed_download_leaves_the_row_completed(monkeypatch, tmp_path, fresh
     assert job.status == "completed" and job.clip is None
     assert [fields["status"] for _shot, fields in seen["update"]] == ["completed"]
     assert 0 < seen["download"][0][2] <= 180  # bounded by the time to grace_end
+
+
+# --- Stage 3b: one reel's shots, and the run's latches (design 6.2, 6.4, 6.8) --------------------
+
+def _trimmed_test4() -> tuple[float, list[tuple[float, float]]]:
+    """Test 4's narration as voice.trim_silence leaves it (as in test_assembly)."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "hinglish_test4.json")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    lead = data["pauses"][0][1]
+    return (round(data["duration"] - lead, 3),
+            [(round(s - lead, 3), round(e - lead, 3)) for s, e in data["pauses"][1:]])
+
+
+def _ready(monkeypatch, tmp_path, plan_ok=True, price=PRICE, ledger=()) -> dict:
+    """Everything below make_shots replaced but the buying and settling: the plan, the pictures,
+    the still clips, the quote and this idea's ledger rows. Returns what was asked."""
+    asked = {"stills": [], "quotes": []}
+    monkeypatch.setattr(ai_video, "plan_shots", lambda req, durations: (
+        [dict(PLAN6[i % 6]) for i in range(len(durations))], plan_ok))
+    pictures = _stills(tmp_path)
+    monkeypatch.setattr(ai_video, "_pictures", lambda req, plan: pictures[:len(plan)])
+    monkeypatch.setattr(ai_video, "_still_clip", lambda picture, dest, seconds, index: (
+        asked["stills"].append(index) or dest))
+
+    def estimate(endpoint, args):
+        asked["quotes"].append((endpoint, args))
+        if isinstance(price, Exception):
+            raise price
+        return price
+
+    def rows(idea_id, days=7):
+        if isinstance(ledger, Exception):
+            raise ledger
+        return [dict(r) for r in ledger]
+
+    monkeypatch.setattr(higgsfield, "estimate", estimate)
+    monkeypatch.setattr(db, "ai_video_jobs_for_idea", rows)
+    return asked
+
+
+def _test4_req(tmp_path, **kw) -> "ai_video.ReelRequest":
+    duration, pauses = _trimmed_test4()
+    return _req(work_dir=str(tmp_path), duration=duration, pauses=pauses, **kw)
+
+
+def test_a_reel_end_to_end(monkeypatch, tmp_path, fresh_run):
+    asked = _ready(monkeypatch, tmp_path)
+    events = _shop(monkeypatch, {})
+    _watch(monkeypatch, {f"req-{i:04d}-abcd": [_done(i)] for i in range(6)})
+    req = _test4_req(tmp_path)
+    shots = ai_video.make_shots(req)
+    assert shots.kinds == ["video"] * 6 and shots.video == 6 and shots.planned_video == 6
+    assert shots.spend_usd == pytest.approx(0.945) and shots.problems == []
+    assert shots.files == [str(tmp_path / f"clip_{i:02d}.mp4") for i in range(6)]
+    assert shots.cuts == assembly.cut_list(req.duration, req.pauses)
+    assert asked["stills"] == []
+    ((endpoint, body),) = asked["quotes"]
+    assert endpoint == higgsfield.KLING and body == {
+        "prompt": PLAN6[0]["motion"], "image_url": "https://example.com/still.png",
+        "duration": 5, "negative_prompt": ai_video.NEGATIVE}
+    assert [e[1] for e in events if e[0] == "reserve"] == [0, 5, 1, 2, 3, 4]
+
+
+@pytest.mark.parametrize("case", ["no-key", "latch", "preflight", "planner", "ledger",
+                                  "quote-fails", "quote-zero", "no-time"])
+def test_nothing_is_bought_without_the_means(monkeypatch, tmp_path, fresh_run, case):
+    price = {"quote-fails": higgsfield.HiggsfieldError("unavailable", "estimate: timeout"),
+             "quote-zero": 0.0}.get(case, PRICE)
+    asked = _ready(monkeypatch, tmp_path, plan_ok=case != "planner", price=price,
+                   ledger=RuntimeError("connection reset") if case == "ledger" else ())
+    events = _shop(monkeypatch, {})
+    if case == "no-key":
+        monkeypatch.delenv("HF_API_KEY")
+    if case == "latch":
+        ai_video._latch.add("funds")
+    extra = {"preflight": {"can_buy": False},
+             "no-time": {"deadline": fresh_run.now + 100}}.get(case, {})
+    shots = ai_video.make_shots(_test4_req(tmp_path, **extra))
+    assert shots.kinds == ["still"] * 6 and shots.spend_usd == 0
+    assert sorted(asked["stills"]) == [0, 1, 2, 3, 4, 5]  # Ken Burns, rendered in parallel
+    assert not [e for e in events if e[0] == "reserve"]
+    assert shots.planned_video == 6  # the downgrade production reports
+
+
+def test_paid_clips_are_reused(monkeypatch, tmp_path, fresh_run):
+    ledger = [
+        {"id": 50, "shot": 0, "status": "completed", "cost_usd": PRICE,
+         "result_url": "https://cdn.example/old0.mp4"},
+        {"id": 55, "shot": 5, "status": "completed", "cost_usd": PRICE,
+         "result_url": "https://cdn.example/old5.mp4"},
+        {"id": 51, "shot": 1, "status": "late", "cost_usd": PRICE, "result_url": None},
+        {"id": 52, "shot": 2, "status": "reserved", "cost_usd": PRICE},
+        {"id": 53, "shot": 3, "status": "failed", "cost_usd": 0}]
+    _ready(monkeypatch, tmp_path, ledger=ledger)
+    events = _shop(monkeypatch, {})
+    seen = _watch(monkeypatch, {f"req-{i:04d}-abcd": [_done(i)] for i in range(6)})
+    shots = ai_video.make_shots(_test4_req(tmp_path))
+    assert [e[1] for e in events if e[0] == "reserve"] == [1, 2]  # k = 6, 4 already paid
+    assert [url for url, _name, _t in seen["download"]][:2] == [
+        "https://cdn.example/old0.mp4", "https://cdn.example/old5.mp4"]
+    assert shots.kinds == ["video", "video", "video", "still", "still", "video"]
+    assert shots.spend_usd == pytest.approx(2 * PRICE)  # reused clips cost nothing new
+
+
+def test_the_phase_and_grace_times(monkeypatch, tmp_path, fresh_run):
+    _ready(monkeypatch, tmp_path)
+    times = []
+    monkeypatch.setattr(ai_video, "_buy", lambda req, positions, pictures, plan, price,
+                        phase_end: times.append(phase_end) or [])
+    monkeypatch.setattr(ai_video, "_settle_jobs", lambda jobs, phase_end, grace_end, lengths,
+                        out_dir: times.append((phase_end, grace_end)))
+    now = fresh_run.now
+    ai_video.make_shots(_test4_req(tmp_path))
+    ai_video.make_shots(_test4_req(tmp_path, deadline=now + 350))
+    monkeypatch.setenv("AI_VIDEO_TIMEOUT_SECONDS", "200")
+    monkeypatch.setenv("AI_VIDEO_GRACE_SECONDS", "60")
+    ai_video.make_shots(_test4_req(tmp_path))
+    assert times == [now + 300, (now + 300, now + 420),
+                     now + 300, (now + 300, now + 350),
+                     now + 200, (now + 200, now + 260)]
+
+
+def test_one_alert_per_kind_per_run(monkeypatch, tmp_path, fresh_run):
+    """Review Focus 4: three reels and no key make one alert, and every reel still ships."""
+    _ready(monkeypatch, tmp_path)
+    monkeypatch.delenv("HF_API_KEY")
+    reels = [ai_video.make_shots(_test4_req(tmp_path)) for _ in range(3)]
+    problems = [p for shots in reels for p in shots.problems]
+    assert len(problems) == 1 and "HF_API_KEY" in problems[0]
+    assert all(shots.kinds == ["still"] * 6 for shots in reels)
+    ai_video.begin_run()
+    assert len(ai_video.make_shots(_test4_req(tmp_path)).problems) == 1
+
+
+def test_a_reel_with_no_clip_stops_buying_for_the_run(monkeypatch, tmp_path, fresh_run):
+    """Review Focus 5: a queue too slow to give one reel one clip would charge every later reel
+    of the run for clips that arrive too late."""
+    _ready(monkeypatch, tmp_path)
+    events = _shop(monkeypatch, {})
+    _watch(monkeypatch, {f"req-{i:04d}-abcd": [RUNNING] for i in range(6)})
+    first = ai_video.make_shots(_test4_req(tmp_path))
+    assert first.kinds == ["still"] * 6 and first.spend_usd == pytest.approx(6 * PRICE)
+    assert ai_video._stop_buying() and any("in time" in p for p in first.problems)
+    events.clear()
+    second = ai_video.make_shots(_test4_req(tmp_path))
+    assert not [e for e in events if e[0] == "reserve"] and second.problems == []
+
+
+def test_reel_line(monkeypatch):
+    shots = ai_video.Shots(files=["a"] * 6, kinds=["video"] * 5 + ["still"], cuts=[],
+                           planned_video=6, spend_usd=5 * PRICE, problems=[])
+    monkeypatch.setattr(db, "ai_video_spend_this_month", lambda: 14.3)
+    assert ai_video.reel_line(shots) == "🎞️ AI video: 5 of 6 shots, $0.79 ($14.30 this month)"
+
+    def missing():
+        raise db.LedgerUnavailable("ai_video_jobs is missing")
+
+    monkeypatch.setattr(db, "ai_video_spend_this_month", missing)
+    assert ai_video.reel_line(shots) == "🎞️ AI video: 5 of 6 shots, $0.79"

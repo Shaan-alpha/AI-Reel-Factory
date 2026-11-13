@@ -18,6 +18,7 @@ in the ledger before it is bought, and every dollar is reported. These lines are
 from __future__ import annotations
 
 import logging
+import math
 import os
 import random
 import re
@@ -715,3 +716,210 @@ def _settle_jobs(jobs: list[Job], phase_end: float, grace_end: float, lengths: l
         log.warning("ai_video: shot %d's clip was not ready in time; it is paid for and its shot "
                     "becomes a still", job.shot)
         _record(job, status="late")
+
+
+# --- One reel's shots (design 6.2, 6.4, 6.8) ----------------------------------------------------
+
+_MIN_BUY_SECONDS = 150   # Kling took 93-105 s on 2026-11-10: with less left, a clip comes too late
+_EXPECTED_PRICE = 0.1575  # the live check's quote (2026-11-13), for sizing when there is none
+_PRICE_URL = "https://example.com/still.png"  # /estimate needs an image_url, but not a real one
+# One alert per kind per run (design 6.8). The latch kinds also stop the buying (6.4).
+_ALERTS = {
+    "key": "🎞️ HF_API_KEY is not set: AI-video reels use stills until it is.",
+    "funds": "🎞️ Higgsfield is out of funds: no more clips this run, reels use stills. Top up "
+             "the balance.",
+    "auth": "🎞️ Higgsfield refused the key: no more clips this run, reels use stills. Check "
+            "HF_API_KEY.",
+    "ledger": "🎞️ The ai_video_jobs table is missing (the SQL at the end of docs/03 §4): nothing "
+              "is bought until it exists.",
+    "slow": "🎞️ Higgsfield gave a reel no clip in time: nothing more is bought this run.",
+    "price": "🎞️ Higgsfield's price check failed: a reel was made from stills.",
+    "preflight": "🎞️ The subtitle burn failed its test on a blank clip, so no clips were bought "
+                 "for that reel.",
+}
+
+
+@dataclass
+class Shots:
+    """One ai_video reel's pictures, one entry per shot in order (design 6.1)."""
+
+    files: list[str]       # the shot's Kling clip, or a Ken Burns clip over its still
+    kinds: list[str]       # "video" or "still"
+    cuts: list[assembly.Segment]
+    planned_video: int     # how many shots the budget makes video: fewer means a downgrade
+    spend_usd: float       # this attempt's Higgsfield spend; reused clips add nothing
+    problems: list[str]    # for Telegram, each kind once a run
+
+    @property
+    def video(self) -> int:
+        return self.kinds.count("video")
+
+
+def _setting(key: str, default: float) -> float:
+    try:
+        return float(config.get(key, str(default)))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _alert(kind: str, problems: list[str]) -> None:
+    if kind not in _alerted:
+        _alerted.add(kind)
+        problems.append(_ALERTS[kind])
+
+
+def _may_buy(req: ReelRequest, plan_ok: bool, problems: list[str]) -> bool:
+    """Step 1 of design 6.2: no latch set, a key, a subtitle burn that works, a usable plan."""
+    if _stop_buying():
+        return False  # its alert went out when the latch was set
+    if not _have_key():
+        _alert("key", problems)
+        return False
+    if not req.can_buy:
+        _alert("preflight", problems)
+        return False
+    if not plan_ok:
+        log.warning("ai_video: no usable shot plan for idea %s; its shots are stills",
+                    req.idea_id)
+        return False
+    return True
+
+
+def _quote(plan: list[dict], problems: list[str]) -> float | None:
+    """The price of one 5 s clip (free to ask); None when there is no usable price."""
+    body = {"prompt": plan[0]["motion"], "image_url": _PRICE_URL, "duration": _CLIP_SECONDS,
+            "negative_prompt": NEGATIVE}
+    try:
+        price = higgsfield.estimate(_model(), body)
+    except higgsfield.HiggsfieldError as e:
+        if e.kind in ("funds", "auth"):
+            _latch.add(e.kind)
+        _alert(e.kind if e.kind in ("funds", "auth") else "price", problems)
+        log.warning("ai_video: no quote (%s); this reel uses stills", e)
+        return None
+    if not (math.isfinite(price) and price > 0):
+        _alert("price", problems)
+        log.warning("ai_video: a quote of %r is not a price; this reel uses stills", price)
+        return None
+    return price
+
+
+def _reusable(idea_id: int, m: int, problems: list[str]) -> tuple[dict[int, dict], int] | None:
+    """This idea's clips under 7 days old that can be shown again, by shot, and how many jobs it
+    has paid for (they count against the budget). None when the ledger cannot be read: then
+    nothing is bought (design 6.2 step 6)."""
+    try:
+        rows = db.ai_video_jobs_for_idea(idea_id)
+    except Exception as e:  # noqa: BLE001 — no ledger, no purchase
+        if isinstance(e, db.LedgerUnavailable):
+            _latch.add("ledger")
+            _alert("ledger", problems)
+        log.warning("ai_video: idea %s's ledger rows could not be read (%s); nothing is bought",
+                    idea_id, e)
+        return None
+    reuse: dict[int, dict] = {}
+    for row in rows:  # oldest first, so a later clip of the same shot wins
+        shot = row.get("shot")
+        if (row.get("status") == "completed" and row.get("result_url")
+                and isinstance(shot, int) and 0 <= shot < m):
+            reuse[shot] = row
+    paid = sum(1 for row in rows if float(row.get("cost_usd") or 0) > 0)
+    return reuse, paid
+
+
+def _get_clips(req: ReelRequest, plan: list[dict], pictures: list[Picture], lengths: list[float],
+               price: float, start: float, problems: list[str]) -> tuple[dict[int, str], list[Job]]:
+    """Reuse what this idea already paid for, buy the rest up to the budget, wait, and settle.
+    Returns the usable clip of each shot that has one, and this attempt's jobs."""
+    m = len(lengths)
+    deadline = req.deadline if req.deadline is not None else math.inf
+    phase_end = min(start + _setting("AI_VIDEO_TIMEOUT_SECONDS", 300), deadline)
+    grace_end = min(phase_end + _setting("AI_VIDEO_GRACE_SECONDS", 120), deadline)
+    if phase_end - _clock() < _MIN_BUY_SECONDS:
+        log.warning("ai_video: %.0f s left for Higgsfield, too little for a clip; idea %s uses "
+                    "stills", phase_end - _clock(), req.idea_id)
+        return {}, []
+    found = _reusable(req.idea_id, m, problems)
+    if found is None:
+        return {}, []
+    reuse, paid = found
+    k = math.floor(_setting("AI_VIDEO_BUDGET_USD", 1.10) / price + 1e-9)
+    positions = video_shots(m, k)
+    clips: dict[int, str] = {}
+    for shot in positions:
+        if shot in reuse:
+            clip = _fetch_clip(Job(shot=shot, row_id=reuse[shot].get("id"), key=""),
+                               reuse[shot]["result_url"], lengths[shot], req.work_dir, grace_end)
+            if clip:
+                clips[shot] = clip
+    fresh = sorted((s for s in positions if s not in reuse), key=lambda s: (s != 0, s != m - 1, s))
+    jobs = _buy(req, fresh[:max(0, k - paid)], pictures, plan, price, phase_end)
+    _settle_jobs(jobs, phase_end, grace_end, lengths, req.work_dir)
+    clips.update({job.shot: job.clip for job in jobs if job.clip})
+    submitted = [job for job in jobs if job.request_id]
+    if (submitted and not any(job.status == "completed" for job in submitted)
+            and any(job.status in ("late", "canceled") for job in submitted)):
+        _latch.add("slow")  # a slow queue would charge every later reel for clips too late
+        _alert("slow", problems)
+    return clips, jobs
+
+
+def _files(req: ReelRequest, pictures: list[Picture], lengths: list[float],
+           clips: dict[int, str]) -> tuple[list[str], list[str]]:
+    """Each shot's file: its clip, else a Ken Burns clip over its still (rendered in parallel)."""
+    missing = [i for i in range(len(lengths)) if i not in clips]
+
+    def render(i: int) -> str:
+        return _still_clip(pictures[i], os.path.join(req.work_dir, f"shot_{i:02d}.mp4"),
+                           lengths[i], i)
+
+    rendered: dict[int, str] = {}
+    if missing:
+        workers = max(1, min(len(missing), visuals._visual_workers()))
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                rendered = dict(zip(missing, pool.map(render, missing)))
+        except Exception as e:  # noqa: BLE001 — the cut list cannot drop a shot
+            raise NoShots(f"a still could not be rendered ({type(e).__name__}: {e})") from e
+    files = [clips.get(i) or rendered[i] for i in range(len(lengths))]
+    kinds = ["video" if i in clips else "still" for i in range(len(lengths))]
+    return files, kinds
+
+
+def make_shots(req: ReelRequest) -> Shots:
+    """One ai_video reel's shots (design 6.2): the cut list from the narration's pauses, a plan,
+    a still per shot, then as many Kling clips as the budget buys, each reserved in the ledger
+    first. Every shot without a clip is a Ken Burns move over its still, on the same cut list.
+
+    Raises NoShots only when the reel cannot have its shots at all (no picture for any shot, or
+    a still that cannot be rendered): production then falls back to the `ai` path."""
+    problems: list[str] = []
+    cuts = assembly.cut_list(req.duration, req.pauses,
+                             mode=str(config.get("AI_VIDEO_CUTS", "pauses") or "pauses"))
+    lengths = assembly.shot_lengths(cuts)
+    plan, plan_ok = plan_shots(req, lengths)
+    pictures = _pictures(req, plan)
+    price, clips, jobs = None, {}, []
+    if _may_buy(req, plan_ok, problems):
+        start = _clock()
+        price = _quote(plan, problems)
+        if price is not None:
+            clips, jobs = _get_clips(req, plan, pictures, lengths, price, start, problems)
+    k = math.floor(_setting("AI_VIDEO_BUDGET_USD", 1.10) / (price or _EXPECTED_PRICE) + 1e-9)
+    files, kinds = _files(req, pictures, lengths, clips)
+    spend = round(sum(job.cost for job in jobs), 4)
+    log.info("ai_video: idea %s: %d of %d shots are video, $%.2f", req.idea_id,
+             kinds.count("video"), len(kinds), spend)
+    return Shots(files=files, kinds=kinds, cuts=cuts, planned_video=len(video_shots(len(lengths), k)),
+                 spend_usd=spend, problems=problems)
+
+
+def reel_line(shots: Shots) -> str:
+    """The reel's line under "Published" (design 6.8), with the month to date when the ledger
+    can be read: "🎞️ AI video: 5 of 6 shots, $0.79 ($14.30 this month)"."""
+    line = f"🎞️ AI video: {shots.video} of {len(shots.files)} shots, ${shots.spend_usd:.2f}"
+    try:
+        line += f" (${db.ai_video_spend_this_month():.2f} this month)"
+    except Exception as e:  # noqa: BLE001 — a report never fails a reel
+        log.info("ai_video: no month-to-date for the reel's line (%s)", e)
+    return line
