@@ -35,6 +35,9 @@ BAR_STDDEV = 6         # ...and this flat
 CLIP_MIN_SECONDS = 4.5  # a clip's floor (design 11.6); it must also cover its whole shot
 CLIP_BLACK = 0.5       # a clip's black stretch this long or longer fails it
 CLIP_FROZEN = 1.5      # ...and a frozen one
+REEL_SLACK = 0.2       # a finished reel's length may differ from its narration's by this much
+REEL_BLACK = 1.0       # a finished reel's black stretch this long or longer fails it
+REEL_FROZEN = 2.0      # ...and a frozen one
 
 _OCR_TIMEOUT = 60
 _DETECT_TIMEOUT = 120
@@ -206,3 +209,25 @@ def clip_problems(path: str, seconds: float) -> list[str]:
     if media.duration + 1e-3 < need:
         problems.append(f"short: {media.duration:.2f} s < {need:.2f} s")
     return problems + _stretch_problems(path, CLIP_BLACK, CLIP_FROZEN, media.duration)
+
+
+def reel_problems(path: str, narration_seconds: float) -> list[str]:
+    """What is wrong with a finished reel (design 11.6): unreadable, no video or no audio
+    stream, a length more than 0.2 s off its narration's, a black stretch of 1.0 s or more, a
+    frozen stretch of 2.0 s or more. Empty when it may be uploaded. Only a reel that cannot be
+    probed is refused for the check's own sake; a detection pass that cannot run is skipped."""
+    try:
+        media = _probe(path)
+    except Exception as e:  # noqa: BLE001
+        return [f"unreadable: {type(e).__name__}: {e}"]
+    problems = []
+    if not media.video:
+        problems.append("no video stream")
+    if not media.audio:
+        problems.append("no audio stream")
+    if problems:
+        return problems
+    if abs(media.duration - narration_seconds) > REEL_SLACK:
+        problems.append(f"length: {media.duration:.2f} s for {narration_seconds:.2f} s of "
+                        f"narration")
+    return problems + _stretch_problems(path, REEL_BLACK, REEL_FROZEN, media.duration)

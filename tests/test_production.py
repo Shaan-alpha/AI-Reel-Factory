@@ -9,7 +9,14 @@ import os
 
 import pytest
 
-from src import production
+from src import gates, production
+
+
+@pytest.fixture(autouse=True)
+def _reels_pass_their_check(monkeypatch):
+    """The reel check (design 11.6) probes the burned reel; these tests' reels are fakes, so
+    every reel passes it unless a test says otherwise."""
+    monkeypatch.setattr(gates, "reel_problems", lambda path, seconds: [], raising=False)
 
 
 def test_source_domain_derivation():
@@ -935,6 +942,28 @@ def test_a_failed_attempt_is_recorded_with_its_stage(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         production.produce_one(IDEA, str(tmp_path))
     assert len(calls) == 1 and calls[0]["outcome"] == "failed" and calls[0]["stage"] == "assembly"
+
+
+def test_a_reel_that_fails_its_check_is_not_uploaded(monkeypatch):
+    """Design 11.6: a reel that fails its check is not uploaded; its attempt fails at the check
+    with the reason, and its idea goes back to the digest with an alert."""
+    statuses = _wire_happy(monkeypatch)
+    calls = _attempts(monkeypatch)
+    published, alerts, checked = [], [], []
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: published.append(v) or ("VID1", "url"))
+    monkeypatch.setattr(gates, "reel_problems", lambda path, seconds: checked.append(
+        (os.path.basename(path), seconds)) or ["black: 1.4 s"])
+    monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [IDEA])
+    monkeypatch.setattr(production, "_notify_failure",
+                        lambda idea, e, spend=None: alerts.append(f"{type(e).__name__}: {e}"))
+    result = production.run_production()
+    assert published == [] and checked == [("reel_final.mp4", 30.0)]
+    assert calls[0]["outcome"] == "failed" and calls[0]["stage"] == "check"
+    assert "black: 1.4 s" in calls[0]["reason"]
+    assert (7, "pending") in statuses
+    assert alerts == ["ReelCheckFailed: black: 1.4 s"]
+    assert result["failed"][0]["error"] == "ReelCheckFailed: black: 1.4 s"
 
 
 def test_a_blocked_attempt_is_recorded(monkeypatch, tmp_path):

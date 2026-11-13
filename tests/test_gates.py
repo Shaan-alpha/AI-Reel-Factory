@@ -252,3 +252,58 @@ def test_real_ffmpeg_a_freeze_to_the_end_counts(tmp_path):
     problems = gates.clip_problems(clip, 5.0)
     assert len(problems) == 1 and problems[0].startswith("frozen: ")
     assert 2.0 <= float(problems[0].split()[1]) <= 2.6
+
+
+# --- The finished reel ----------------------------------------------------------------------------
+
+def test_a_reel_that_matches_its_narration_passes(monkeypatch):
+    asked = []
+    monkeypatch.setattr(gates, "_probe", lambda path: gates.Media(32.52, True, True))
+    monkeypatch.setattr(gates, "_stretches",
+                        lambda path, black_min, frozen_min, total: asked.append(
+                            (black_min, frozen_min, total)) or ([], []))
+    assert gates.reel_problems("reel.mp4", 32.5) == []
+    assert asked == [(1.0, 2.0, 32.52)]  # the design's reel thresholds
+
+
+def test_a_reel_off_its_narration(monkeypatch):
+    _media(monkeypatch, duration=32.9, audio=True)
+    assert gates.reel_problems("reel.mp4", 32.5) == ["length: 32.90 s for 32.50 s of narration"]
+
+
+def test_a_reel_without_audio(monkeypatch):
+    _media(monkeypatch, duration=32.5, audio=False)
+    assert gates.reel_problems("reel.mp4", 32.5) == ["no audio stream"]
+
+
+def test_a_reel_without_video(monkeypatch):
+    _media(monkeypatch, duration=32.5, video=False, audio=True)
+    assert gates.reel_problems("reel.mp4", 32.5) == ["no video stream"]
+
+
+def test_a_reel_with_a_long_black_stretch(monkeypatch):
+    _media(monkeypatch, duration=32.5, audio=True, black=[1.4], frozen=[2.2])
+    assert gates.reel_problems("reel.mp4", 32.5) == ["black: 1.4 s", "frozen: 2.2 s"]
+
+
+def test_a_reel_whose_check_times_out_ships(monkeypatch):
+    """Review Focus 4: a check that cannot run never costs a reel."""
+    _media(monkeypatch, duration=32.5, audio=True, fails="stretches")
+    assert gates.reel_problems("reel.mp4", 32.5) == []
+
+
+def test_an_unreadable_reel_is_refused(monkeypatch):
+    _media(monkeypatch, fails=subprocess.TimeoutExpired(["ffprobe"], 60))
+    (problem,) = gates.reel_problems("reel.mp4", 32.5)
+    assert problem.startswith("unreadable:")
+
+
+def test_real_ffmpeg_a_reel_with_sound_passes(tmp_path):
+    ffmpeg = _ffmpeg_or_skip()
+    reel = tmp_path / "reel.mp4"
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2={SIZE}:d=5",
+                    "-f", "lavfi", "-i", "sine=f=440:d=5", "-c:v", "libx264", "-pix_fmt",
+                    "yuv420p", "-c:a", "aac", "-shortest", str(reel)],
+                   check=True, capture_output=True, timeout=120)
+    assert gates.reel_problems(str(reel), 5.0) == []
+    assert gates.reel_problems(str(reel), 4.0)[0].startswith("length: 5.0")

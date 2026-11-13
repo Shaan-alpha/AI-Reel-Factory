@@ -31,6 +31,7 @@ from src import (
     config,
     db,
     factcheck,
+    gates,
     hinglish,
     ideation_fallback,
     publish_youtube,
@@ -50,6 +51,11 @@ class FactCheckFailed(RuntimeError):
     Raised instead of returning quietly so run_production's per-reel handler treats it like any
     other failure: log it, Telegram-alert the operator, skip that reel, keep the batch alive
     (rule 14). A distinct type so the alert says WHY rather than 'RuntimeError'."""
+
+
+class ReelCheckFailed(RuntimeError):
+    """The finished reel failed its check before the upload (design 11.6): it is not uploaded,
+    and its idea goes back to the digest like any other failed reel."""
 
 
 class FactCheckUnavailable(RuntimeError):
@@ -466,6 +472,11 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         # The audio language is what was voiced (design 9.9): hi for Hinglish, en otherwise.
         metadata["audio_language"] = language
         metadata["format"] = _format(language, shown)
+        # Nothing looks at a reel before it is public, so this does (design 11.6).
+        progress["stage"] = "check"
+        problems = gates.reel_problems(final, duration)
+        if problems:
+            raise ReelCheckFailed("; ".join(problems))
         progress["stage"] = "upload"
         video_id, url = publish_youtube.publish(final, metadata, script["script_id"])
         _mark_produced(idea_id, url)
