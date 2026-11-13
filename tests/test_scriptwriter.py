@@ -1300,3 +1300,20 @@ def test_write_script_returns_the_checked_key_number(monkeypatch):
     assert scriptwriter.write_script(IDEA)["key_number"] == "286 days"
     _patch(monkeypatch, reply("300 days"))
     assert scriptwriter.write_script(IDEA)["key_number"] == ""
+
+
+
+def test_a_key_number_without_its_unit_or_sign_is_dropped():
+    """Review 4b I-2: the card must show the figure as said, its unit and sign included: "2,000"
+    for "Rs 2,000 crore" would be off by ten million."""
+    assert scriptwriter.checked_key_number("40", "Only 40% of voters turned out.") == ""
+    assert scriptwriter.checked_key_number("5", "A $5 billion deal.") == ""
+    assert scriptwriter.checked_key_number("2,000", "It costs Rs 2,000 crore.") == ""
+    assert scriptwriter.checked_key_number("2,000 crore", "It costs Rs 2,000 crore.") == ""
+    assert scriptwriter.checked_key_number("1.4", "India has 1.4 billion people.") == ""
+    assert scriptwriter.checked_key_number("5%", "Prices fell \u22125% this week.") == ""
+    assert scriptwriter.checked_key_number("5%", "A 3-5% drop is expected.") == ""
+    assert scriptwriter.checked_key_number("40", "Across 40 districts, only 40% voted.") == ""
+    assert (scriptwriter.checked_key_number("Rs 2,000 crore", "It costs Rs 2,000 crore.")
+            == "Rs 2,000 crore")
+    assert scriptwriter.checked_key_number("40 percent", "Only 40 percent voted.") == "40 percent"

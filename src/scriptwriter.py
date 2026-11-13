@@ -1246,6 +1246,12 @@ def _opens_with_a_hook(body: str) -> bool:
 
 
 _KEY_NUMBER_MAX = 20  # characters: the number card is large (design 11.5)
+# A unit or sign the narration puts next to the figure: a card without it shows another number
+# ("2,000" for "Rs 2,000 crore" is off by ten million; review 4b I-2).
+_UNIT_AFTER = re.compile(r"^\s*(?:%|per\s*cent\b|percent\b|crore\b|lakh\b|thousand\b|"
+                         r"million\b|billion\b|trillion\b|bn\b|mn\b|cr\b)", re.IGNORECASE)
+_SIGN_BEFORE = re.compile(r"(?:[\u20b9$\u20ac\u00a3\u00a5\u2212\u2013\-]|\b(?:rs|inr|usd)\.?)\s*$",
+                          re.IGNORECASE)
 
 
 def checked_key_number(value, body: str) -> str:
@@ -1257,7 +1263,11 @@ def checked_key_number(value, body: str) -> str:
     if not (number and body) or not re.search(r"\d", number) or len(number) > _KEY_NUMBER_MAX:
         return ""
     whole = r"(?<!\w)(?<!\d[.,])" + re.escape(number) + r"(?!\w)(?![.,]\d)"
-    return number if re.search(whole, body, re.IGNORECASE) else ""
+    hits = list(re.finditer(whole, body, re.IGNORECASE))
+    if not hits or any(_UNIT_AFTER.match(body[m.end():]) or _SIGN_BEFORE.search(body[:m.start()])
+                       for m in hits):
+        return ""
+    return number
 
 
 def write_script(idea: dict, template: str = "N") -> dict:
