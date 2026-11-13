@@ -113,9 +113,15 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **The SQL for stages 0-3 is run** (2026-11-13, through the Supabase CLI at the operator's
   request; verified: tables, columns, RLS, the pipeline's access, advisors).
 
-**Next:** the approved test render (`python tools/try_ai_video.py --yes-spend`) (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
-number card, the banner hold, the music level, the vignette and stings) and the relaunch (design
-section 14).
+- **The test renders are done** (2026-11-13; STATUS.md's log). Four renders of script 441,
+  $0.945 of clips (reused after the first). They found and fixed a tool crash, three name-check
+  bugs, a meaning check with no failover, and a 12-word line-1 rule that contradicted "nothing
+  dropped" (design 7.2 updated). The fourth is the target format in Hinglish. FLUX drew fake
+  lettering and a code-filled laptop screen: stage 4's still gate.
+
+**Next:** stage 4 on `feat/stage-4-picture-sound` (picture and sound: the gates, the number
+card, the banner hold, the music level, the vignette and stings); the branch also holds the
+render fixes, unpushed. Then the relaunch (design section 14).
 
 ## 1. What the operator wants
 
