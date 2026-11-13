@@ -468,8 +468,8 @@ def _shop(monkeypatch, answers: dict, reserve_fails_at: int | None = None,
     def update(row_id, **fields):
         events.append(("update", rows[row_id], fields))
 
-    def upload(path, content_type):
-        events.append(("upload", path, content_type))
+    def upload(path, content_type, timeout=None):
+        events.append(("upload", path, content_type, timeout))
         return f"https://cdn.example/{os.path.basename(path)}"
 
     asked: dict[int, int] = {}
@@ -659,7 +659,7 @@ def _watch(monkeypatch, states: dict, cancels: dict | None = None, probe: float 
         seen["cancel"].append(request_id)
         return (cancels or {}).get(request_id, False)
 
-    def download(url, dest, timeout=None):
+    def download(url, dest, timeout=None, deadline=None):
         seen["download"].append((url, os.path.basename(dest), timeout))
         if download_error:
             raise download_error
@@ -926,3 +926,141 @@ def test_reel_line(monkeypatch):
 
     monkeypatch.setattr(db, "ai_video_spend_this_month", missing)
     assert ai_video.reel_line(shots) == "🎞️ AI video: 5 of 6 shots, $0.79"
+
+
+# --- Stage 3b's final review: the fix pass -------------------------------------------------------
+
+def test_a_latch_set_while_buying_is_told_once(monkeypatch, tmp_path, fresh_run):
+    """Review I-1: an empty balance is usually found at a submit (the quote is free), and the
+    latch it sets used to stop the buying with no word to the operator."""
+    _ready(monkeypatch, tmp_path)
+    funds = higgsfield.HiggsfieldError("funds", "submit -> HTTP 403", status=403)
+    _shop(monkeypatch, {0: [funds]})
+    first = ai_video.make_shots(_test4_req(tmp_path))
+    assert any("out of funds" in p for p in first.problems)
+    assert ai_video.make_shots(_test4_req(tmp_path)).problems == []  # told once a run
+
+    ai_video.begin_run()
+    _shop(monkeypatch, {}, reserve_fails_at=0,
+          reserve_error=db.LedgerUnavailable("ai_video_jobs is missing"))
+    third = ai_video.make_shots(_test4_req(tmp_path))
+    assert any("ai_video_jobs" in p for p in third.problems)
+
+
+def test_a_hung_higgsfield_cannot_outlast_the_grace(monkeypatch, tmp_path, fresh_run):
+    """Review I-2: every status and cancel call hangs for its whole 30 s timeout. The phase used
+    to run 225 s past its deadline, past the job's kill; now one call at most."""
+    jobs = [_job(i, fresh_run) for i in range(6)]
+
+    def hang(kind):
+        def call(request_id):
+            fresh_run.now += 30
+            if kind == "cancel":
+                return False
+            raise higgsfield.HiggsfieldError("unavailable", f"{kind}: ReadTimeout")
+        return call
+
+    monkeypatch.setattr(higgsfield, "status", hang("status"))
+    monkeypatch.setattr(higgsfield, "cancel", hang("cancel"))
+    monkeypatch.setattr(db, "update_ai_video_job", lambda row_id, **fields: None)
+    monkeypatch.setattr(ai_video, "_jitter", lambda: 0.0)
+    start = fresh_run.now
+    ai_video._settle_jobs(jobs, start + 100, start + 160, LENGTHS, str(tmp_path))
+    assert fresh_run.now <= start + 160 + 30
+    assert all(job.status == "late" for job in jobs)
+
+
+def test_one_jobs_refusal_does_not_stop_the_others_being_read(monkeypatch, tmp_path, fresh_run):
+    """A status read refused for one job (404) is that job's problem: the tick goes on."""
+    jobs = [_job(i, fresh_run) for i in range(2)]
+    gone = higgsfield.HiggsfieldError("refused", "status -> HTTP 404: not found", status=404)
+    _watch(monkeypatch, {"req-0000-abcd": [gone], "req-0001-abcd": [_done(1)]})
+    ai_video._settle_jobs(jobs, fresh_run.now + 300, fresh_run.now + 420, LENGTHS, str(tmp_path))
+    assert jobs[1].status == "completed" and jobs[1].clip
+
+
+def test_the_upload_is_bounded_by_the_phase(monkeypatch, tmp_path, fresh_run):
+    events = _shop(monkeypatch, {})
+    ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                  fresh_run.now + 40)
+    upload = next(e for e in events if e[0] == "upload")
+    assert upload[3] == pytest.approx(40)
+
+
+def test_a_still_that_will_not_render_borrows_a_clip(monkeypatch, tmp_path, fresh_run):
+    """Review I-3: one still's failed render used to throw the reel's paid clips away."""
+    _ready(monkeypatch, tmp_path)
+    _shop(monkeypatch, {})
+    states = {f"req-{i:04d}-abcd": [_done(i)] for i in range(6)}
+    states["req-0003-abcd"] = [{"status": "failed"}]
+    _watch(monkeypatch, states)
+    tries = []
+
+    def broken(picture, dest, seconds, index):
+        tries.append(index)
+        raise RuntimeError("ken burns failed (1)")
+
+    monkeypatch.setattr(ai_video, "_still_clip", broken)
+    shots = ai_video.make_shots(_test4_req(tmp_path))
+    assert tries == [3, 3]  # one retry
+    assert shots.files[3] == shots.files[2] and shots.kinds[3] == "still"
+    assert shots.video == 5 and shots.spend_usd == pytest.approx(5 * PRICE)
+
+
+def test_no_shots_carries_the_reels_spend(monkeypatch, tmp_path, fresh_run):
+    """When nothing at all can be shown, the reel's spend and problems still reach production."""
+    _ready(monkeypatch, tmp_path)
+    _shop(monkeypatch, {})
+    _watch(monkeypatch, {f"req-{i:04d}-abcd": [RUNNING] for i in range(6)})
+
+    def broken(picture, dest, seconds, index):
+        raise RuntimeError("ken burns failed (1)")
+
+    monkeypatch.setattr(ai_video, "_still_clip", broken)
+    with pytest.raises(ai_video.NoShots) as err:
+        ai_video.make_shots(_test4_req(tmp_path))
+    assert err.value.spend_usd == pytest.approx(6 * PRICE)
+    assert any("in time" in p for p in err.value.problems)
+
+
+def test_a_submit_blackout_stops_buying_for_the_run(monkeypatch, tmp_path, fresh_run):
+    """Review I-4: every submit unanswered used to trip nothing, so each reel of the run spent
+    its whole phase on one shot and said nothing."""
+    _ready(monkeypatch, tmp_path)
+    events = _shop(monkeypatch, {i: [UNANSWERED] for i in range(6)})
+    first = ai_video.make_shots(_test4_req(tmp_path))
+    assert ai_video._stop_buying() and any("in time" in p for p in first.problems)
+    assert first.spend_usd == pytest.approx(PRICE)  # the one row whose submit may have landed
+    events.clear()
+    ai_video.make_shots(_test4_req(tmp_path))
+    assert not [e for e in events if e[0] == "reserve"]
+
+
+def test_busy_with_no_wait_still_waits_a_second(monkeypatch, tmp_path, fresh_run):
+    """A 429 with Retry-After: 0 used to resubmit in a tight loop, thousands of times."""
+    answer = {"request_id": "req-0000-abcd", "status": "queued"}
+    busy = higgsfield.HiggsfieldError("busy", "account_queue_full", status=429, retry_after=0)
+    _shop(monkeypatch, {0: [busy, busy, answer]})
+    (job,) = ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                           fresh_run.now + 60)
+    assert fresh_run.slept == [1, 1] and job.status == "submitted"
+
+
+def test_a_search_naming_someone_is_replaced(monkeypatch):
+    """A stock-photo search for a person's name could put that person on screen."""
+    shots = [_shot(i) for i in range(6)]
+    shots[2]["search"] = "Sunita Williams"
+    shots[4]["search"] = "nasa launch"
+    _llm(monkeypatch, [_reply(shots)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    names = {"sunita", "williams", "nasa"}
+    assert ok and plan[0]["search"] == "space capsule"
+    for i in (2, 4):
+        assert not set(plan[i]["search"].lower().split()) & names, plan[i]["search"]
+
+
+def test_a_rejected_plan_is_told_for_each_reel(monkeypatch, tmp_path, fresh_run):
+    _ready(monkeypatch, tmp_path, plan_ok=False)
+    for _ in range(2):
+        shots = ai_video.make_shots(_test4_req(tmp_path))
+        assert any("shot plan" in p for p in shots.problems)

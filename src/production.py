@@ -519,8 +519,15 @@ def _ai_video_shots(idea: dict, script: dict, audio: str, duration: float, setti
     except Exception as e:  # noqa: BLE001 — NoShots included: the `ai` path takes over
         log.warning("produce: idea %s has no AI-video shots (%s: %s); using today's ai path",
                     idea.get("id"), type(e).__name__, e)
-        progress["ai_video"] = (f"🎞️ AI video: none ({type(e).__name__}: {str(e)[:200]}); "
-                                f"made from stills on the ai path")
+        # Clips bought before the fall (NoShots carries them) are still this reel's spend.
+        spend = float(getattr(e, "spend_usd", 0) or 0)
+        for problem in getattr(e, "problems", None) or []:
+            _notify(problem)
+        if spend > 0:
+            progress["spend_usd"] = spend
+        progress["ai_video"] = (f"🎞️ AI video: none ({type(e).__name__}: {str(e)[:200]})"
+                                + (f", ${spend:.2f} spent" if spend > 0 else "")
+                                + "; made from stills on the ai path")
         return None
 
 

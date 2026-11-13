@@ -376,11 +376,17 @@ def plan_shots(req: ReelRequest, durations: list[float]) -> tuple[list[dict], bo
             log.warning("ai_video: the shot plan named %s", ", ".join(found))
             continue
         style = _style_line(mood, somber)
-        words = visuals._keywords_heuristic(_plain(req.script_body), m) or ["city skyline"]
+        # A stock-photo search for a name could put that person on screen: such a search, or a
+        # missing one, becomes a word from the script that names no one.
+        lowered = {n.lower() for n in names}
+        words = [w for w in visuals._keywords_heuristic(_plain(req.script_body),
+                                                        m + len(names) + 3)
+                 if not set(re.findall(r"[a-z]+", w.lower())) & lowered][:m] or ["city skyline"]
         for i, shot in enumerate(shots):
             room = _STILL_CHARS - len(style) - 1
             shot["still"] = f"{shot['still'][:room].rstrip()} {style}"
-            shot["search"] = shot["search"] or words[i % len(words)]
+            if not shot["search"] or set(re.findall(r"[a-z]+", shot["search"].lower())) & lowered:
+                shot["search"] = words[i % len(words)]
         return shots, True
     return _fallback_plan(req, m), False
 
@@ -391,7 +397,13 @@ FPS = 24  # an ai_video reel's rate end to end: Kling's own, so no clip is conve
 
 
 class NoShots(RuntimeError):
-    """Not one shot has a picture: the reel falls back to today's `ai` path (design 6.2 step 11)."""
+    """The reel cannot have its shots (no picture for any shot, or a shot nothing can cover): it
+    falls back to today's `ai` path (design 6.2 step 11). It carries what the attempt already
+    spent and the problems to tell, so neither is lost with the shots (review I-3)."""
+
+    def __init__(self, message: str, spend_usd: float = 0.0, problems: list[str] | None = None):
+        super().__init__(message)
+        self.spend_usd, self.problems = spend_usd, list(problems or [])
 
 
 @dataclass(frozen=True)
@@ -537,7 +549,8 @@ def _wait(seconds: float, phase_end: float) -> bool:
 def _submit(job: Job, picture: Picture, motion: str, model: str, phase_end: float) -> None:
     """Upload the shot's still once, then submit its job, repeating only what may be repeated."""
     try:
-        url = higgsfield.upload(picture.path, _content_type(picture.path))
+        url = higgsfield.upload(picture.path, _content_type(picture.path),
+                                timeout=max(5.0, min(180.0, phase_end - _clock())))
     except higgsfield.HiggsfieldError as e:
         if e.kind in ("funds", "auth"):
             _latch.add(e.kind)
@@ -560,7 +573,8 @@ def _submit(job: Job, picture: Picture, motion: str, model: str, phase_end: floa
                             "quote", job.shot)
                 return
             if e.kind == "busy":
-                wait = e.retry_after if e.retry_after is not None else next(waits, 10)
+                # At least a second: "Retry-After: 0" resubmitted in a tight loop.
+                wait = max(1.0, e.retry_after if e.retry_after is not None else next(waits, 10))
                 if _clock() + wait < phase_end:
                     _sleep(wait)
                     continue
@@ -633,7 +647,7 @@ def _fetch_clip(job: Job, url: str, seconds: float, out_dir: str, grace_end: flo
     # Never longer than the time left in the reel's grace, but never zero: the clip is paid for.
     timeout = max(5.0, min(180.0, grace_end - _clock()))
     try:
-        higgsfield.download(url, dest, timeout=timeout)
+        higgsfield.download(url, dest, timeout=timeout, deadline=grace_end)
     except higgsfield.HiggsfieldError as e:
         log.warning("ai_video: shot %d's clip did not download (%s); it becomes a still",
                     job.shot, e)
@@ -660,13 +674,14 @@ def _finish(job: Job, state: dict, lengths: list[float], out_dir: str, grace_end
     _record(job, status=status, cost_usd=0, settled_at=_now())
 
 
-def _read(job: Job) -> dict | None:
-    """One status read; None when it fails (it is read again on the next tick)."""
+def _read(job: Job) -> tuple[dict | None, str | None]:
+    """One status read: (the state, None), or (None, the error's kind) when it fails. A failed
+    job is read again on the next tick."""
     try:
-        return higgsfield.status(job.request_id)
+        return higgsfield.status(job.request_id), None
     except higgsfield.HiggsfieldError as e:
         log.info("ai_video: shot %d's status read failed (%s); trying again", job.shot, e)
-        return None
+        return None, e.kind
 
 
 def _poll(live: list[Job], last: dict, until: float, delay: float, lengths: list[float],
@@ -677,9 +692,13 @@ def _poll(live: list[Job], last: dict, until: float, delay: float, lengths: list
         _sleep(min(delay + _jitter(), until - _clock()))
         delay = min(delay * _POLL_GROWTH, _POLL_MAX)
         for job in list(live):
-            state = _read(job)
+            if _clock() > until:
+                break  # each read may wait out its 30 s timeout: never past the end (review I-2)
+            state, failed = _read(job)
+            if failed in _SERVICE_FAILED:
+                break  # Higgsfield itself is not answering: the next tick tries again
             if state is None:
-                continue
+                continue  # this job's own problem (a 404): the others are still read
             last[job.shot] = state.get("status")
             if state.get("status") in higgsfield.TERMINAL:
                 _finish(job, state, lengths, out_dir, grace_end)
@@ -700,13 +719,19 @@ def _settle_jobs(jobs: list[Job], phase_end: float, grace_end: float, lengths: l
     last: dict[int, str | None] = {}
     delay = _poll(live, last, phase_end, _POLL_FIRST, lengths, out_dir, grace_end)
     for job in list(live):
+        if _clock() >= grace_end:
+            break  # out of time: what is still open is late (review I-2)
         if last.get(job.shot, "queued") != "queued":
             continue
         if higgsfield.cancel(job.request_id):
             _finish(job, {"status": "canceled"}, lengths, out_dir, grace_end)
             live.remove(job)
             continue
-        state = _read(job)
+        if _clock() >= grace_end:
+            break
+        state, failed = _read(job)
+        if failed in _SERVICE_FAILED:
+            break  # Higgsfield is not answering: stop asking
         if state and state.get("status") in higgsfield.TERMINAL:
             _finish(job, state, lengths, out_dir, grace_end)
             live.remove(job)
@@ -781,6 +806,9 @@ def _may_buy(req: ReelRequest, plan_ok: bool, problems: list[str]) -> bool:
     if not plan_ok:
         log.warning("ai_video: no usable shot plan for idea %s; its shots are stills",
                     req.idea_id)
+        problems.append(f"🎞️ Idea {req.idea_id}'s shot plan was not usable (a name from the "
+                        f"story in a prompt, or a reply that could not be read), so nothing "
+                        f"was bought and its shots are stills.")
         return False
     return True
 
@@ -854,35 +882,58 @@ def _get_clips(req: ReelRequest, plan: list[dict], pictures: list[Picture], leng
                 clips[shot] = clip
     fresh = sorted((s for s in positions if s not in reuse), key=lambda s: (s != 0, s != m - 1, s))
     jobs = _buy(req, fresh[:max(0, k - paid)], pictures, plan, price, phase_end)
+    for kind in ("funds", "auth", "ledger"):
+        if kind in _latch:  # set by a refusal or a missing table while buying (review I-1)
+            _alert(kind, problems)
     _settle_jobs(jobs, phase_end, grace_end, lengths, req.work_dir)
     clips.update({job.shot: job.clip for job in jobs if job.clip})
-    submitted = [job for job in jobs if job.request_id]
-    if (submitted and not any(job.status == "completed" for job in submitted)
-            and any(job.status in ("late", "canceled") for job in submitted)):
-        _latch.add("slow")  # a slow queue would charge every later reel for clips too late
+    timed_out = any(job.status in ("late", "canceled") for job in jobs if job.request_id)
+    unanswered = any(job.ambiguous and not job.request_id for job in jobs)
+    if (timed_out or unanswered) and not any(job.status == "completed" for job in jobs):
+        # A queue too slow to give this reel one clip, or a Higgsfield that never answered a
+        # submit (review I-4), would cost every later reel of the run its time and its money.
+        _latch.add("slow")
         _alert("slow", problems)
     return clips, jobs
 
 
 def _files(req: ReelRequest, pictures: list[Picture], lengths: list[float],
            clips: dict[int, str]) -> tuple[list[str], list[str]]:
-    """Each shot's file: its clip, else a Ken Burns clip over its still (rendered in parallel)."""
-    missing = [i for i in range(len(lengths)) if i not in clips]
+    """Each shot's file: its clip, else a Ken Burns clip over its still (rendered in parallel,
+    one retry). A shot whose still will not render shows the nearest shot's file that covers
+    it, so one render never throws the reel's paid clips away (review I-3). NoShots only when
+    nothing can cover a shot."""
+    m = len(lengths)
+    missing = [i for i in range(m) if i not in clips]
 
-    def render(i: int) -> str:
-        return _still_clip(pictures[i], os.path.join(req.work_dir, f"shot_{i:02d}.mp4"),
-                           lengths[i], i)
+    def render(i: int) -> str | None:
+        dest = os.path.join(req.work_dir, f"shot_{i:02d}.mp4")
+        for attempt in (1, 2):
+            try:
+                return _still_clip(pictures[i], dest, lengths[i], i)
+            except Exception as e:  # noqa: BLE001 — retried once, then covered by a neighbour
+                log.warning("ai_video: shot %d's still did not render (%s: %s)%s", i,
+                            type(e).__name__, e, "; trying again" if attempt == 1 else "")
+        return None
 
     rendered: dict[int, str] = {}
     if missing:
         workers = max(1, min(len(missing), visuals._visual_workers()))
-        try:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                rendered = dict(zip(missing, pool.map(render, missing)))
-        except Exception as e:  # noqa: BLE001 — the cut list cannot drop a shot
-            raise NoShots(f"a still could not be rendered ({type(e).__name__}: {e})") from e
-    files = [clips.get(i) or rendered[i] for i in range(len(lengths))]
-    kinds = ["video" if i in clips else "still" for i in range(len(lengths))]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            rendered = {i: f for i, f in zip(missing, pool.map(render, missing)) if f}
+    own = {**rendered, **clips}
+    files: list[str] = []
+    for i in range(m):
+        if i in own:
+            files.append(own[i])
+            continue
+        nearest = sorted((j for j in own if j != i), key=lambda j: (abs(j - i), j > i))
+        cover = next((own[j] for j in nearest if _check_clip(own[j], lengths[i])), None)
+        if cover is None:
+            raise NoShots(f"shot {i}'s still did not render and no other shot covers it")
+        log.warning("ai_video: shot %d shows another shot's file", i)
+        files.append(cover)
+    kinds = ["video" if i in clips else "still" for i in range(m)]
     return files, kinds
 
 
@@ -906,8 +957,11 @@ def make_shots(req: ReelRequest) -> Shots:
         if price is not None:
             clips, jobs = _get_clips(req, plan, pictures, lengths, price, start, problems)
     k = math.floor(_setting("AI_VIDEO_BUDGET_USD", 1.10) / (price or _EXPECTED_PRICE) + 1e-9)
-    files, kinds = _files(req, pictures, lengths, clips)
     spend = round(sum(job.cost for job in jobs), 4)
+    try:
+        files, kinds = _files(req, pictures, lengths, clips)
+    except NoShots as e:
+        raise NoShots(str(e), spend_usd=spend, problems=problems) from e
     log.info("ai_video: idea %s: %d of %d shots are video, $%.2f", req.idea_id,
              kinds.count("video"), len(kinds), spend)
     return Shots(files=files, kinds=kinds, cuts=cuts, planned_video=len(video_shots(len(lengths), k)),

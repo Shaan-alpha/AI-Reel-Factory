@@ -23,6 +23,7 @@ import logging
 import math
 import os
 import re
+import time
 
 import requests
 
@@ -221,8 +222,9 @@ def estimate(endpoint: str, args: dict) -> float:
     return usd
 
 
-def upload(path: str, content_type: str) -> str:
-    """Put a local file where a job can read it; return its public URL."""
+def upload(path: str, content_type: str, timeout: float | None = None) -> str:
+    """Put a local file where a job can read it; return its public URL. `timeout` (default
+    180 s) bounds the PUT's reads: the caller passes what is left of its phase."""
     with open(path, "rb") as f:
         data = _api("POST", "files/generate-upload-url", "upload",
                     body={"content_type": content_type})
@@ -230,7 +232,7 @@ def upload(path: str, content_type: str) -> str:
         if not (isinstance(upload_url, str) and isinstance(public_url, str)):
             raise HiggsfieldError("unavailable", "upload: no upload or public URL in the answer")
         headers = data.get("upload_headers") or {"Content-Type": content_type}
-        _check(_send("PUT", upload_url, auth=False, timeout=_FILE_TIMEOUT, data=f,
+        _check(_send("PUT", upload_url, auth=False, timeout=timeout or _FILE_TIMEOUT, data=f,
                      headers=headers), "upload PUT", api=False)
     return public_url
 
@@ -266,15 +268,20 @@ def cancel(request_id: str) -> bool:
     return r.status_code == 202
 
 
-def download(url: str, dest: str, timeout: float | None = None) -> str:
+def download(url: str, dest: str, timeout: float | None = None,
+             deadline: float | None = None) -> str:
     """Fetch a finished clip to `dest`. A failure leaves no partial file behind. `timeout`
-    (default 180 s) is per read: the caller passes what is left of its own deadline."""
+    (default 180 s) is per read, so a file that trickles in could outlast it: `deadline` (a
+    time.monotonic() value) bounds the whole download."""
     r = _send("GET", url, auth=False, timeout=timeout or _FILE_TIMEOUT, stream=True)
     try:
         _check(r, "download", api=False)
         size = 0
         with open(dest, "wb") as f:
             for chunk in r.iter_content(1 << 16):
+                if deadline is not None and time.monotonic() > deadline:
+                    raise HiggsfieldError("unavailable", f"download {url}: still arriving at "
+                                                         f"its deadline")
                 if chunk:
                     f.write(chunk)
                     size += len(chunk)

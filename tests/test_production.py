@@ -1412,3 +1412,15 @@ def test_a_reel_on_the_ai_path_says_so_under_published(monkeypatch, tmp_path):
     line = report["ai_video"]
     assert line.startswith("🎞️ AI video: none") and "NoShots: no picture for any shot" in line
     assert "spend_usd" not in report
+
+
+def test_no_shots_still_reports_its_spend(monkeypatch, tmp_path):
+    """Review I-3: clips paid for before a reel fell back to the ai path are still reported."""
+    failure = production.ai_video.NoShots("a still did not render", spend_usd=0.4725,
+                                          problems=["🎞️ a problem"])
+    seen = _ai_video_wiring(monkeypatch, shots=failure)
+    report = {}
+    production.produce_one(IDEA, str(tmp_path), report)
+    assert report["spend_usd"] == pytest.approx(0.4725) and "$0.47" in report["ai_video"]
+    assert "🎞️ a problem" in seen["notes"]
+    assert seen["attempt"]["spend_usd"] == pytest.approx(0.4725)
