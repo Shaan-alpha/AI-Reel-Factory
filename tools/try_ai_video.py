@@ -75,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--english", action="store_true", help="narrate in English")
     parser.add_argument("--somber", action="store_true", help="render with the somber tone")
     parser.add_argument("--out", help="where to write the reel (default: test-videos/)")
+    parser.add_argument("--key-number",
+                        help="the reel's key number, copied exactly from the script (stored "
+                             "scripts predate the writer's key number)")
     args = parser.parse_args(argv)
     if not args.yes_spend:
         print("This buys up to AI_VIDEO_BUDGET_USD of Kling clips (about $0.95). Run it again "
@@ -92,6 +95,11 @@ def main(argv: list[str] | None = None) -> int:
 
     script, idea = _pick(args.script)
     title = script.get("title") or idea.get("title") or ""
+    # Production's own check: a number the narration does not say gets no card.
+    key_number = scriptwriter.checked_key_number(args.key_number, script["body"]) or None
+    if args.key_number and not key_number:
+        print(f"--key-number {args.key_number!r} is not in the script as written, so there is "
+              f"no number card.")
     tone = "somber" if args.somber else "plain"
     print(f"Script {script['id']} (idea {idea['id']}): {title!r}; ${month:.2f} spent this month "
           f"so far.")
@@ -131,10 +139,11 @@ def main(argv: list[str] | None = None) -> int:
     final = os.path.join(work, "reel_final.mp4")
     if lines:
         subtitles.burn_hinglish(raw, audio, final, lines, hook_text=title, source_label=source,
-                                fps=ai_video.FPS)
+                                fps=ai_video.FPS, key_number=key_number)
     else:
         subtitles.burn_captions(raw, audio, final, hook_text=title, source_label=source,
-                                script_text=script["body"], fps=ai_video.FPS)
+                                script_text=script["body"], fps=ai_video.FPS,
+                                key_number=key_number)
     out = args.out or os.path.join(ROOT, "test-videos", f"ai_video_try_{script['id']}.mp4")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     shutil.copyfile(final, out)

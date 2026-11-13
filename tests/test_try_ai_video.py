@@ -78,8 +78,8 @@ def _fake_render(monkeypatch, tool) -> dict:
         seen["assemble"] = (clips, fps)
         return out
 
-    def burn(raw, audio, out, lines, hook_text=None, source_label=None, fps=30):
-        seen["burn"] = fps
+    def burn(raw, audio, out, lines, hook_text=None, source_label=None, fps=30, key_number=None):
+        seen["burn"], seen["key_number"] = fps, key_number
         with open(out, "wb") as f:
             f.write(b"mp4")
         return out
@@ -116,3 +116,19 @@ def test_a_windows_console_cannot_crash_a_paid_render(monkeypatch, tmp_path):
     out = tmp_path / "try.mp4"
     assert tool.main(["--yes-spend", "--out", str(out)]) == 0
     assert out.exists()
+
+
+
+def test_a_key_number_said_in_the_script_reaches_the_burn(monkeypatch, tmp_path, capsys):
+    """Stored scripts predate the writer's key number, so a test render can name one; it gets
+    production's check (copied exactly from the narration) or no card."""
+    monkeypatch.setenv("HF_API_KEY", "abc123:def456")
+    tool = _tool()
+    seen = _fake_render(monkeypatch, tool)
+    picked = tool._pick(None)
+    monkeypatch.setattr(tool, "_pick", lambda script_id: (
+        {**picked[0], "body": "Prices rose 40%. Here is why."}, picked[1]))
+    assert tool.main(["--yes-spend", "--out", str(tmp_path / "a.mp4"), "--key-number", "40%"]) == 0
+    assert seen["key_number"] == "40%"
+    assert tool.main(["--yes-spend", "--out", str(tmp_path / "b.mp4"), "--key-number", "50%"]) == 0
+    assert seen["key_number"] is None and "no number card" in capsys.readouterr().out
