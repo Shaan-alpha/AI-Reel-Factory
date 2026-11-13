@@ -443,6 +443,11 @@ def _card_events(key_points: list[str], total_dur: float, start_after: float,
     return out
 
 
+def text_cards_enabled() -> bool:
+    """The key-point cards: off since stage 4b, when one key number replaced them."""
+    return config.get_bool("ENABLE_TEXT_CARDS", False)
+
+
 def _graphic_cards_enabled() -> bool:
     """PIL stat cards instead of ASS text cards. Default OFF: the ASS cards already ship and
     work, so this is a look change the operator opts into for a run and judges, not a silent
@@ -457,7 +462,7 @@ def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
     Shares `_card_events` with the ASS path so both treatments use ONE timing rule. Returns []
     when disabled or on any failure, and the caller then falls back to the ASS text cards —
     a card renderer breaking must never cost us the captions (rules 11, 14)."""
-    if not (key_points and config.get_bool("ENABLE_TEXT_CARDS", False) and _graphic_cards_enabled()):
+    if not (key_points and text_cards_enabled() and _graphic_cards_enabled()):
         return []
     try:
         from src import graphics
@@ -477,8 +482,11 @@ def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
 
 # The key-number card (design 11.5): a short scale-in, on screen for its spoken length plus half
 # a second, between 1.5 and 2.5 s.
-_NUMBER_SCALE_IN = "{\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}"
+# Its rows are broken in code and libass's own wrapping is off (\\q2): wrapped by libass, a
+# long figure sat on one row at 70% and jumped to two at full size (review 4b I-3).
+_NUMBER_SCALE_IN = "{\\q2\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}"
 _NUMBER_MIN, _NUMBER_TAIL, _NUMBER_MAX = 1.5, 0.5, 2.5
+_NUMBER_ROW = 12  # characters a row at 150 px, inside the safe box
 
 
 def _token_run(wanted: list[str], tokens: list[str]) -> int | None:
@@ -489,9 +497,15 @@ def _token_run(wanted: list[str], tokens: list[str]) -> int | None:
     return next((i for i in range(len(tokens) - n + 1) if tokens[i:i + n] == wanted), None)
 
 
+def _number_form(token: str) -> str:
+    """A token as a figure is compared: lowercase, sentence punctuation and quotes trimmed from
+    its ends, and nothing else, so "40%" is not "40" and "1.4" is not "14" (review 4b I-1)."""
+    return token.strip(".,;:!?\"'()[]{}\u201c\u201d\u2018\u2019\u2026").lower()
+
+
 def _number_tokens(key_number: str | None) -> list[str]:
-    """The key number as the captions' normalized tokens: "Rs 2,000 crore" -> rs 2000 crore."""
-    return [_norm(t) for t in _script_tokens(key_number)]
+    """The key number as figure tokens: "Rs 2,000 crore" -> rs 2,000 crore."""
+    return [_number_form(t) for t in _script_tokens(key_number)]
 
 
 def _number_moment_words(key_number: str | None,
@@ -499,7 +513,7 @@ def _number_moment_words(key_number: str | None,
     """When the narration says the key number: the first run of aligned words that spell it,
     whole tokens only, so "2" never matches inside "2,000". None when it is not said."""
     wanted = _number_tokens(key_number)
-    i = _token_run(wanted, [_norm(w[2]) for w in words or []])
+    i = _token_run(wanted, [_number_form(w[2]) for w in words or []])
     return None if i is None else (words[i][0], words[i + len(wanted) - 1][1])
 
 
@@ -509,7 +523,7 @@ def _number_moment_blocks(key_number: str | None,
     no word timings, so the block is when its part of the sentence is spoken."""
     wanted = _number_tokens(key_number)
     for start, end, block in blocks or []:
-        if _token_run(wanted, [_norm(t) for t in _script_tokens(block)]) is not None:
+        if _token_run(wanted, [_number_form(t) for t in _script_tokens(block)]) is not None:
             return start, end
     return None
 
@@ -525,7 +539,16 @@ def _number_card(key_number: str | None, moment: tuple[float, float] | None,
     end = min(total_dur, start + shown)
     if end - start < 0.5:
         return None
-    return start, end, _NUMBER_SCALE_IN + _ass_escape(_NON_RENDERABLE.sub("", key_number)).upper()
+    written = " ".join(key_number.split())
+    drawn = _ass_escape(_NON_RENDERABLE.sub("", written))
+    if drawn != written:
+        return None  # the font or the escape would change the figure ("-5%" read "5%")
+    # Words are capitalised; short units keep their case ("5 m" is metres, not "5 M").
+    rows = _wrap([w.upper() if w.isalpha() and len(w) >= 3 else w for w in drawn.split()],
+                 _NUMBER_ROW)
+    if len(rows) > 2:
+        return None
+    return start, end, _NUMBER_SCALE_IN + "\\N".join(rows)
 
 
 def _banner_seconds(first_end: float | None) -> float:
@@ -578,7 +601,7 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
 
     # Sparse on-screen key-point cards (middle of frame), after the banner. Off by default
     # since stage 4b: the key number replaces them (design 11.5).
-    if key_points and config.get_bool("ENABLE_TEXT_CARDS", False):
+    if key_points and text_cards_enabled():
         dur = total_dur if total_dur else (words[-1][1] if words else 0.0)
         start_after = banner_end
         card_dur = float(config.get("CARD_SECONDS", "1.8"))

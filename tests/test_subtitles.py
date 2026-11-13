@@ -893,7 +893,7 @@ def test_the_number_scales_in():
     assert fields[2] == "150" and fields[18] == "8"   # large, top centre
     assert 700 <= int(fields[21]) <= 960              # the upper middle, under the source line
     card = subtitles._number_card("40%", (1.0, 1.4), 10.0)
-    assert card[2].startswith("{\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}")
+    assert card[2].startswith("{\\q2\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}")
     assert card[2].endswith("40%")
 
 
@@ -954,3 +954,43 @@ def test_burn_hinglish_draws_the_key_number(monkeypatch, tmp_path):
     blocks = subtitles.subtitle_blocks(lines, [(3.0, 3.3)], 7.0)
     start = next(b[0] for b in blocks if "286 days" in b[2])
     assert _event(seen["ass"], "Number")[0] == subtitles._format_ts(start)
+
+
+
+# --- Stage 4b's final review: the number card shows the figure as said, when it is said --------
+
+def test_the_number_is_matched_as_written_not_as_digits():
+    """Review 4b I-1: "40%" must not show while "40 districts" is said, "14" at "1.4 billion",
+    or "5%" at "5 states" when the narration's 5% is part of "3-5%"."""
+    words = [(0.0, 0.4, "Across"), (0.4, 0.7, "40"), (0.7, 1.2, "districts,"), (1.5, 1.8, "only"),
+             (1.8, 2.2, "40%"), (2.2, 2.5, "of"), (2.5, 2.9, "voters.")]
+    assert subtitles._number_moment_words("40%", words) == (1.8, 2.2)
+    words = [(0.0, 0.3, "India"), (0.3, 0.5, "has"), (0.5, 0.9, "1.4"), (0.9, 1.4, "billion"),
+             (1.4, 1.8, "people."), (2.3, 2.6, "covers"), (2.6, 2.9, "14"), (2.9, 3.4, "states.")]
+    assert subtitles._number_moment_words("14", words) == (2.6, 2.9)
+    words = [(0.0, 0.2, "A"), (0.2, 0.7, "3-5%"), (0.7, 1.0, "drop"), (1.0, 1.2, "in"),
+             (1.2, 1.4, "5"), (1.4, 1.9, "states.")]
+    assert subtitles._number_moment_words("5%", words) is None
+    blocks = [(0.0, 1.2, "Across 40 districts,"), (1.2, 3.0, "only 40% of voters.")]
+    assert subtitles._number_moment_blocks("40%", blocks) == (1.2, 3.0)
+
+
+def test_a_card_the_font_would_change_is_not_shown():
+    """Review 4b I-2: a minus the renderer strips would turn "-5%" into "5%"."""
+    assert subtitles._number_card("\u22125%", (1.0, 1.5), 10.0) is None
+
+
+def test_a_long_number_is_broken_into_rows_before_it_scales_in():
+    """Review 4b I-3: "RS 1.25 LAKH CRORE" sat on one row at 70% and jumped to two at 100%."""
+    card = subtitles._number_card("Rs 1.25 lakh crore", (1.0, 2.0), 10.0)
+    assert card[2].startswith("{\\q2")
+    rows = card[2].split("}")[-1].split("\\N")
+    assert len(rows) == 2 and all(len(row) <= 12 for row in rows)
+    assert subtitles._number_card("286 days", (1.0, 2.0), 10.0)[2].endswith("}286 DAYS")
+
+
+def test_short_units_keep_their_case():
+    """Review 4b: "5 m" (metres) must not read "5 M" (million); words are capitalised."""
+    assert subtitles._number_card("5 m", (1.0, 1.5), 10.0)[2].endswith("}5 m")
+    assert subtitles._number_card("Rs 1.25 lakh crore", (1.0, 2.0), 10.0)[2].endswith("CRORE")
+    assert "Rs 1.25" in subtitles._number_card("Rs 1.25 lakh crore", (1.0, 2.0), 10.0)[2]
