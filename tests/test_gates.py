@@ -33,9 +33,10 @@ def _still(tmp_path, name="still.jpg", fill=200, middle=None, bars=False) -> str
     return str(path)
 
 
-def _ocr(monkeypatch, original: bytes = b"", doubled: bytes = b"", raises=None) -> list:
+def _ocr(monkeypatch, original: bytes | None = None, doubled: bytes | None = None,
+         raises=None) -> list:
     """Tesseract replaced: `original` is what it reads from the still itself, `doubled` from the
-    2x copy. Returns the commands it was given."""
+    2x copy (a TSV with no words when not given). Returns the commands it was given."""
     calls = []
 
     def run(cmd, **kwargs):
@@ -43,7 +44,7 @@ def _ocr(monkeypatch, original: bytes = b"", doubled: bytes = b"", raises=None) 
         if raises:
             raise raises
         out = doubled if "ocr2x" in cmd[1] else original
-        return SimpleNamespace(stdout=out, returncode=0)
+        return SimpleNamespace(stdout=_tsv() if out is None else out, stderr=b"", returncode=0)
 
     monkeypatch.setattr(gates, "_tesseract", lambda: "tesseract")
     monkeypatch.setattr(gates.subprocess, "run", run)
@@ -81,6 +82,29 @@ def test_no_tesseract_skips_the_text_check_once(monkeypatch, tmp_path, caplog):
         assert gates.still_problems(_still(tmp_path, "a.jpg")) == []
         assert gates.still_problems(_still(tmp_path, "b.jpg")) == []
     assert len([r for r in caplog.records if "Tesseract" in r.getMessage()]) == 1
+
+
+def test_a_tesseract_that_fails_warns_instead_of_passing_the_still(monkeypatch, tmp_path,
+                                                                   caplog):
+    """Review 4a I-2: without its language data Tesseract exits 1 with a bare TSV header, which
+    read as a clean still and said nothing."""
+    def run(cmd, **kwargs):
+        return SimpleNamespace(stdout=HEADER.encode(), returncode=1,
+                               stderr=b"Error opening data file eng.traineddata")
+
+    monkeypatch.setattr(gates, "_tesseract", lambda: "tesseract")
+    monkeypatch.setattr(gates.subprocess, "run", run)
+    with caplog.at_level(logging.WARNING, logger="src.gates"):
+        assert gates.still_problems(_still(tmp_path)) == []
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "exited 1" in said and "eng.traineddata" in said
+
+
+def test_a_tesseract_with_no_tsv_warns(monkeypatch, tmp_path, caplog):
+    _ocr(monkeypatch, original=b"", doubled=b"")
+    with caplog.at_level(logging.WARNING, logger="src.gates"):
+        assert gates.still_problems(_still(tmp_path)) == []
+    assert any("no TSV" in r.getMessage() for r in caplog.records)
 
 
 def test_a_tesseract_timeout_skips_the_text_check(monkeypatch, tmp_path):

@@ -55,12 +55,23 @@ def _tesseract() -> str | None:
     return _WINDOWS_TESSERACT if os.path.exists(_WINDOWS_TESSERACT) else None
 
 
+def _text(data) -> str:
+    """A subprocess stream as text: UTF-8 whatever the console's code page."""
+    return data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data or "")
+
+
 def _read(binary: str, path: str) -> list[tuple[str, float]]:
     """One Tesseract reading (sparse text, TSV): the words of 3+ letters and their confidence.
-    The output is UTF-8 whatever the console's code page."""
-    out = subprocess.run([binary, path, "stdout", "--psm", "11", "tsv"], capture_output=True,
-                         timeout=_OCR_TIMEOUT).stdout
-    text = out.decode("utf-8", "replace") if isinstance(out, bytes) else str(out or "")
+    Raises when Tesseract fails or prints no TSV (missing language data exits 1 with a bare
+    header), so a broken install is a warning, never a run of clean-looking stills."""
+    proc = subprocess.run([binary, path, "stdout", "--psm", "11", "tsv"], capture_output=True,
+                          timeout=_OCR_TIMEOUT)
+    text = _text(proc.stdout)
+    if proc.returncode != 0:
+        why = _text(getattr(proc, "stderr", b"")).strip()[:200]
+        raise RuntimeError(f"tesseract exited {proc.returncode}: {why}")
+    if "conf" not in text.split("\n", 1)[0]:
+        raise RuntimeError("tesseract printed no TSV")
     words = []
     for row in csv.DictReader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE):
         word = (row.get("text") or "").strip()
