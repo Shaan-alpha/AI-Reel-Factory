@@ -91,9 +91,13 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   - `tools/verify_higgsfield.py`, the one live check, at most $0.18 and not yet run.
   `HF_API_SECRET` is gone from the local `.env` (it was empty).
 
-**Next:** stage 3a's final review, then the operator's go-ahead for push and merge, the
-`HF_API_KEY` repository secret and the live check (design 15 steps 2-3). Then stage 3b (the shots,
-the cut list, the wiring) with stage 4, and the relaunch (design section 14).
+- **Stage 3a's final review is done** (7 findings fixed test-first; details and the deferred minors
+  in STATUS.md's 2026-11-13 log). The run's closing sweep and spend line are now one call,
+  `ai_video.close_run(since)`.
+
+**Next:** the operator's go-ahead for push and merge, the `HF_API_KEY` repository secret and the
+live check (design 15 steps 2-3). Then stage 3b (the shots, the cut list, the wiring) with stage 4,
+and the relaunch (design section 14).
 
 ## 1. What the operator wants
 

@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3a (the Higgsfield client, the ledger, the sweep) built** on `feat/stage-3-ai-video`, not yet pushed; nothing is bought yet. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3a (the Higgsfield client, the ledger, the sweep) built and reviewed** on `feat/stage-3-ai-video`, not yet pushed; nothing is bought yet. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -141,7 +141,7 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
-### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (not pushed)
+### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (reviewed, not pushed)
 
 Stage 2 was merged as PR #19 (CI 963 pass). Stage 3a was built on `feat/stage-3-ai-video` from
 its plan, `docs/superpowers/plans/2026-11-13-stage-3a-higgsfield-client-and-ledger.md`. This is
@@ -174,6 +174,37 @@ the plumbing that touches money. No reel buys anything yet: stage 3b wires the s
   its "paste both" comment were removed from the local `.env`, with no value printed.
 - **docs/04** records Higgsfield and its licence basis (Terms §4.4: no claim on outputs, commercial
   use unrestricted; §5.5: disclose AI output, keep its provenance marks).
+
+**Final review** (a fresh reviewer over `42e1beb..24b8f20`): no critical finding, 6 important and 9
+minor; two minors re-graded important. All 7 are fixed test-first, in four commits:
+
+- **The key in an error** (I-1): the detail was cut to 300 characters before redaction, so a key
+  straddling the cut left a prefix of its secret half. It is now redacted, then cut.
+- **"Paid, not used"** (I-2): the closing sweep turned a late clip that had since finished into
+  `completed`, which reads as used. `ai_video.close_run` now reads the unused clips before the
+  sweep, then sends the line.
+- **An expired key** (I-3): a 403 marked `no-store` is a disabled or expired key (Higgsfield's
+  header docs), so it counts as `auth`, not "out of funds".
+- **An outage** (I-4): the sweep stopped only at a refused key; it now stops at the first failure of
+  Higgsfield itself (auth, funds, busy, unavailable), so an outage costs one timeout, not 30 s per
+  row twice a run. A row's own failure (404, a failed write) still leaves just that row (I-5's test).
+- **The live tool** (M-1): a failed second submit left the first job running and unrecorded; it is
+  now still cancelled or waited for, and its id is recorded first.
+- **A malformed key** (M-2): a key holding a space or control character is refused before any header
+  is built, since `requests` would quote it, escaped, where the redactor cannot find it.
+
+**Ruled out of 3a:** I-6 (a refusal after an ambiguous submit may follow a charged job) is a 3b rule:
+a row stays `reserved` at its quote after any ambiguous attempt. Whether a repeated key returns the
+same `request_id`, and whether a cancel is free, only the live check can answer.
+
+**Deferred minors:** an upload or download error carries 300 characters of the storage host's body
+(an S3 error names its access key id); a truthy but malformed `request_id` is stored and refused on
+every sweep; a `completed` status without `video.url` is settled with a null URL; a missing column
+reads as a missing table; no spend line when a run crashes (the next month total has it); authed
+calls follow redirects; `_FILE_TIMEOUT` is per read, not a total, so 3b's phase deadline cannot
+rely on it (carried to 3b).
+
+Suite after the fixes: **1028 passed, 5 skipped**.
 
 ### 2026-11-12 — The voice moves to Vertex now; the audit checked; the design rewritten
 
