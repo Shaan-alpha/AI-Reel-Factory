@@ -1141,8 +1141,8 @@ None blocks the build; each has the default stated.
 2. **Cut rhythm:** hard cuts on the narration's pauses, about every 2-3 seconds, inside the bought
    clips (default), or one cut per clip.
 3. **Measuring:** no action needed; the API is enabled and the token works (10.1).
-4. **The goal:** about 20 reels a month (default, the operator's own budget figure) instead of 4-5 a
-   day. CLAUDE.md changes at relaunch.
+4. ~~**The goal**~~ **Decided 2026-11-14 (operator):** about 20 reels a month, one channel until
+   its reach earns, then full power; no 4-5-a-day milestone now. CLAUDE.md says so.
 5. **The channel:** keep it (default). Its 87 Shorts were watched mostly outside India.
 6. **A one-off media lawyer's opinion** on a stock AI narrator as synthetic information, the
    news-publisher rules and the election silence period: recommended, not blocking.

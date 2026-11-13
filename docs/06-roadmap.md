@@ -33,8 +33,9 @@ budget figure).
 - **Exit:** 7 consecutive days of reliable auto-publishing with only approval taps. **Not met.**
   Gaps as of 2026-10-09:
   - **Cadence:** about 0.7 Shorts a day on average (about 81 public Shorts live), against 4–5.
-    The relaunch's goal is about 20 a month; this exit criterion still assumes the old daily goal
-    and is the operator's to restate.
+    **Set aside 2026-11-14 (operator):** no daily-volume milestone for now. One channel first,
+    until its reach earns (the YouTube Partner Program); then full power (4–5 a day and more
+    channels). The next milestone is reach, judged first on the relaunch's 20 reels (design 10.2).
   - **Trigger:** every run starts with `/makeshort` or a button press, then the taps; nothing
     publishes on its own. The exit criterion assumes a scheduled daily run and has not been
     restated for on-demand.

@@ -13,7 +13,8 @@ from the Telegram digest, up to 3 a run.
 
 - **Channel:** *But It Matters* — daily impact news/info explainers (India + world), truth-first: verdicts allowed when the facts carry them (rule 6).
 - **Primary goal:** Reliably ship **about 20 reels a month** (the operator's own budget figure,
-  design 18.4; it was 4–5 Shorts a day). **Consistency beats sophistication.**
+  design 18.4; it was 4–5 Shorts a day). **One channel first, until its reach earns; then full
+  power** (operator, 2026-11-14: no 4–5-a-day milestone now). **Consistency beats sophistication.**
 - **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2). The Anthropic API has its own, **separate ≤ $4/month** for Claude's scripts (operator, 2026-10-22), enforced in code. **Higgsfield** (the Kling clips) is operator-approved at up to **$1.10 a reel** with no cap in code (about $0.95 for an all-video reel at $0.1575 a clip, about $19 a month at 20 reels; the operator's stated budget is $60–80 a month).
 
 ## Onboarding (do this before working)
