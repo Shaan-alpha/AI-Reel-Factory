@@ -961,6 +961,17 @@ def _get_clips(req: ReelRequest, plan: list[dict], pictures: list[Picture], leng
     return clips, jobs
 
 
+def _covers(path: str, seconds: float) -> bool:
+    """Whether a file already made for this reel is long enough to stand in for a shot of
+    `seconds`. Only its length matters: it passed its own check when it was made, and the clip
+    check's 4.5 s floor is for bought clips, not for a still's Ken Burns clip, which is its
+    shot plus 0.1 s (review 4a I-3)."""
+    try:
+        return assembly.probe_duration(path) + 1e-3 >= seconds
+    except Exception:  # noqa: BLE001 — a file that cannot be read covers nothing
+        return False
+
+
 def _files(req: ReelRequest, pictures: list[Picture], lengths: list[float],
            clips: dict[int, str]) -> tuple[list[str], list[str]]:
     """Each shot's file: its clip, else a Ken Burns clip over its still (rendered in parallel,
@@ -992,7 +1003,7 @@ def _files(req: ReelRequest, pictures: list[Picture], lengths: list[float],
             files.append(own[i])
             continue
         nearest = sorted((j for j in own if j != i), key=lambda j: (abs(j - i), j > i))
-        cover = next((own[j] for j in nearest if _check_clip(own[j], lengths[i])), None)
+        cover = next((own[j] for j in nearest if _covers(own[j], lengths[i])), None)
         if cover is None:
             raise NoShots(f"shot {i}'s still did not render and no other shot covers it")
         log.warning("ai_video: shot %d shows another shot's file", i)

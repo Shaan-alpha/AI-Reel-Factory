@@ -1129,6 +1129,29 @@ def test_a_still_that_will_not_render_borrows_a_clip(monkeypatch, tmp_path, fres
     assert shots.video == 5 and shots.spend_usd == pytest.approx(5 * PRICE)
 
 
+def test_a_short_still_clip_covers_a_shorter_shot(monkeypatch, tmp_path):
+    """Review 4a I-3: a still's Ken Burns clip is its shot plus 0.1 s, often under 4.5 s. As
+    cover for a shorter shot only its length matters; the 4.5 s floor is for bought clips."""
+    lengths = [3.0, 4.3, 3.2]
+
+    def still_clip(picture, dest, seconds, index):
+        if index == 0:
+            raise RuntimeError("ken burns failed (1)")
+        with open(dest, "wb") as f:
+            f.write(b"mp4")
+        return dest
+
+    real = {f"shot_{i:02d}.mp4": lengths[i] + 0.1 for i in range(3)}
+    monkeypatch.setattr(ai_video, "_still_clip", still_clip)
+    monkeypatch.setattr(assembly, "probe_duration", lambda path: real[os.path.basename(path)])
+    monkeypatch.setattr(gates, "_probe",
+                        lambda path: gates.Media(real[os.path.basename(path)], True, False))
+    monkeypatch.setattr(gates, "_stretches", lambda *a, **k: ([], []))
+    pictures = [ai_video.Picture(str(tmp_path / f"still_{i:02d}.jpg"), False) for i in range(3)]
+    files, kinds = ai_video._files(_req(work_dir=str(tmp_path)), pictures, lengths, {})
+    assert os.path.basename(files[0]) == "shot_01.mp4" and kinds == ["still"] * 3
+
+
 def test_no_shots_carries_the_reels_spend(monkeypatch, tmp_path, fresh_run):
     """When nothing at all can be shown, the reel's spend and problems still reach production."""
     _ready(monkeypatch, tmp_path)
