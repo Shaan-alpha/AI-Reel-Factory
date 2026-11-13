@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); **stage 4b (the text on screen and the sound) built** on `feat/stage-4b-text-sound`, not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); **stage 4b (the text on screen and the sound) merged** (PR #24, 2026-11-14, CI 1213 pass). Every build stage is merged; next is the relaunch, on `feat/relaunch-prep`. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -69,9 +69,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   merged** (PR #21), behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13 log). The test renders
   are done and their fixes merged (PR #22). Stage 4 comes in two plans: **4a, the picture gates,
   is merged** (PR #23; see the 2026-11-13 log); **4b** (the key-number card, the banner hold, the
-  source line and logo, the music level, the vignette and the stings) **is built** on
-  `feat/stage-4b-text-sound` (see the 2026-11-14 log); next is its final review, then the
-  relaunch's steps (design 14-15). State and decisions are in
+  source line and logo, the music level, the vignette and the stings) **is merged** (PR #24;
+  see the 2026-11-14 log). Next is the relaunch (design 14-15): `FORMAT_VERSION` 2 and the
+  design's docs pass, then, with the operator's go-ahead, the repository variables and one real
+  reel end to end. State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ~~**Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4~~ Done 2026-11-13 at the
   operator's request, through the Supabase CLI (`supabase db query --linked`): every table and
@@ -145,7 +146,7 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
-### 2026-11-14 — Stage 4b: the text on screen and the sound (built on `feat/stage-4b-text-sound`)
+### 2026-11-14 — Stage 4b: the text on screen and the sound (merged as PR #24)
 
 Plan `docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`, 5 tasks, test-first, built
 inline. Design Part F's remaining items:
@@ -221,7 +222,8 @@ lettering list entirely; no test for a number said inside the first sentence or 
 first-sentence end on the ASR fallback.
 
 Suite: **1213 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
-Next: the push with the operator's go-ahead, then the relaunch.
+**Merged as PR #24** (merge b3f8aa1, 2026-11-14) with the operator's go-ahead; CI 1213 passed.
+Next: the relaunch.
 
 ### 2026-11-13 — Stage 4a: the picture gates (merged as PR #23 on 2026-11-14)
 

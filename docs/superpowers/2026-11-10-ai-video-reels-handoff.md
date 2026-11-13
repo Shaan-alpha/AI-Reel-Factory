@@ -150,8 +150,9 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   its unit or sign, breaks long numbers into rows; the fact-check sees what is on screen).
   Merging changes today's English reels at once; that was decided and recorded in STATUS.md.
 
-**Next:** stage 4b's push and PR with the operator's go-ahead. Then the relaunch (design
-sections 14-15): `FORMAT_VERSION` to 2 (the judging rule counts version 2), the repository
+- **Stage 4b is merged** (PR #24, 2026-11-14; CI 1213 pass). Every build stage is merged.
+
+**Next:** the relaunch (design sections 14-15) on `feat/relaunch-prep`: `FORMAT_VERSION` to 2 (the judging rule counts version 2), the repository
 variables, one real reel end to end, `WINNERS_SINCE`; the rule's Telegram verdict is not built.
 
 ## 1. What the operator wants
