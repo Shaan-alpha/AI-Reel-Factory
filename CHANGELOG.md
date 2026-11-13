@@ -5,7 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 [Semantic Versioning](https://semver.org/). Phase milestones are tagged
 (`v0.1.0` = Phase-1 MVP done).
 
-## [Unreleased] — The sound, a retiring model, and a full audit (2026-09-27)
+## [Unreleased]
+
+## [0.19.0] - 2026-11-14 — The AI-video format, built (and the September audit)
+
+Everything since v0.18.0. The September audit (the sound, a retiring model, the gate), the
+October fixes, Claude as the scriptwriter (2026-10-22), and the new format, built in stages 0-4
+(2026-11-10 → 11-14, PRs #17-#24): AI-video shots (Kling 2.5 Turbo through Higgsfield), Hinglish
+narration with English subtitles, stories chosen for Indian viewers, a plain explainer script,
+automatic checks on every still, clip and reel, and the text on screen and the sound. The new
+format switches on with the relaunch's repository variables (docs/03 §9). **1213 pass,
+5 skipped.**
+
+### Changed (2026-11-14: the relaunch's preparation; details: STATUS.md)
+- Reels are stamped **format version 2** (`production.FORMAT_VERSION`): the judging rule (design
+  10.2) counts version-2 posts narrated in Hinglish with mostly video shots.
+- **The docs describe the new format** (design 16): CLAUDE.md (the goal of about 20 reels a
+  month, the cost target, rules 2, 11 and 13), README, docs/01-08, the template and the routine;
+  docs/03 gains Higgsfield (§6e) and the relaunch's variables.
+
+### The September audit: the sound, a retiring model (2026-09-27)
 
 A full audit, prompted by "the sound is very different from before". It was: on 2026-09-01 an
 empty-env fix switched on a style prompt and SFX stings that had never run in production, three

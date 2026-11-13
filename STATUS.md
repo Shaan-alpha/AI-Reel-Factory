@@ -5,7 +5,8 @@
 > Newest entry at the top of the log.
 
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
-**Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
+**Version:** 0.19.0 (2026-11-14, the AI-video format built; tagged when `feat/relaunch-prep` is
+merged, with the operator's go-ahead). Before it, 0.18.0 (2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
 **In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); **stage 4b (the text on screen and the sound) merged** (PR #24, 2026-11-14, CI 1213 pass). Every build stage is merged; next is the relaunch, on `feat/relaunch-prep`. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
@@ -145,6 +146,29 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 ---
 
 ## Log
+
+### 2026-11-14 — The relaunch's preparation (on `feat/relaunch-prep`)
+
+Stage 4b was **merged as PR #24** (merge b3f8aa1; CI 1213 pass). Every build stage is merged.
+Before the relaunch's switches (design 14-15):
+- **format version 2:** `production.FORMAT_VERSION` was still 1, while the judging rule (design
+  10.2) counts posts stamped version 2, so it would have counted nothing. Every reel is stamped 2
+  from this merge; the rule's Hinglish and video-share filters keep English reels out;
+- **the docs pass** (design 16): CLAUDE.md (the goal of about 20 reels a month, design 18.4's
+  default and the operator's own figure; the cost target with Higgsfield; rule 2's Higgsfield
+  text; rules 11 and 13), README, docs/01-08 (docs/03 gains a Higgsfield section and the
+  relaunch's variables; docs/08 the AI-shot and India rules), the template and the routine;
+- **design 15, step 5, corrected:** `GOOGLE_TTS_VOICE` is the English fallback
+  (`en-IN-Chirp3-HD-Charon`); the Hindi voice is `GOOGLE_TTS_VOICE_HI`'s default, as section 12
+  and the code say;
+- **v0.19.0** in the changelog, to be tagged at the merge.
+
+**The relaunch, each step waiting for the operator** (docs/03 §9): the repository variables
+`NARRATION_LANGUAGE=hinglish`, `VISUAL_SOURCE=ai_video`, `GEMINI_TTS_VOICE=Charon`,
+`GOOGLE_TTS_VOICE=en-IN-Chirp3-HD-Charon` and `WINNERS_SINCE`; then one real reel end to end,
+watched (public; about $1 of Higgsfield). Optional (design 15, step 6): YouTube Studio's automatic
+dubbing set to "Publish manually" for the first 20 reels. Not built yet, and not needed until
+the twentieth new reel is 72 hours old: the judging rule's Telegram verdict.
 
 ### 2026-11-14 — Stage 4b: the text on screen and the sound (merged as PR #24)
 

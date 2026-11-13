@@ -152,8 +152,14 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 
 - **Stage 4b is merged** (PR #24, 2026-11-14; CI 1213 pass). Every build stage is merged.
 
-**Next:** the relaunch (design sections 14-15) on `feat/relaunch-prep`: `FORMAT_VERSION` to 2 (the judging rule counts version 2), the repository
-variables, one real reel end to end, `WINNERS_SINCE`; the rule's Telegram verdict is not built.
+- **The relaunch's preparation is done** on `feat/relaunch-prep` (2026-11-14): format version 2,
+  the docs pass (design 16), design 15's voice variable corrected, v0.19.0 in the changelog.
+
+**Next:** the relaunch (design sections 14-15), each step with the operator's go-ahead: the
+push of `feat/relaunch-prep` and the v0.19.0 tag; the repository variables (docs/03 §9:
+`NARRATION_LANGUAGE=hinglish`, `VISUAL_SOURCE=ai_video`, `GEMINI_TTS_VOICE=Charon`,
+`GOOGLE_TTS_VOICE=en-IN-Chirp3-HD-Charon`, `WINNERS_SINCE`); one real reel end to end, watched.
+The judging rule's Telegram verdict is not built (needed once 20 new reels are 72 hours old).
 
 ## 1. What the operator wants
 
@@ -488,8 +494,7 @@ None of these blocks the rewrite; each has a default the design can state.
 - A fallback for every new dependency: a Higgsfield or Hinglish failure must cost a shot or the
   language of one reel, never the reel.
 - No spend cap in code.
-- The local `.env` has an empty `HF_API_SECRET` line and a comment saying "paste both". Both
-  are wrong now (the console issues one combined key): tidy them at build time without
-  printing any value. `.env.example` has no Higgsfield entry yet.
+- ~~The local `.env` has an empty `HF_API_SECRET` line~~ Tidied in stage 3a; `.env.example`
+  documents `HF_API_KEY` and every `AI_VIDEO_*` setting.
 - The operator approves ideas, not finished reels, and declined to do manual checks in YouTube
   Studio. Anything that needs a human look has to be made automatic or dropped.
