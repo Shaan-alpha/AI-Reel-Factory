@@ -299,6 +299,28 @@ alter table scripts add column if not exists grounding jsonb;  -- citations: dra
 
 -- 2026-11-12, Hinglish narration (AI-video design, stage 2; safe to run twice).
 alter table scripts add column if not exists spoken jsonb;     -- language, and each line's en/hi/said
+
+-- 2026-11-13, the Higgsfield ledger (AI-video design, stage 3; safe to run twice). One row per
+-- Kling job, reserved before it is bought. Until this table exists nothing is bought from
+-- Higgsfield: reels use stills, and each run says so once.
+create table if not exists ai_video_jobs (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  idea_id bigint not null references ideas (id),
+  shot int not null,                        -- position in the reel, from 0
+  endpoint text not null,
+  idempotency_key text not null unique,
+  request_id text unique,                   -- null until a submit is answered
+  status text not null,                     -- reserved | submitted | completed | failed | nsfw
+                                            -- | canceled | late | refused
+  cost_usd numeric(10, 4) not null,         -- the quote; 0 once known not to be charged
+  seconds numeric(8, 1),                    -- submit to finished
+  result_url text,                          -- valid for 7 days
+  settled_at timestamptz
+);
+create index if not exists ai_video_jobs_idea on ai_video_jobs (idea_id, shot);
+create index if not exists ai_video_jobs_open on ai_video_jobs (status, created_at);
+alter table ai_video_jobs enable row level security;
 ```
 
 ---
