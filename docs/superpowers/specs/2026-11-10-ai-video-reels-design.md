@@ -330,7 +330,9 @@ query, used only if this shot falls back to a Pexels photo.
   then light (source, direction, softness).
 - One main subject, **large and centred, filling the middle half of a vertical frame**, brightly
   and evenly lit; a named shot size and angle. The top fifth and the lower third are simple and
-  calm, because the banner and subtitles sit there.
+  calm, because the banner and subtitles sit there. The planner is not told that reason: told it,
+  it wrote "room for the title and subtitles" into its stills (stage 4b's render), and the image
+  model draws what it reads. It is told never to name text, even to exclude it.
 - Describe the wanted state, not negatives ("all surfaces are plain and unmarked"), and avoid
   nouns that invite lettering or a screen (sign, poster, headline, screen, laptop, phone,
   computer, television, keyboard, newspaper, book, chart, label, banner, document).
@@ -897,6 +899,11 @@ them 30.2%, and the finished test reels carried 26-27%. Other sources stay at 30
 - **One key number a reel:** the writer names the script's key number; code checks that the exact
   figure is in the English script; it appears large in the upper middle, with a short scale-in, for
   the part of the narration that says it. The key-point text cards are off for the new format.
+- **As built (stage 4b):** the safe box is Google's vertical overlay (x 48-888, y 288-1248). The
+  subtitles' margins are 48/192/672; the banner is top-centred at y 300; the source line sits
+  under the banner's real rows; the number is 150 px, top-anchored at y 760, scaling in from 70%
+  over 0.18 s, shown 1.5-2.5 s from the moment it is said (the English burn finds it in its
+  aligned words, the Hinglish burn in its English blocks); the logo is 96 px tall.
 
 ### 11.6 Automatic gates
 

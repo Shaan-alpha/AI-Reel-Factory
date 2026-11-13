@@ -132,7 +132,7 @@ def still_problems(path: str) -> list[str]:
     w, h = gray.size
     middle = ImageStat.Stat(gray.crop((w // 4, h // 4, w - w // 4, h - h // 4))).mean[0]
     if middle < DARK_BELOW:
-        problems.append(f"dark: {middle:.0f} < {DARK_BELOW}")
+        problems.append(f"dark: {middle:.1f} < {DARK_BELOW}")
     band = max(1, h // 16)
     edges = [ImageStat.Stat(gray.crop(box)) for box in ((0, 0, w, band), (0, h - band, w, h))]
     if all(s.mean[0] < BAR_MEAN and s.stddev[0] < BAR_STDDEV for s in edges):

@@ -745,6 +745,42 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
     assert saved == ["FIXED BODY"] and voiced == ["FIXED BODY"]
 
 
+def test_a_repair_rechecks_the_key_number(monkeypatch, tmp_path):
+    """Review Focus 3: a repair that rewrites the number away drops the card."""
+    _wire_happy(monkeypatch)
+    _verdicts(monkeypatch, _BLOCK, _OK)
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
+        **SCRIPT, "script_body": "It took 286 days. " * 5, "key_number": "286 days"})
+    monkeypatch.setattr(production.scriptwriter, "repair_script",
+                        lambda body, f, topic=None, title=None, **_: {
+                            "script_body": "It took 290 days. " * 5, "title": title})
+    seen = {}
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: seen.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["key_number"] == ""
+
+
+def test_the_key_number_reaches_both_burns(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "key_number": "286 days"})
+    english = {}
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: english.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert english["key_number"] == "286 days"
+
+    hinglish = {}
+    _hinglish_wiring(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "key_number": "286 days"})
+    monkeypatch.setattr(production.subtitles, "burn_hinglish",
+                        lambda v, a, o, lines, **k: hinglish.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert hinglish["key_number"] == "286 days"
+
+
 def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _BLOCK)
@@ -1103,6 +1139,7 @@ def test_the_recheck_sees_the_repaired_description_and_cards(monkeypatch, tmp_pa
     """Design 9.6: the re-check uses the repaired description too. The description's first line
     restates the claim, so a false main claim left there blocked the re-check every time."""
     _wire_happy(monkeypatch)
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # cards are checked only when shown
     caption = ("Old line.\n\nSources:\nexample.org: https://example.org/a\n\n"
                "AI-generated narration, images and music.")
     monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
@@ -1486,3 +1523,23 @@ def test_no_shots_still_reports_its_spend(monkeypatch, tmp_path):
     assert report["spend_usd"] == pytest.approx(0.4725) and "$0.47" in report["ai_video"]
     assert "🎞️ a problem" in seen["notes"]
     assert seen["attempt"]["spend_usd"] == pytest.approx(0.4725)
+
+
+
+def test_the_fact_check_sees_what_is_on_screen(monkeypatch, tmp_path):
+    """Review 4b: the key-point cards are off, so the gate checks the key number that is shown,
+    not cards that are not (a finding on a hidden card could block a reel)."""
+    _wire_happy(monkeypatch)
+    monkeypatch.delenv("ENABLE_TEXT_CARDS", raising=False)
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
+        **SCRIPT, "key_points": ["A hidden card"], "key_number": "286 days"})
+    seen = []
+    monkeypatch.setattr(production.factcheck, "verify",
+                        lambda body, sources=None, title="", on_screen=None: seen.append(
+                            on_screen) or {"ok": True, "unsupported": [], "checked": 1,
+                                           "reason": "pass"})
+    production.produce_one(IDEA, str(tmp_path))
+    assert "286 days" in seen[0] and "A hidden card" not in seen[0]
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")
+    production.produce_one(IDEA, str(tmp_path))
+    assert "A hidden card" in seen[1]

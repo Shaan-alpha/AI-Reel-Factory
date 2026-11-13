@@ -1245,3 +1245,75 @@ def test_caption_for_rebuilds_sources_and_disclosure(monkeypatch):
     out = scriptwriter.caption_for("Line one.\nLine two.", ["https://www.thehindu.com/a"])
     assert out == ("Line one.\nLine two.\n\nSources:\nThe Hindu: https://www.thehindu.com/a"
                    "\n\n" + scriptwriter.DISCLOSURE_LINE_AI)
+
+
+# --- Stage 4b: the key number (design 11.5) -----------------------------------------------------
+
+BODY_N = ("Sunita Williams spent 286 days in orbit, and India's crew flight costs Rs 2,000 crore. "
+          "Here's why it matters: 1286 rockets later, the cost has fallen 40%.")
+
+
+def test_the_key_number_is_kept_when_copied_exactly():
+    assert scriptwriter.checked_key_number("286 days", BODY_N) == "286 days"
+    assert scriptwriter.checked_key_number(" 286 Days. ", BODY_N) == "286 Days"
+    assert scriptwriter.checked_key_number("Rs 2,000 crore", BODY_N) == "Rs 2,000 crore"
+    assert scriptwriter.checked_key_number("40%", BODY_N) == "40%"
+
+
+def test_a_key_number_not_in_the_narration_is_dropped():
+    """Review Focus 3: a wrong number is never shown; no card is."""
+    assert scriptwriter.checked_key_number("300 days", BODY_N) == ""
+    assert scriptwriter.checked_key_number(None, BODY_N) == ""
+    assert scriptwriter.checked_key_number("286 days", "") == ""
+
+
+def test_a_key_number_without_a_digit_is_dropped():
+    assert scriptwriter.checked_key_number("a record", "It set a record.") == ""
+
+
+def test_a_digit_inside_a_longer_number_does_not_count():
+    """Review Focus 2: "2" inside "2,000", or "286" inside "1286", is not the number said."""
+    assert scriptwriter.checked_key_number("2", BODY_N) == ""
+    assert scriptwriter.checked_key_number("000 crore", BODY_N) == ""
+    assert scriptwriter.checked_key_number("286", "1286 rockets") == ""
+    assert scriptwriter.checked_key_number("1286", BODY_N) == "1286"
+
+
+def test_a_key_number_too_long_for_the_card_is_dropped():
+    value = "286 days in low Earth orbit"
+    assert scriptwriter.checked_key_number(value, value + ".") == ""
+
+
+def test_the_writer_is_asked_for_the_key_number():
+    assert '"key_number"' in scriptwriter._PROMPT_N
+
+
+def test_write_script_returns_the_checked_key_number(monkeypatch):
+    body = "Sunita Williams spent 286 days in orbit. " * 3
+
+    def reply(key_number):
+        return json.dumps({"title": "T", "script_body": body,
+                           "caption": "cap https://example.com/isro https://example.org/space",
+                           "hashtags": ["#Shorts"], "key_number": key_number})
+
+    _patch(monkeypatch, reply("286 days"))
+    assert scriptwriter.write_script(IDEA)["key_number"] == "286 days"
+    _patch(monkeypatch, reply("300 days"))
+    assert scriptwriter.write_script(IDEA)["key_number"] == ""
+
+
+
+def test_a_key_number_without_its_unit_or_sign_is_dropped():
+    """Review 4b I-2: the card must show the figure as said, its unit and sign included: "2,000"
+    for "Rs 2,000 crore" would be off by ten million."""
+    assert scriptwriter.checked_key_number("40", "Only 40% of voters turned out.") == ""
+    assert scriptwriter.checked_key_number("5", "A $5 billion deal.") == ""
+    assert scriptwriter.checked_key_number("2,000", "It costs Rs 2,000 crore.") == ""
+    assert scriptwriter.checked_key_number("2,000 crore", "It costs Rs 2,000 crore.") == ""
+    assert scriptwriter.checked_key_number("1.4", "India has 1.4 billion people.") == ""
+    assert scriptwriter.checked_key_number("5%", "Prices fell \u22125% this week.") == ""
+    assert scriptwriter.checked_key_number("5%", "A 3-5% drop is expected.") == ""
+    assert scriptwriter.checked_key_number("40", "Across 40 districts, only 40% voted.") == ""
+    assert (scriptwriter.checked_key_number("Rs 2,000 crore", "It costs Rs 2,000 crore.")
+            == "Rs 2,000 crore")
+    assert scriptwriter.checked_key_number("40 percent", "Only 40 percent voted.") == "40 percent"

@@ -103,6 +103,9 @@ remembered URL is usually a dead one), and no question to the viewer.
 spellings allowed). No '#'.
 - "key_points": 2-3 very short on-screen text cards (4 words or fewer each), the plainest facts or \
 numbers.
+- "key_number": the one number that carries the story (a count, an amount, a percentage, a date \
+or a year), copied exactly as it is written in script_body, with its unit when the unit is \
+written next to it ("286 days", "40%"); an empty string when the story has none.
 - "payoff": the "why it matters" sentence, copied exactly from script_body.
 - "optional": the sentences that could be cut without losing the story (never sentence one or \
 the payoff), each copied exactly from script_body; an empty list when there are none.
@@ -111,7 +114,7 @@ the payoff), each copied exactly from script_body; an empty list when there are 
 Return ONLY a JSON object, no markdown fences. Write every line break inside a string as the \
 two-character escape \\n — a raw newline inside a JSON string is invalid JSON. Inside a string, \
 put any quoted word in SINGLE quotes ('like this'): a raw double quote ends the string.
-{{"title": "the title", "script_body": "the spoken narration", "caption": "line one\\nline two", "hashtags": ["#subject"], "tags": ["a name", "another spelling"], "key_points": ["card", "card"], "payoff": "the why-it-matters sentence", "optional": ["a sentence that could go"], "structure": "what-happened"}}
+{{"title": "the title", "script_body": "the spoken narration", "caption": "line one\\nline two", "hashtags": ["#subject"], "tags": ["a name", "another spelling"], "key_points": ["card", "card"], "key_number": "the number", "payoff": "the why-it-matters sentence", "optional": ["a sentence that could go"], "structure": "what-happened"}}
 """
 
 
@@ -1242,6 +1245,31 @@ def _opens_with_a_hook(body: str) -> bool:
     return opening_problem(body) is None
 
 
+_KEY_NUMBER_MAX = 20  # characters: the number card is large (design 11.5)
+# A unit or sign the narration puts next to the figure: a card without it shows another number
+# ("2,000" for "Rs 2,000 crore" is off by ten million; review 4b I-2).
+_UNIT_AFTER = re.compile(r"^\s*(?:%|per\s*cent\b|percent\b|crore\b|lakh\b|thousand\b|"
+                         r"million\b|billion\b|trillion\b|bn\b|mn\b|cr\b)", re.IGNORECASE)
+_SIGN_BEFORE = re.compile(r"(?:[\u20b9$\u20ac\u00a3\u00a5\u2212\u2013\-]|\b(?:rs|inr|usd)\.?)\s*$",
+                          re.IGNORECASE)
+
+
+def checked_key_number(value, body: str) -> str:
+    """The writer's key number when it is copied exactly from the narration (design 11.5): it
+    has a digit, it fits the card, and it occurs in `body` as a whole phrase, never inside a
+    longer number ("2" in "2,000", "286" in "1286"). Otherwise "", and no number card shows: a
+    wrong number on screen is worse than none."""
+    number = re.sub(r"[\s.,;:!?]+$", "", str(value or "").strip())
+    if not (number and body) or not re.search(r"\d", number) or len(number) > _KEY_NUMBER_MAX:
+        return ""
+    whole = r"(?<!\w)(?<!\d[.,])" + re.escape(number) + r"(?!\w)(?![.,]\d)"
+    hits = list(re.finditer(whole, body, re.IGNORECASE))
+    if not hits or any(_UNIT_AFTER.match(body[m.end():]) or _SIGN_BEFORE.search(body[:m.start()])
+                       for m in hits):
+        return ""
+    return number
+
+
 def write_script(idea: dict, template: str = "N") -> dict:
     """Generate {script_body, caption, hashtags[]} for an approved idea and persist it.
 
@@ -1354,4 +1382,4 @@ def write_script(idea: dict, template: str = "N") -> dict:
             "tone": tone_for(idea, body), "writer": data.get("writer"),
             "claude_issue": data.get("claude_issue"), "structure": structure,
             "grounding": data.get("grounding") or {"draft_citations": None},
-            "payoff": payoff_now}
+            "payoff": payoff_now, "key_number": checked_key_number(data.get("key_number"), body)}

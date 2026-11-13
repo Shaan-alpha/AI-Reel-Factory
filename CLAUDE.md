@@ -176,7 +176,7 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 - **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
   Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
   runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day against the 4–5
-  goal. Every module in [src/](src/) is implemented and tested (1171 pass, 5 skipped, 2026-11-13). Since 2026-10-22 Claude
+  goal. Every module in [src/](src/) is implemented and tested (1213 pass, 5 skipped, 2026-11-14). Since 2026-10-22 Claude
   (Anthropic API, $4/month cap of its own) writes each script from Gemini's grounded draft.
 - **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
   workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
@@ -194,8 +194,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
 - **In progress since 2026-11-10: stages 0, 1, 2 (Hinglish, behind `NARRATION_LANGUAGE`) and 3
   (AI-video shots, behind `VISUAL_SOURCE=ai_video`) merged (PRs #17-#21), with the test
-  renders' fixes (PR #22); stage 4a (the picture gates, `src/gates.py`) built on
-  `feat/stage-4-picture-sound`.** The operator chose a new
+  renders' fixes (PR #22) and stage 4a (the picture gates, `src/gates.py`, PR #23); stage 4b
+  (the text on screen and the sound) built on `feat/stage-4b-text-sound`.** The operator chose a new
   format: AI-video
   shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
   for Indian viewers. Higgsfield is approved by the operator as a billed service for this

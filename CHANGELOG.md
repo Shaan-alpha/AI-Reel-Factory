@@ -13,6 +13,29 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Changed (2026-11-14: stage 4b, the text on screen and the sound; details: STATUS.md)
+- **The sound:** no cut stings, and the music bed 4 LU under the voice (was 11).
+- **The look:** no vignette; the key-point cards are off, replaced by one key number.
+- **The banner** holds until the first sentence ends (1.8-4.0 s); **the source line** shows with
+  the first sentence, under the banner (it sat at y 1480, under the Shorts interface).
+- **The subtitles** sit inside the Shorts safe box; the logo is 96 px tall (was 150).
+- **One key number:** the writer names it, code keeps it only when copied exactly from the
+  narration, and it shows large in the upper middle, scaling in, while it is said.
+- `tools/try_ai_video.py --key-number`.
+
+- **After the final review:** the number card matches the figure as written ("40%" never shows
+  at "40 districts"), refuses a number without its unit or sign ("2,000" for "Rs 2,000 crore"),
+  breaks a long number into rows before it scales in, and leaves short units' case alone; the
+  fact-check sees the key number and no hidden cards.
+- **Today's English reels change at once** with these defaults (no vignette, stings or cards, the
+  bed 7 LU up, the banner hold, the source line and karaoke in the safe area, the key number).
+
+### Fixed (2026-11-14: found by stage 4b's render)
+- The shot planner was told that "a title and subtitles sit there" and wrote it into its
+  stills, so the lettering check refused nearly every plan, and the image model may draw what it
+  reads. It is now told never to name text, even to exclude it; "display" left the word list.
+- The still check's darkness message shows the measured value, not a rounded "60 < 60".
+
 ### Added (2026-11-13: stage 4a, the picture gates; details: STATUS.md)
 - **A still check** (`gates.still_problems`, new module `src/gates.py`): Tesseract reads each
   FLUX still as drawn and as a grayscale 2x copy; a word of 3+ letters at confidence 70+, a

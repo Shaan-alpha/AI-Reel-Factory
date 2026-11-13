@@ -135,10 +135,24 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   and frozen stretches refuse only an AI-video reel; a failing Tesseract warns; a still's clip
   covers a shorter shot again). Deferred minors are in STATUS.md's 2026-11-13 log.
 
-**Next:** stage 4a's push and PR with the operator's go-ahead; then
-**stage 4b** on the same branch or a new one (the key-number card, the banner hold, the source
-line and the logo, the subtitles' safe zone, the music level 4 LU, the vignette and the stings
-off, the key-point cards off). Then the relaunch (design section 14).
+- **Stage 4a is merged** (PR #23, 2026-11-14; CI 1171 pass, Tesseract and FFmpeg proven on
+  Ubuntu).
+
+- **Stage 4b is built** on `feat/stage-4b-text-sound` (5 tasks; plan
+  `docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`; not yet pushed): no stings, the
+  bed 4 LU under the voice, no vignette, no key-point cards; the banner held for the first
+  sentence (1.8-4.0 s), the source line with it under the banner, subtitles in the safe box, a
+  96 px logo; one key number from the writer, shown when said. Its render (script 441, $0 of
+  clips) also fixed the planner echoing "title and subtitles" into its stills.
+
+- **Stage 4b's final review is done** (4 important findings and 2 re-graded minors fixed
+  test-first, 1213 pass: the number card matches the figure as written, refuses a number without
+  its unit or sign, breaks long numbers into rows; the fact-check sees what is on screen).
+  Merging changes today's English reels at once; that was decided and recorded in STATUS.md.
+
+**Next:** stage 4b's push and PR with the operator's go-ahead. Then the relaunch (design
+sections 14-15): `FORMAT_VERSION` to 2 (the judging rule counts version 2), the repository
+variables, one real reel end to end, `WINNERS_SINCE`; the rule's Telegram verdict is not built.
 
 ## 1. What the operator wants
 

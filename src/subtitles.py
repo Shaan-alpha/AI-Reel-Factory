@@ -29,6 +29,7 @@ from collections import Counter
 from functools import lru_cache
 
 from src import config
+from src.text import split_sentences
 from src.assembly import BT709_TAGS, RENDER_TIMEOUT_SECONDS, _ffmpeg, x264_args
 from src.text import ends_clause
 
@@ -136,6 +137,24 @@ def _norm(token: str) -> str:
     return re.sub(r"[^a-z0-9]", "", token.lower())
 
 
+def _script_tokens(script_text: str | None) -> list[str]:
+    """The script's spoken words, as the captions show them: delivery tags removed, and split on
+    dashes too ('drama—it' is two spoken words and needs two karaoke timings)."""
+    text = re.sub(r"\s*[—–]\s*", " ", _DELIVERY_TAG.sub(" ", script_text or ""))
+    return [t for t in text.split() if _norm(t)]
+
+
+def _first_sentence_end(words: list[tuple[float, float, str]],
+                        script_text: str | None) -> float | None:
+    """When the narration's first sentence ends: the aligned word that ends it, counted in the
+    captions' own tokens. None without words or a script."""
+    if not words or not script_text:
+        return None
+    sentences = split_sentences(_DELIVERY_TAG.sub(" ", script_text))
+    n = len(_script_tokens(sentences[0])) if sentences else 0
+    return words[min(n, len(words)) - 1][1] if n else None
+
+
 def _align_to_script(words: list[tuple[float, float, str]],
                      script_text: str | None) -> list[tuple[float, float, str]]:
     """Caption the SCRIPT's words at whisper's timings.
@@ -152,9 +171,7 @@ def _align_to_script(words: list[tuple[float, float, str]],
     dropped. If the two barely agree, the script is not what was spoken, so the ASR words are
     returned untouched.
     """
-    # Split on dashes too: 'drama—it' is two spoken words and needs two karaoke timings.
-    text = re.sub(r"\s*[—–]\s*", " ", _DELIVERY_TAG.sub(" ", script_text or ""))
-    spoken = [t for t in text.split() if _norm(t)]
+    spoken = _script_tokens(script_text)
     if not words or not spoken:
         return words
     heard = [_norm(w[2]) for w in words]
@@ -331,7 +348,7 @@ def _caption_groups(words: list[tuple[float, float, str]],
 # The longest pause a caption is held across (seconds).
 _HOLD_GAP = 0.6
 # English subtitles on Hinglish reels (design 7.7): plain white, smaller than the karaoke, at the
-# karaoke's height, clear of the action rail and of the Source line below them.
+# karaoke's height, inside the Shorts safe box (x 48-888, bottom at y 1248), clear of the rail.
 _SUB_PX = 86
 
 
@@ -375,11 +392,12 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,90,150,640,1
+Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,48,192,672,1
 Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
 Style: Card,{font},90,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,5,40,40,0,1
-Style: Source,{font},46,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,40,40,440,1
-Style: Sub,{font},{_SUB_PX},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,2,90,150,640,1
+Style: Source,{font},46,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,8,60,60,300,1
+Style: Sub,{font},{_SUB_PX},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,2,48,192,672,1
+Style: Number,{font},150,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,760,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -425,6 +443,11 @@ def _card_events(key_points: list[str], total_dur: float, start_after: float,
     return out
 
 
+def text_cards_enabled() -> bool:
+    """The key-point cards: off since stage 4b, when one key number replaced them."""
+    return config.get_bool("ENABLE_TEXT_CARDS", False)
+
+
 def _graphic_cards_enabled() -> bool:
     """PIL stat cards instead of ASS text cards. Default OFF: the ASS cards already ship and
     work, so this is a look change the operator opts into for a run and judges, not a silent
@@ -439,7 +462,7 @@ def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
     Shares `_card_events` with the ASS path so both treatments use ONE timing rule. Returns []
     when disabled or on any failure, and the caller then falls back to the ASS text cards —
     a card renderer breaking must never cost us the captions (rules 11, 14)."""
-    if not (key_points and config.get_bool("ENABLE_TEXT_CARDS", True) and _graphic_cards_enabled()):
+    if not (key_points and text_cards_enabled() and _graphic_cards_enabled()):
         return []
     try:
         from src import graphics
@@ -457,40 +480,140 @@ def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
         return []
 
 
+# The key-number card (design 11.5): a short scale-in, on screen for its spoken length plus half
+# a second, between 1.5 and 2.5 s.
+# Its rows are broken in code and libass's own wrapping is off (\\q2): wrapped by libass, a
+# long figure sat on one row at 70% and jumped to two at full size (review 4b I-3).
+_NUMBER_SCALE_IN = "{\\q2\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}"
+_NUMBER_MIN, _NUMBER_TAIL, _NUMBER_MAX = 1.5, 0.5, 2.5
+_NUMBER_ROW = 12  # characters a row at 150 px, inside the safe box
+
+
+def _token_run(wanted: list[str], tokens: list[str]) -> int | None:
+    """Where the run `wanted` first starts in `tokens` (both normalized), or None."""
+    n = len(wanted)
+    if not n:
+        return None
+    return next((i for i in range(len(tokens) - n + 1) if tokens[i:i + n] == wanted), None)
+
+
+def _number_form(token: str) -> str:
+    """A token as a figure is compared: lowercase, sentence punctuation and quotes trimmed from
+    its ends, and nothing else, so "40%" is not "40" and "1.4" is not "14" (review 4b I-1)."""
+    return token.strip(".,;:!?\"'()[]{}\u201c\u201d\u2018\u2019\u2026").lower()
+
+
+def _number_tokens(key_number: str | None) -> list[str]:
+    """The key number as figure tokens: "Rs 2,000 crore" -> rs 2,000 crore."""
+    return [_number_form(t) for t in _script_tokens(key_number)]
+
+
+def _number_moment_words(key_number: str | None,
+                         words: list[tuple[float, float, str]]) -> tuple[float, float] | None:
+    """When the narration says the key number: the first run of aligned words that spell it,
+    whole tokens only, so "2" never matches inside "2,000". None when it is not said."""
+    wanted = _number_tokens(key_number)
+    i = _token_run(wanted, [_number_form(w[2]) for w in words or []])
+    return None if i is None else (words[i][0], words[i + len(wanted) - 1][1])
+
+
+def _number_moment_blocks(key_number: str | None,
+                          blocks: list[tuple[float, float, str]]) -> tuple[float, float] | None:
+    """The first English subtitle block that carries the key number: a Hinglish narration has
+    no word timings, so the block is when its part of the sentence is spoken."""
+    wanted = _number_tokens(key_number)
+    for start, end, block in blocks or []:
+        if _token_run(wanted, [_number_form(t) for t in _script_tokens(block)]) is not None:
+            return start, end
+    return None
+
+
+def _number_card(key_number: str | None, moment: tuple[float, float] | None,
+                 total_dur: float) -> tuple[float, float, str] | None:
+    """(start, end, ASS text) of the key-number card, from the moment it is said, never past
+    the reel's end. None when it is not said or too little time is left to read it."""
+    if not (key_number and moment):
+        return None
+    start, said_end = moment
+    shown = min(_NUMBER_MAX, max(_NUMBER_MIN, said_end - start + _NUMBER_TAIL))
+    end = min(total_dur, start + shown)
+    if end - start < 0.5:
+        return None
+    written = " ".join(key_number.split())
+    drawn = _ass_escape(_NON_RENDERABLE.sub("", written))
+    if drawn != written:
+        return None  # the font or the escape would change the figure ("-5%" read "5%")
+    # Words are capitalised; short units keep their case ("5 m" is metres, not "5 M").
+    rows = _wrap([w.upper() if w.isalpha() and len(w) >= 3 else w for w in drawn.split()],
+                 _NUMBER_ROW)
+    if len(rows) > 2:
+        return None
+    return start, end, _NUMBER_SCALE_IN + "\\N".join(rows)
+
+
+def _banner_seconds(first_end: float | None) -> float:
+    """How long the banner shows: until the first sentence ends, at least HOOK_SECONDS (1.8)
+    and at most HOOK_MAX_SECONDS (4.0). It vanished at 1.8 s, the biggest change between two
+    frames in the test reels (design 11.5)."""
+    low = float(config.get("HOOK_SECONDS", "1.8"))
+    high = max(low, float(config.get("HOOK_MAX_SECONDS", "4.0")))
+    return min(high, max(low, first_end or 0.0))
+
+
+_BANNER_TOP = 300  # the Hook style's MarginV: just under the Shorts top bar (288 px)
+
+
+def _source_margin(banner: str) -> int:
+    """The source line's distance from the top: under the banner's real rows at its real size,
+    or at the banner's own top when there is no banner."""
+    if not banner:
+        return _BANNER_TOP
+    size = re.search(r"\\fs(\d+)", banner)
+    rows = banner.count("\\N") + 1
+    return int(_BANNER_TOP + rows * (int(size.group(1)) if size else 94) * 1.25 + 16)
+
+
 def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None,
                key_points: list[str] | None = None, total_dur: float | None = None,
-               source_label: str | None = None) -> str:
-    """Render the full .ass subtitle file: active-word karaoke captions + an optional frame-1
-    hook banner + optional sparse on-screen key-point cards + an optional source lower-third."""
+               source_label: str | None = None, first_end: float | None = None,
+               number: tuple[float, float, str] | None = None) -> str:
+    """Render the full .ass subtitle file: active-word karaoke captions, the banner (the title)
+    and the source line for the first sentence (`first_end`, when known), and optional sparse
+    key-point cards. Everything sits inside the Shorts safe area (design 11.5)."""
     lines = [_ass_header()]
+    banner = (_hook_banner_text(hook_text)
+              if hook_text and config.get_bool("ENABLE_HOOK_CAPTION", True) else "")
+    banner_end = _banner_seconds(first_end)
 
-    # Brief source citation (bottom, faint) — credibility + news-compliance (rule 6: cite sources).
+    # The source citation, with the first sentence: the claim it supports (rule 6: cite
+    # sources). Under the banner, at the top: at y 1480 the Shorts interface covered it.
     if source_label and config.get_bool("ENABLE_SOURCE_CITE", True):
-        secs = float(config.get("SOURCE_CITE_SECONDS", "3.0"))
+        until = (max(float(config.get("HOOK_SECONDS", "1.8")), first_end) if first_end
+                 else float(config.get("SOURCE_CITE_SECONDS", "3.0")))
         label = _ass_escape(_NON_RENDERABLE.sub("", f"Source: {source_label}"))
-        lines.append(f"Dialogue: 1,{_format_ts(0)},{_format_ts(secs)},Source,,0,0,0,,{label}")
+        lines.append(f"Dialogue: 1,{_format_ts(0)},{_format_ts(until)},Source,,0,0,"
+                     f"{_source_margin(banner)},,{label}")
 
-    # Frame-1 hook banner: the first frame IS the in-feed thumbnail, so a bold top-of-screen
-    # hook is the single biggest free CTR lever. Drawn on Layer 1 (top), the word captions sit
-    # at the bottom — they don't overlap. Toggle via ENABLE_HOOK_CAPTION; duration HOOK_SECONDS.
-    if hook_text and config.get_bool("ENABLE_HOOK_CAPTION", True):
-        banner = _hook_banner_text(hook_text)
-        if banner:
-            secs = float(config.get("HOOK_SECONDS", "1.8"))
-            lines.append(
-                f"Dialogue: 1,{_format_ts(0)},{_format_ts(secs)},Hook,,0,0,0,,{banner}"
-            )
+    # The banner: the first frame IS the in-feed thumbnail, so a bold top-of-screen title is
+    # the biggest free CTR lever. Drawn on Layer 1 (top); the captions sit at the bottom.
+    if banner:
+        lines.append(f"Dialogue: 1,{_format_ts(0)},{_format_ts(banner_end)},Hook,,0,0,0,,{banner}")
 
-    # Sparse on-screen key-point cards (middle of frame) — story-specific text that lifts the
-    # generic-stock B-roll. Shown after the hook window; toggle ENABLE_TEXT_CARDS.
-    if key_points and config.get_bool("ENABLE_TEXT_CARDS", True):
+    # Sparse on-screen key-point cards (middle of frame), after the banner. Off by default
+    # since stage 4b: the key number replaces them (design 11.5).
+    if key_points and text_cards_enabled():
         dur = total_dur if total_dur else (words[-1][1] if words else 0.0)
-        start_after = float(config.get("HOOK_SECONDS", "1.8"))
+        start_after = banner_end
         card_dur = float(config.get("CARD_SECONDS", "1.8"))
         for cs, ce, text in _card_events(key_points, dur, start_after, card_dur, words):
             banner = _hook_banner_text(text, max_chars=18, max_lines=2, base_size=90)
             if banner:
                 lines.append(f"Dialogue: 2,{_format_ts(cs)},{_format_ts(ce)},Card,,0,0,0,,{banner}")
+
+    # One key number, large in the upper middle, while the narration says it (design 11.5).
+    if number:
+        start, end, label = number
+        lines.append(f"Dialogue: 2,{_format_ts(start)},{_format_ts(end)},Number,,0,0,0,,{label}")
 
     # Group words into short phrases; each phrase is ONE karaoke line whose words fill to the
     # highlight colour exactly as spoken (active-word highlight — a retention driver).
@@ -572,7 +695,7 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 def burn_captions(video_path: str, audio_path: str, out_path: str,
                   hook_text: str | None = None, key_points: list[str] | None = None,
                   source_label: str | None = None, script_text: str | None = None,
-                  fps: int = 30) -> str:
+                  fps: int = 30, key_number: str | None = None) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
@@ -602,17 +725,21 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     total_dur = words[-1][1] if words else None
 
     cards = _render_graphic_cards(key_points, total_dur or 0.0, out_dir)
+    first_end = _first_sentence_end(words, script_text)
+    number = _number_card(key_number, _number_moment_words(key_number, words), total_dur or 0.0)
 
     # The ASS omits text cards only when PNG cards will draw them, so they never double up.
     ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_build_ass(words, hook_text, None if cards else key_points, total_dur, source_label))
+        f.write(_build_ass(words, hook_text, None if cards else key_points, total_dur, source_label,
+                           first_end=first_end, number=number))
 
     fallback_ass = None
     if cards:  # a full-featured fallback: same captions, cards back as ASS text
         fallback_ass = os.path.join(out_dir, f"captions_{digest}_text.ass")
         with open(fallback_ass, "w", encoding="utf-8") as f:
-            f.write(_build_ass(words, hook_text, key_points, total_dur, source_label))
+            f.write(_build_ass(words, hook_text, key_points, total_dur, source_label,
+                               first_end=first_end, number=number))
 
     log.info("subtitles: burning %d word events into %s (graphic cards=%d)",
              len(words), out_path, len(cards))
@@ -825,13 +952,17 @@ def _part_blocks(parts: list[dict], start: float, end: float,
     return out
 
 
+def _line_weights(lines: list[dict]) -> list[int]:
+    """Each Hinglish line's share of the narration: its spoken characters."""
+    return [_spoken_chars(line.get("said") or line.get("hi") or "") for line in lines]
+
+
 def subtitle_blocks(lines: list[dict], pause_list: list[tuple[float, float]],
                     duration: float) -> list[tuple[float, float, str]]:
     """(start, end, English text) for every subtitle block of a Hinglish narration: the lines'
     sentence times from the pauses, then each line's parts in spoken order, or the whole
     sentence when its parts cannot be trusted."""
-    weights = [_spoken_chars(line.get("said") or line.get("hi") or "") for line in lines]
-    ends = sentence_ends(pause_list, weights, duration)
+    ends = sentence_ends(pause_list, _line_weights(lines), duration)
     t0, _t1 = _speech_span(pause_list, duration)
     starts = [t0] + ends[:-1]
     blocks: list[tuple[float, float, str]] = []
@@ -848,10 +979,13 @@ def subtitle_blocks(lines: list[dict], pause_list: list[tuple[float, float]],
 
 
 def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
-                  duration: float, source_label: str | None) -> str:
-    """The banner and the source line as on every reel, then the English blocks: plain white,
-    at most two rows each, each held until the next starts."""
-    lines = [_build_ass([], hook_text, None, duration, source_label).rstrip("\n")]
+                  duration: float, source_label: str | None,
+                  first_end: float | None = None,
+                  number: tuple[float, float, str] | None = None) -> str:
+    """The banner and the source line as on every reel (held for line 1, `first_end`), then
+    the English blocks: plain white, at most two rows each, each held until the next starts."""
+    lines = [_build_ass([], hook_text, None, duration, source_label,
+                        first_end=first_end, number=number).rstrip("\n")]
     for i, (start, end, text) in enumerate(blocks):
         until = blocks[i + 1][0] if i + 1 < len(blocks) else max(end, duration)
         rows = [_ass_escape(_NON_RENDERABLE.sub("", row)) for row in _sub_rows(text)]
@@ -862,7 +996,7 @@ def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
 
 def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[dict],
                   hook_text: str | None = None, source_label: str | None = None,
-                  fps: int = 30) -> str:
+                  fps: int = 30, key_number: str | None = None) -> str:
     """Burn English subtitles for a Hinglish narration: no speech recognition; the timing comes
     from the narration's pauses and the text from the checked lines (design 7.7)."""
     if not os.path.exists(video_path):
@@ -870,13 +1004,16 @@ def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[d
     if not os.path.exists(audio_path):
         raise ValueError(f"subtitles: audio not found: {audio_path}")
     duration = _audio_seconds(audio_path)
-    blocks = subtitle_blocks(lines, pauses(audio_path), duration)
+    pause_list = pauses(audio_path)
+    blocks = subtitle_blocks(lines, pause_list, duration)
+    first_end = sentence_ends(pause_list, _line_weights(lines), duration)[0] if lines else None
     out_dir = os.path.dirname(os.path.abspath(out_path))
     os.makedirs(out_dir, exist_ok=True)
     digest = hashlib.sha1(os.path.abspath(audio_path).encode("utf-8")).hexdigest()[:12]
     ass_path = os.path.join(out_dir, f"subs_{digest}.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_hinglish_ass(blocks, hook_text, duration, source_label))
+        number = _number_card(key_number, _number_moment_blocks(key_number, blocks), duration)
+        f.write(_hinglish_ass(blocks, hook_text, duration, source_label, first_end, number))
     log.info("subtitles: burning %d English blocks for a Hinglish narration into %s",
              len(blocks), out_path)
     _burn(video_path, ass_path, out_path, fps=fps)

@@ -316,9 +316,12 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
     # Only FABRICATION-grade findings block (2026-08-07): imprecision is waived and logged, so
     # the gate stops false stories rather than stopping the channel. See src/factcheck.py.
     # The cards and the description are published claims too, and were never checked.
+    # What the viewer reads: the description, the key number, and the key-point cards only when
+    # they are shown (off since stage 4b: a finding on a hidden card cost a reel for nothing).
     summary_text = (script.get("caption") or "").split("\nSources:")[0].strip()
     check = factcheck.verify(script["script_body"], idea.get("sources"), script.get("title") or "",
-                             on_screen=[*(script.get("key_points") or []), summary_text])
+                             on_screen=_on_screen(script.get("key_points"),
+                                                  script.get("key_number"), summary_text))
     if check.get("minor") and check["ok"]:
         log.warning("produce: idea %s shipped with %d waived minor fact issue(s): %s",
                     idea_id, len(check["minor"]), " | ".join(check["minor"][:3]))
@@ -353,12 +356,16 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
             new_title = fixed.get("title") or script.get("title") or ""
             new_summary = fixed.get("summary") or summary_text
             new_cards = fixed.get("key_points") or (script.get("key_points") or [])
+            # The key number must still be in the narration it is shown over (design 11.5).
+            kept_number = scriptwriter.checked_key_number(script.get("key_number"),
+                                                          fixed["script_body"])
             recheck = factcheck.verify(fixed["script_body"], idea.get("sources"), new_title,
-                                       on_screen=[*new_cards, new_summary])
+                                       on_screen=_on_screen(new_cards, kept_number, new_summary))
             if recheck["ok"] and factcheck.gate_ran(recheck):
                 log.warning("produce: idea %s repaired after the fact-check block (%s)",
                             idea_id, factcheck.summary(check))
                 script["script_body"] = fixed["script_body"]
+                script["key_number"] = kept_number
                 db.update_script_body(script["script_id"], fixed["script_body"])
                 if new_title != (script.get("title") or ""):
                     script["title"] = new_title
@@ -460,12 +467,13 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
             final = subtitles.burn_hinglish(raw, audio, os.path.join(work, "reel_final.mp4"),
                                             spoken["lines"], hook_text=hook,
                                             source_label=_source_domain(idea.get("sources")),
-                                            **rate)
+                                            key_number=script.get("key_number"), **rate)
         else:
             final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
                                             hook_text=hook, key_points=script.get("key_points"),
                                             source_label=_source_domain(idea.get("sources")),
-                                            script_text=script["script_body"], **rate)
+                                            script_text=script["script_body"],
+                                            key_number=script.get("key_number"), **rate)
         _disclose_what_was_shown(script, shown)
         metadata = _build_metadata(idea, script)
         metadata["voice"] = spoke.get("voice")
@@ -493,6 +501,13 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         return video_id, url
     finally:
         shutil.rmtree(work, ignore_errors=True)  # render artifacts are disposable (rule 15)
+
+
+def _on_screen(cards: list[str] | None, key_number: str | None, summary: str) -> list[str]:
+    """The published words besides the narration and the title, for the fact-check: the key
+    number, the description, and the key-point cards only when they are shown."""
+    shown = list(cards or []) if subtitles.text_cards_enabled() else []
+    return [*shown, *([key_number] if key_number else []), summary]
 
 
 def _wants_ai_video() -> bool:

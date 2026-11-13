@@ -152,7 +152,7 @@ jobs:
           ENABLE_HUMAN_ANGLE: ${{ vars.ENABLE_HUMAN_ANGLE || 'true' }}  # require a genuine why-it-matters take
           CAPTION_FONT: ${{ vars.CAPTION_FONT || 'Montserrat' }}
           CAPTION_HIGHLIGHT_COLOR: ${{ vars.CAPTION_HIGHLIGHT_COLOR || '&H0000FFFF' }}  # active-word fill colour
-          ENABLE_TEXT_CARDS: ${{ vars.ENABLE_TEXT_CARDS || 'true' }}  # on-screen key-point cards (story-specific)
+          ENABLE_TEXT_CARDS: ${{ vars.ENABLE_TEXT_CARDS || 'false' }}  # key-point cards (off: the key number replaces them)
           CARD_SECONDS: ${{ vars.CARD_SECONDS || '1.8' }}            # how long each key-point card flashes
           NEWS_RSS_URL: ${{ vars.NEWS_RSS_URL }}                     # optional: override the news feed seeding ideation
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || 'public' }}   # set var to 'unlisted' for safe first runs
@@ -172,13 +172,13 @@ jobs:
           PAUSE_BETWEEN: ${{ vars.PAUSE_BETWEEN || '0.18' }}        # inter-sentence silence (s)
           PAUSE_BEFORE_PAYOFF: ${{ vars.PAUSE_BEFORE_PAYOFF || '0.5' }}  # dramatic beat before the last line (s)
           MUSIC_VOLUME: ${{ vars.MUSIC_VOLUME || '0.10' }}          # fixed bed gain, used only if the bed cannot be measured
-          ENABLE_SFX: ${{ vars.ENABLE_SFX || 'true' }}              # transition stings on clip cuts
+          ENABLE_SFX: ${{ vars.ENABLE_SFX || 'false' }}             # transition stings on clip cuts (off since stage 4b)
           SFX_VOLUME: ${{ vars.SFX_VOLUME || '0.18' }}              # 0..1; 0 disables. >0.3 fights the narration
           SFX_EVERY_N_CUTS: ${{ vars.SFX_EVERY_N_CUTS || '2' }}     # sting every Nth cut (1 = every cut, busy)
           ENABLE_LOUDNORM: ${{ vars.ENABLE_LOUDNORM || 'true' }}    # level each reel to TARGET_LUFS (reels shipped at -17..-23)
           TARGET_LUFS: ${{ vars.TARGET_LUFS || '-14' }}              # finished-mix loudness; YouTube plays at -14
           ENABLE_VOICE_COMPRESS: ${{ vars.ENABLE_VOICE_COMPRESS || 'true' }}  # light 3:1 broadcast compression on the voice
-          MUSIC_LU_BELOW_VOICE: ${{ vars.MUSIC_LU_BELOW_VOICE || '11' }}      # bed level under the voice (8 = more present)
+          MUSIC_LU_BELOW_VOICE: ${{ vars.MUSIC_LU_BELOW_VOICE || '4' }}      # bed level under the voice (was 11 before stage 4b)
           ENABLE_MUSIC_OFFSET: ${{ vars.ENABLE_MUSIC_OFFSET || 'true' }}      # each reel starts its bed at a different bar
           ENABLE_GRAPHIC_CARDS: ${{ vars.ENABLE_GRAPHIC_CARDS || 'false' }}  # PIL stat cards vs ASS text cards
           ENABLE_CHANNEL_TAGS: ${{ vars.ENABLE_CHANNEL_TAGS || 'true' }}     # append the brand tag after the writer's tags

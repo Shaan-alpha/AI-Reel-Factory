@@ -104,7 +104,7 @@ def test_card_events_empty_when_no_points_or_no_time():
 
 
 def test_build_ass_includes_text_cards(monkeypatch):
-    monkeypatch.delenv("ENABLE_TEXT_CARDS", raising=False)  # default on
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     words = [(0.0, 0.4, "Reusable"), (0.4, 0.9, "rockets"), (5.0, 5.4, "cut"), (5.4, 6.0, "costs")]
     ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
     assert "Style: Card" in ass
@@ -205,6 +205,7 @@ def test_graphic_cards_off_by_default(monkeypatch, tmp_path):
 
 def test_graphic_cards_render_pngs_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     monkeypatch.setenv("CARD_SECONDS", "1.8")
     monkeypatch.setenv("HOOK_SECONDS", "1.8")
     cards = subtitles._render_graphic_cards(["First in Asia", "30% cheaper"], 20.0, str(tmp_path))
@@ -217,6 +218,7 @@ def test_graphic_cards_render_pngs_when_enabled(monkeypatch, tmp_path):
 def test_graphic_cards_fall_back_when_render_fails(monkeypatch, tmp_path):
     """A card renderer breaking must cost us the cards, never the captions (rules 11, 14)."""
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     from src import graphics
     monkeypatch.setattr(graphics, "create_stat_card",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no font")))
@@ -226,6 +228,7 @@ def test_graphic_cards_fall_back_when_render_fails(monkeypatch, tmp_path):
 def test_ass_omits_text_cards_when_png_cards_are_used(monkeypatch, tmp_path):
     """Both treatments at once would double-draw, so exactly one must own the key points."""
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
     audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
     monkeypatch.setattr(subtitles, "_transcribe_words",
@@ -246,6 +249,7 @@ def test_ass_omits_text_cards_when_png_cards_are_used(monkeypatch, tmp_path):
 
 def test_burn_captions_retries_with_text_cards_when_overlay_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
     audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
     monkeypatch.setattr(subtitles, "_transcribe_words",
@@ -490,9 +494,11 @@ def test_a_short_hook_banner_keeps_its_full_size():
 
 
 def test_the_source_line_sits_above_the_shorts_bottom_ui():
+    """It sat at y 1480, which the Shorts interface covers; it is top-anchored now, under the
+    banner (design 11.5)."""
     header = subtitles._ass_header()
     source = next(ln for ln in header.splitlines() if ln.startswith("Style: Source"))
-    assert int(source.split(",")[-2]) >= 400
+    assert source.split(",")[18] == "8"  # alignment: top centre
 
 
 def test_a_long_seven_word_title_still_fits_without_an_ellipsis():
@@ -729,3 +735,262 @@ def test_an_english_preflight_transcribes_once(monkeypatch, tmp_path):
     other = tmp_path / "other.wav"
     other.write_bytes(b"RIFF-another")
     assert subtitles.preflight(str(other), str(tmp_path)) is False  # no words, no purchase
+
+
+def test_key_point_cards_are_off_by_default(monkeypatch):
+    """The key number replaces the key-point cards (design 11.5, 12)."""
+    monkeypatch.delenv("ENABLE_TEXT_CARDS", raising=False)
+    words = [(0.0, 0.4, "Reusable"), (0.4, 0.9, "rockets"), (5.0, 5.4, "cut"), (5.4, 6.0, "costs")]
+    ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
+    assert ",Card,," not in ass
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")
+    ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
+    assert ass.count(",Card,,") == 2
+
+
+# --- Stage 4b: the banner, the source line and the subtitles in the safe area (design 11.5) ---
+
+import re  # noqa: E402
+
+TITLE = "Back after 286 days"
+WORDS = [(0.1, 0.5, "Sunita"), (0.5, 0.9, "Williams"), (0.9, 1.4, "returned"), (1.4, 1.6, "to"),
+         (1.6, 3.1, "Earth."), (3.4, 3.8, "NASA"), (3.8, 4.2, "says"), (4.2, 5.0, "so.")]
+
+
+def _event(ass: str, style: str) -> tuple[str, str, list[str]]:
+    """(start, end, fields) of the first Dialogue line in `style`."""
+    line = next(ln for ln in ass.splitlines()
+                if ln.startswith("Dialogue:") and ln.split(",")[3] == style)
+    fields = line.split(",", 9)
+    return fields[1], fields[2], fields
+
+
+def test_the_banner_holds_for_the_first_sentence(monkeypatch):
+    for k in ("HOOK_SECONDS", "HOOK_MAX_SECONDS"):
+        monkeypatch.delenv(k, raising=False)
+    ass = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=5.0, first_end=3.1)
+    assert _event(ass, "Hook")[:2] == ("0:00:00.00", "0:00:03.10")
+
+
+def test_the_banner_holds_between_1_8_and_4_0(monkeypatch):
+    for k in ("HOOK_SECONDS", "HOOK_MAX_SECONDS"):
+        monkeypatch.delenv(k, raising=False)
+    short = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=5.0, first_end=1.2)
+    long = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=9.0, first_end=6.9)
+    assert _event(short, "Hook")[1] == "0:00:01.80"
+    assert _event(long, "Hook")[1] == "0:00:04.00"
+
+
+def test_the_source_line_shows_with_the_first_sentence(monkeypatch):
+    """Review Focus 1: the opening claims ran to 6.6-7.3 s; the banner leaves at 4.0 s, the
+    source line stays with the claim it supports."""
+    monkeypatch.delenv("ENABLE_SOURCE_CITE", raising=False)
+    ass = subtitles._build_ass(WORDS, hook_text=TITLE, total_dur=9.0, source_label="nasa.gov",
+                               first_end=6.9)
+    assert _event(ass, "Source")[:2] == ("0:00:00.00", "0:00:06.90")
+    assert _event(ass, "Hook")[1] == "0:00:04.00"
+
+
+def test_the_source_line_sits_under_the_banner(monkeypatch):
+    """Review Focus 5: a long title fills three rows at a smaller size; the source line goes
+    under the banner's real height, and straight under the top edge when there is no banner."""
+    monkeypatch.delenv("ENABLE_SOURCE_CITE", raising=False)
+    title = "Networks Boycott Trump: An Unprecedented Media Blackout"
+    banner = subtitles._hook_banner_text(title)
+    rows = banner.count("\\N") + 1
+    size = int(re.search(r"\\fs(\d+)", banner).group(1)) if "\\fs" in banner else 94
+    ass = subtitles._build_ass(WORDS, hook_text=title, total_dur=5.0, source_label="nasa.gov",
+                               first_end=3.1)
+    margin = int(_event(ass, "Source")[2][7])
+    assert 300 + rows * size * 1.2 <= margin <= 300 + rows * size * 1.4 + 40
+    bare = subtitles._build_ass(WORDS, total_dur=5.0, source_label="nasa.gov", first_end=3.1)
+    assert int(_event(bare, "Source")[2][7]) == 300
+
+
+def test_subtitles_sit_inside_the_safe_box():
+    """Google's vertical overlay: clear of the left 48, right 192 and bottom 672 px."""
+    header = subtitles._ass_header()
+    for name in ("Karaoke", "Sub"):
+        style = next(ln for ln in header.splitlines() if ln.startswith(f"Style: {name},"))
+        margin_l, margin_r, margin_v = (int(v) for v in style.split(",")[19:22])
+        assert (margin_l, margin_r, margin_v) == (48, 192, 672)
+
+
+def test_no_words_keeps_the_1_8_s_banner(monkeypatch):
+    """Review Focus 4: without the first sentence's end the banner keeps its old 1.8 s and the
+    source line its SOURCE_CITE_SECONDS."""
+    for k in ("HOOK_SECONDS", "HOOK_MAX_SECONDS", "SOURCE_CITE_SECONDS", "ENABLE_SOURCE_CITE"):
+        monkeypatch.delenv(k, raising=False)
+    ass = subtitles._build_ass([], hook_text=TITLE, total_dur=5.0, source_label="nasa.gov")
+    assert _event(ass, "Hook")[1] == "0:00:01.80" and _event(ass, "Source")[1] == "0:00:03.00"
+
+
+def test_first_sentence_end_from_aligned_words():
+    script = "Sunita Williams returned to Earth. NASA says so."
+    assert subtitles._first_sentence_end(WORDS, script) == 3.1
+    tagged = "Sunita Williams [short pause] returned to\u2014Earth. NASA says so."
+    words = WORDS[:3] + [(1.4, 1.6, "to"), (1.6, 3.1, "Earth."), (3.4, 3.8, "NASA")]
+    assert subtitles._first_sentence_end(words, tagged) == 3.1
+    assert subtitles._first_sentence_end([], script) is None
+    assert subtitles._first_sentence_end(WORDS, None) is None
+
+
+def test_hinglish_banner_ends_with_line_one(monkeypatch, tmp_path):
+    """The Hinglish burn holds the banner to line 1's end from the same sentence times its
+    subtitles use."""
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.wav"; audio.write_bytes(b"\x00" * 100)
+    lines = [{"en": "Sunita Williams is back.", "hi": "सुनीता विलियम्स लौट आईं।", "said": "a" * 30},
+             {"en": "Here is why it matters.", "hi": "इसका मतलब यह है।", "said": "b" * 30}]
+    pause_list = [(3.0, 3.3)]
+    monkeypatch.setattr(subtitles, "pauses", lambda path: pause_list)
+    monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: 7.0)
+    seen = {}
+    monkeypatch.setattr(subtitles, "_burn",
+                        lambda v, ass, out, cards=None, fps=30: seen.update(
+                            ass=open(ass, encoding="utf-8").read()) or open(out, "wb").write(b"x"))
+    monkeypatch.delenv("HOOK_MAX_SECONDS", raising=False)
+    subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "out.mp4"), lines,
+                            hook_text=TITLE)
+    weights = [subtitles._spoken_chars(line["said"]) for line in lines]
+    first = subtitles.sentence_ends(pause_list, weights, 7.0)[0]
+    assert _event(seen["ass"], "Hook")[1] == subtitles._format_ts(min(4.0, max(1.8, first)))
+
+
+# --- Stage 4b: the key-number card (design 11.5) --------------------------------------------------
+
+NUM_WORDS = [(0.1, 0.5, "Sunita"), (0.5, 0.9, "spent"), (2.0, 2.4, "286"), (2.4, 2.9, "days"),
+             (3.0, 3.4, "in"), (3.4, 4.0, "orbit."), (4.3, 4.7, "Rs"), (4.7, 5.2, "2,000"),
+             (5.2, 5.6, "crore,"), (6.0, 6.3, "not"), (6.3, 6.6, "2"), (6.6, 7.0, "lakh.")]
+
+
+def test_the_number_shows_when_it_is_said():
+    assert subtitles._number_moment_words("286 days", NUM_WORDS) == (2.0, 2.9)
+    card = subtitles._number_card("286 days", (2.0, 2.9), 10.0)
+    ass = subtitles._build_ass(NUM_WORDS, total_dur=10.0, number=card)
+    start, end, fields = _event(ass, "Number")
+    assert (start, end) == ("0:00:02.00", "0:00:03.50")  # at least 1.5 s on screen
+    assert fields[9].endswith("286 DAYS")
+
+
+def test_a_long_spoken_number_stays_longer_but_at_most_2_5_s():
+    start, end, _text = subtitles._number_card("Rs 2,000 crore", (4.3, 5.6), 10.0)
+    assert start == 4.3 and end == pytest.approx(6.1)  # said for 1.3 s, plus half a second
+    assert subtitles._number_card("x 1", (1.0, 4.0), 10.0)[:2] == (1.0, 3.5)
+
+
+def test_the_number_shows_with_its_block():
+    blocks = [(0.0, 3.0, "Sunita Williams is back."), (3.0, 6.2, "After 286 days in orbit,"),
+              (6.2, 8.0, "she landed safely.")]
+    assert subtitles._number_moment_blocks("286 days", blocks) == (3.0, 6.2)
+    assert subtitles._number_moment_blocks("300 days", blocks) is None
+
+
+def test_the_number_scales_in():
+    header = subtitles._ass_header()
+    style = next(ln for ln in header.splitlines() if ln.startswith("Style: Number,"))
+    fields = style.split(",")
+    assert fields[2] == "150" and fields[18] == "8"   # large, top centre
+    assert 700 <= int(fields[21]) <= 960              # the upper middle, under the source line
+    card = subtitles._number_card("40%", (1.0, 1.4), 10.0)
+    assert card[2].startswith("{\\q2\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}")
+    assert card[2].endswith("40%")
+
+
+def test_a_number_never_said_has_no_card():
+    """Review Focus 3: a number the narration does not say gets no card, never a wrong one."""
+    assert subtitles._number_moment_words("300 days", NUM_WORDS) is None
+    assert subtitles._number_card("300 days", None, 10.0) is None
+    assert ",Number,," not in subtitles._build_ass(NUM_WORDS, total_dur=10.0, number=None)
+
+
+def test_the_card_stays_inside_the_reel():
+    assert subtitles._number_card("286 days", (9.5, 9.8), 10.0)[:2] == (9.5, 10.0)
+    assert subtitles._number_card("286 days", (9.8, 9.9), 10.0) is None  # too short to read
+
+
+def test_a_number_said_twice_marks_the_first():
+    """Review Focus 2: "2" is the standalone 2, never the digit inside "2,000"."""
+    assert subtitles._number_moment_words("2", NUM_WORDS) == (6.3, 6.6)
+    twice = NUM_WORDS + [(8.0, 8.4, "286"), (8.4, 8.9, "days")]
+    assert subtitles._number_moment_words("286 days", twice) == (2.0, 2.9)
+
+
+def test_no_words_no_card():
+    """Review Focus 4: no word timing, no card."""
+    assert subtitles._number_moment_words("286 days", []) is None
+    assert subtitles._number_moment_words("", NUM_WORDS) is None
+
+
+def _capture_burn(monkeypatch, seen: dict) -> None:
+    monkeypatch.setattr(subtitles, "_burn",
+                        lambda v, ass, out, cards=None, fps=30: seen.update(
+                            ass=open(ass, encoding="utf-8").read()) or open(out, "wb").write(b"x"))
+
+
+def test_burn_captions_draws_the_key_number(monkeypatch, tmp_path):
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
+    monkeypatch.setattr(subtitles, "_cached_words", lambda path: list(NUM_WORDS))
+    seen = {}
+    _capture_burn(monkeypatch, seen)
+    script = "Sunita spent 286 days in orbit. Rs 2,000 crore, not 2 lakh."
+    subtitles.burn_captions(str(video), str(audio), str(tmp_path / "out.mp4"),
+                            script_text=script, key_number="286 days")
+    assert _event(seen["ass"], "Number")[:2] == ("0:00:02.00", "0:00:03.50")
+
+
+def test_burn_hinglish_draws_the_key_number(monkeypatch, tmp_path):
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.wav"; audio.write_bytes(b"\x00" * 100)
+    lines = [{"en": "Sunita Williams is back.", "hi": "सुनीता विलियम्स लौट आईं।", "said": "a" * 30},
+             {"en": "After 286 days.", "hi": "286 दिन बाद।", "said": "b" * 30}]
+    monkeypatch.setattr(subtitles, "pauses", lambda path: [(3.0, 3.3)])
+    monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: 7.0)
+    seen = {}
+    _capture_burn(monkeypatch, seen)
+    subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "out.mp4"), lines,
+                            key_number="286 days")
+    blocks = subtitles.subtitle_blocks(lines, [(3.0, 3.3)], 7.0)
+    start = next(b[0] for b in blocks if "286 days" in b[2])
+    assert _event(seen["ass"], "Number")[0] == subtitles._format_ts(start)
+
+
+
+# --- Stage 4b's final review: the number card shows the figure as said, when it is said --------
+
+def test_the_number_is_matched_as_written_not_as_digits():
+    """Review 4b I-1: "40%" must not show while "40 districts" is said, "14" at "1.4 billion",
+    or "5%" at "5 states" when the narration's 5% is part of "3-5%"."""
+    words = [(0.0, 0.4, "Across"), (0.4, 0.7, "40"), (0.7, 1.2, "districts,"), (1.5, 1.8, "only"),
+             (1.8, 2.2, "40%"), (2.2, 2.5, "of"), (2.5, 2.9, "voters.")]
+    assert subtitles._number_moment_words("40%", words) == (1.8, 2.2)
+    words = [(0.0, 0.3, "India"), (0.3, 0.5, "has"), (0.5, 0.9, "1.4"), (0.9, 1.4, "billion"),
+             (1.4, 1.8, "people."), (2.3, 2.6, "covers"), (2.6, 2.9, "14"), (2.9, 3.4, "states.")]
+    assert subtitles._number_moment_words("14", words) == (2.6, 2.9)
+    words = [(0.0, 0.2, "A"), (0.2, 0.7, "3-5%"), (0.7, 1.0, "drop"), (1.0, 1.2, "in"),
+             (1.2, 1.4, "5"), (1.4, 1.9, "states.")]
+    assert subtitles._number_moment_words("5%", words) is None
+    blocks = [(0.0, 1.2, "Across 40 districts,"), (1.2, 3.0, "only 40% of voters.")]
+    assert subtitles._number_moment_blocks("40%", blocks) == (1.2, 3.0)
+
+
+def test_a_card_the_font_would_change_is_not_shown():
+    """Review 4b I-2: a minus the renderer strips would turn "-5%" into "5%"."""
+    assert subtitles._number_card("\u22125%", (1.0, 1.5), 10.0) is None
+
+
+def test_a_long_number_is_broken_into_rows_before_it_scales_in():
+    """Review 4b I-3: "RS 1.25 LAKH CRORE" sat on one row at 70% and jumped to two at 100%."""
+    card = subtitles._number_card("Rs 1.25 lakh crore", (1.0, 2.0), 10.0)
+    assert card[2].startswith("{\\q2")
+    rows = card[2].split("}")[-1].split("\\N")
+    assert len(rows) == 2 and all(len(row) <= 12 for row in rows)
+    assert subtitles._number_card("286 days", (1.0, 2.0), 10.0)[2].endswith("}286 DAYS")
+
+
+def test_short_units_keep_their_case():
+    """Review 4b: "5 m" (metres) must not read "5 M" (million); words are capitalised."""
+    assert subtitles._number_card("5 m", (1.0, 1.5), 10.0)[2].endswith("}5 m")
+    assert subtitles._number_card("Rs 1.25 lakh crore", (1.0, 2.0), 10.0)[2].endswith("CRORE")
+    assert "Rs 1.25" in subtitles._number_card("Rs 1.25 lakh crore", (1.0, 2.0), 10.0)[2]
