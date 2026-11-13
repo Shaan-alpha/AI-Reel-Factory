@@ -475,6 +475,16 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         # Nothing looks at a reel before it is public, so this does (design 11.6).
         progress["stage"] = "check"
         problems = gates.reel_problems(final, duration)
+        if shots is None:
+            # Today's formats can hold a picture still: a Ken Burns move ends before its clip
+            # does, and a clip is replayed when an image fetch fails, under a held Hinglish
+            # sentence. There a black or frozen stretch is logged, not refused (review 4a I-1);
+            # in an ai_video reel every clip passed its own check, so one means a break.
+            held = [p for p in problems if p.startswith(("black:", "frozen:"))]
+            if held:
+                log.warning("produce: idea %s's reel shows %s; today's format ships anyway",
+                            idea_id, "; ".join(held))
+                problems = [p for p in problems if p not in held]
         if problems:
             raise ReelCheckFailed("; ".join(problems))
         progress["stage"] = "upload"

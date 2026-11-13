@@ -953,17 +953,33 @@ def test_a_reel_that_fails_its_check_is_not_uploaded(monkeypatch):
     monkeypatch.setattr(production.publish_youtube, "publish",
                         lambda v, m, sid: published.append(v) or ("VID1", "url"))
     monkeypatch.setattr(gates, "reel_problems", lambda path, seconds: checked.append(
-        (os.path.basename(path), seconds)) or ["black: 1.4 s"])
+        (os.path.basename(path), seconds)) or ["no audio stream"])
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [IDEA])
     monkeypatch.setattr(production, "_notify_failure",
                         lambda idea, e, spend=None: alerts.append(f"{type(e).__name__}: {e}"))
     result = production.run_production()
     assert published == [] and checked == [("reel_final.mp4", 30.0)]
     assert calls[0]["outcome"] == "failed" and calls[0]["stage"] == "check"
-    assert "black: 1.4 s" in calls[0]["reason"]
+    assert "no audio stream" in calls[0]["reason"]
     assert (7, "pending") in statuses
-    assert alerts == ["ReelCheckFailed: black: 1.4 s"]
-    assert result["failed"][0]["error"] == "ReelCheckFailed: black: 1.4 s"
+    assert alerts == ["ReelCheckFailed: no audio stream"]
+    assert result["failed"][0]["error"] == "ReelCheckFailed: no audio stream"
+
+
+def test_a_held_picture_does_not_stop_todays_format(monkeypatch, tmp_path, caplog):
+    """Review 4a I-1: today's formats can hold a picture still (a Ken Burns move that has ended,
+    replayed when an image fetch failed) under a held Hinglish sentence. That stretch is logged;
+    the reel ships, as it did before the check."""
+    _wire_happy(monkeypatch)
+    published = []
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: published.append(v) or ("VID1", "url"))
+    monkeypatch.setattr(gates, "reel_problems",
+                        lambda path, seconds: ["black: 1.2 s", "frozen: 3.0 s"])
+    with caplog.at_level("WARNING", logger="production"):
+        production.produce_one(IDEA, str(tmp_path))
+    assert len(published) == 1
+    assert any("frozen: 3.0 s" in r.getMessage() for r in caplog.records)
 
 
 def test_a_blocked_attempt_is_recorded(monkeypatch, tmp_path):
@@ -1298,6 +1314,23 @@ def _ai_video_wiring(monkeypatch, shots=None, preflight_ok=True):
     monkeypatch.setattr(production.db, "finish_attempt", lambda *a, **k: seen.update(attempt=k))
     monkeypatch.setattr(production, "_seconds_left", lambda: 1000.0)
     return seen
+
+
+def test_an_ai_video_reel_with_a_frozen_stretch_is_not_uploaded(monkeypatch, tmp_path):
+    """Review 4a I-1: in an ai_video reel every clip passed its own check and every still moves,
+    so a black or frozen stretch means something broke."""
+    seen = _ai_video_wiring(monkeypatch)
+    monkeypatch.setattr(gates, "reel_problems", lambda path, seconds: ["frozen: 3.0 s"])
+    with pytest.raises(production.ReelCheckFailed, match="frozen: 3.0 s"):
+        production.produce_one(IDEA, str(tmp_path))
+    assert seen["meta"] is None and seen["attempt"]["stage"] == "check"
+
+
+def test_an_ai_video_reel_on_the_ai_path_ships_with_a_held_picture(monkeypatch, tmp_path):
+    seen = _ai_video_wiring(monkeypatch, shots=production.ai_video.NoShots("no picture"))
+    monkeypatch.setattr(gates, "reel_problems", lambda path, seconds: ["frozen: 2.4 s"])
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["meta"] is not None  # uploaded
 
 
 def test_ai_video_reels_use_the_shots(monkeypatch, tmp_path):
