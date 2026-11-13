@@ -78,8 +78,22 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   - English text with any Devanagari takes the Hindi route;
   - the Hinglish step has no deadline of its own.
 
-**Next:** push stage 2 with the operator's go-ahead, then stages 3-4 and the relaunch (design
-section 14).
+- **Stage 2 is merged** (PR #19, 2026-11-13; CI 963 pass).
+- **Stage 3a is built** on `feat/stage-3-ai-video` (4 tasks; plan
+  `docs/superpowers/plans/2026-11-13-stage-3a-higgsfield-client-and-ledger.md`). Nothing is bought
+  yet; no reel calls Higgsfield. It holds:
+  - the client `src/higgsfield.py`: the key only to the API host, every message redacted, each
+    answer sorted into funds, auth, refused, busy or unavailable;
+  - the `ai_video_jobs` ledger in `src/db.py` (its SQL at the end of docs/03 §4);
+  - the sweep and the run's spend line in `src/ai_video.py`, called at the start and end of both
+    entry points;
+  - a conftest guard that keeps every test off the live API;
+  - `tools/verify_higgsfield.py`, the one live check, at most $0.18 and not yet run.
+  `HF_API_SECRET` is gone from the local `.env` (it was empty).
+
+**Next:** stage 3a's final review, then the operator's go-ahead for push and merge, the
+`HF_API_KEY` repository secret and the live check (design 15 steps 2-3). Then stage 3b (the shots,
+the cut list, the wiring) with stage 4, and the relaunch (design section 14).
 
 ## 1. What the operator wants
 

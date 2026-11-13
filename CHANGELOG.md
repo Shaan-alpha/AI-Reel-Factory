@@ -13,6 +13,18 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Added (2026-11-13: stage 3a, the Higgsfield client, the ledger and the sweep; details: STATUS.md)
+- **The Higgsfield client** (`src/higgsfield.py`). The key is sent only to the API host, every
+  message is redacted, and each answer is sorted into funds, auth, refused, busy or unavailable.
+- **The `ai_video_jobs` ledger** (`src/db.py`; SQL in docs/03 §4). Each job is reserved at its quote,
+  with a fresh idempotency key, before it is bought. A missing table is `LedgerUnavailable`, never
+  "nothing bought".
+- **The sweep and the spend line** (`src/ai_video.py`). Open jobs are settled at the start and end of
+  every run, and Telegram gets the run's Higgsfield spend and the month to date.
+- **A test guard** that keeps every test off the live API, and **`tools/verify_higgsfield.py`**:
+  one live check, at most $0.18, not yet run.
+- `HF_API_KEY` is in `.env.example` and both workflows; `HF_API_SECRET` is dropped.
+
 ### Added (2026-11-12: stage 2, Hinglish narration behind NARRATION_LANGUAGE; details: STATUS.md)
 - **Two-text lines** (`src/hinglish.py`): the fact-checked English script, line by line, as spoken
   Hinglish, rendered by Claude (then Gemini, then Groq). Code checks the count, numbers, names,

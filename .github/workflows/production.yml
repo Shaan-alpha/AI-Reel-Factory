@@ -102,6 +102,9 @@ jobs:
           ANTHROPIC_EFFORT: ${{ vars.ANTHROPIC_EFFORT || 'low' }}                  # low ~$0.037 a script, medium ~$0.066
           ANTHROPIC_MONTHLY_BUDGET_USD: ${{ vars.ANTHROPIC_MONTHLY_BUDGET_USD || '4' }} # held by the claude_spend ledger
           ENABLE_CLAUDE_SCRIPT: ${{ vars.ENABLE_CLAUDE_SCRIPT }}                    # empty = on
+          # Higgsfield (Kling shots): every job is reserved in ai_video_jobs before it is bought;
+          # unset, nothing is bought. Shots are bought only with VISUAL_SOURCE=ai_video.
+          HF_API_KEY: ${{ secrets.HF_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

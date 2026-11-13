@@ -137,3 +137,14 @@ def test_no_spend_line_without_purchases_a_key_or_a_ledger(monkeypatch):
     monkeypatch.delenv("HF_API_KEY")
     assert ai_video.spend_line(since) is None
     assert read == []  # an English run without the key never reads the ledger
+
+
+def test_tests_never_reach_higgsfield(monkeypatch):
+    """The conftest guard (design 17): Higgsfield is billed per clip, so with requests unpatched
+    the client refuses to send at all. The proxy points at a dead port so that, were the guard
+    missing, this test would fail on the proxy instead of reaching the real API."""
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    with pytest.raises(RuntimeError, match="Higgsfield"):
+        higgsfield.submit(higgsfield.KLING, {"prompt": "p"}, "key-1")
