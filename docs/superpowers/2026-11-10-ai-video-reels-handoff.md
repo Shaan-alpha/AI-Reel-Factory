@@ -131,7 +131,11 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   the design's one-reading rule missed FLUX's gibberish lettering, so the still is read twice.
   The 3b seam `_check_still` is gone (`_picture` calls the gate); `_check_clip` stays.
 
-**Next:** stage 4a's final review, then its push and PR with the operator's go-ahead; then
+- **Stage 4a's final review is done** (3 important findings fixed test-first, 1171 pass: black
+  and frozen stretches refuse only an AI-video reel; a failing Tesseract warns; a still's clip
+  covers a shorter shot again). Deferred minors are in STATUS.md's 2026-11-13 log.
+
+**Next:** stage 4a's push and PR with the operator's go-ahead; then
 **stage 4b** on the same branch or a new one (the key-number card, the banner hold, the source
 line and the logo, the subtitles' safe zone, the music level 4 LU, the vignette and the stings
 off, the key-point cards off). Then the relaunch (design section 14).

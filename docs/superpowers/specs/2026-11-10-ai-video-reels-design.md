@@ -921,8 +921,11 @@ are automatic. FFmpeg and Tesseract only; no new Python dependency.
 - **The finished reel:** duration within 0.2 s of the narration, audio present, no black stretch over
   1.0 s and no frozen stretch over 2.0 s. A reel that fails is not uploaded; the attempt fails with
   the reason and the idea goes back to the digest. Every format is checked: the four test renders
-  and the suite's real render of today's format pass. A check that cannot run is skipped with a
-  warning; only a reel that cannot be probed is refused for the check's own sake.
+  and the suite's real render of today's format pass. Black and frozen stretches refuse only an
+  `ai_video` reel that has its shots: today's formats can hold a picture still (a Ken Burns move
+  ends before its clip does, and a clip is replayed after a failed image fetch), so there they are
+  logged (stage 4a's final review). A check that cannot run is skipped with a warning; only a
+  reel that cannot be probed is refused for the check's own sake.
 - `tesseract-ocr` joins the cached apt packages on CI (Ubuntu 24.04 ships 5.3.4) and is called as a
   binary. If it is missing, the text check is skipped with one warning.
 - **Every FFmpeg call gets a timeout;** none has one today, so a stalled call waits for the job's kill.

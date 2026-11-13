@@ -25,7 +25,11 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
   stretch of 0.5 s or more, no frozen stretch of 1.5 s or more; a failed clip becomes a still.
 - **A reel check before every upload** (`gates.reel_problems`), for every format: within 0.2 s of
   the narration, video and audio present, no black stretch of 1.0 s or more, no frozen stretch
-  of 2.0 s or more. A failing reel is not uploaded and its idea goes back to the digest.
+  of 2.0 s or more. A failing reel is not uploaded and its idea goes back to the digest. Black and
+  frozen stretches refuse only an AI-video reel; today's formats can hold a picture still, so
+  there they are logged.
+- **After the final review:** a Tesseract that fails is a warning, not a run of clean stills; a
+  still's Ken Burns clip covers a shorter shot again.
 - **CI installs `tesseract-ocr`** with the cached apt packages; `TESSERACT_BINARY` is optional.
 
 ### Fixed (2026-11-13: the first AI-video test renders; details: STATUS.md)

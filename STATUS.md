@@ -179,8 +179,10 @@ free tier), read by Tesseract 5.4:
 - **every finished reel, of any format, is checked before the upload** (`gates.reel_problems`):
   within 0.2 s of its narration, video and audio present, no black stretch of 1.0 s or more, no
   frozen stretch of 2.0 s or more. A failing reel is not uploaded: its attempt fails at stage
-  `check` with the reason, and its idea goes back to the digest with an alert. A check that
-  cannot run is skipped with a warning; only a reel that cannot be probed is refused;
+  `check` with the reason, and its idea goes back to the digest with an alert. Black and frozen
+  stretches refuse only an AI-video reel that has its shots; in today's formats they are logged
+  (see the final review). A check that cannot run is skipped with a warning; only a reel that
+  cannot be probed is refused;
 - **CI installs `tesseract-ocr`** with the cached apt packages (new key
   `apt-ubuntu-24.04-ffmpeg-espeak-ng-tesseract-v2`, so each workflow's first run refills it).
   Without a binary the text check is skipped with one warning.
@@ -192,8 +194,28 @@ the dark laptop screen the noun check now keeps out. The six paid clips pass the
 four test renders, and the suite's real render of today's format (Kokoro, Pexels, FFmpeg), pass
 the reel check.
 
-Suite: **1164 passed, 6 skipped** (the sixth is the real-Tesseract test without a binary; with
-one, it passes). Next: the final review, then the push with the operator's go-ahead, then 4b.
+**Final review** (a fresh reviewer over `b6e6216..1e7f6ef`): no critical finding; the five
+review-focus cases hold. Three important findings, each fixed test-first:
+- **the reel check could refuse a sound reel of today's format.** A Ken Burns move ends 4.0-4.4 s
+  into its 7 s clip; after a failed image fetch a clip is replayed from 3.5 s, about 3 s with no
+  motion, and a held Hinglish sentence does not break the freeze. Black and frozen stretches now
+  refuse only an AI-video reel with its shots (there every clip passed its own check); elsewhere
+  they are logged;
+- **a Tesseract that runs but fails** (missing language data: exit 1, a bare header) made the
+  text check a silent no-op; it now raises, and the skip is logged;
+- **the 4.5 s clip floor broke the neighbour cover** (review I-3 of 3b): a still's Ken Burns clip
+  is its shot plus 0.1 s, so cover is a length-only check again.
+
+**Deferred minors:** a redraw tie goes to a schnell redraw over a klein first still; the redraw
+comparison ignores the problems' kinds; the planner keeps the last name-free plan rather than the
+one with fewer lettering words; the lettering list is broad (`tablet`, `title`, `sign`) and lacks
+Indian-English `hoarding`, `mobile`, `cheque`; the reel's length is the container's, not the video
+stream's; gate timeouts are not tied to the reel's deadline; gates calls assembly's private binary
+helpers.
+
+Tesseract is now installed on the dev machine too (`winget install UB-Mannheim.TesseractOCR`,
+5.4.0, with the operator's admin approval), so the real-Tesseract test runs locally.
+Suite: **1171 passed, 5 skipped**. Next: the push and PR with the operator's go-ahead, then 4b.
 
 ### 2026-11-13 — The first AI-video test renders (approved, nothing uploaded)
 
