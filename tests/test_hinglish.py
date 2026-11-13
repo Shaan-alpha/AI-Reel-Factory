@@ -403,3 +403,36 @@ def test_the_retry_asks_for_every_line_again():
     assert "all 3 lines" in prompt
     assert "all 3 lines" not in hinglish._render_prompt(["One.", "Two.", "Three."], "t", "plain",
                                                         None)
+
+
+def test_the_meaning_check_fails_over_to_another_independent_checker(monkeypatch):
+    """2026-11-13, the second test render: Gemini answered 503 "high demand" to the meaning
+    check, strict mode failed the line, and a Hinglish rendering that had passed every code check
+    was narrated in English. Groq is also independent of Claude: it checks instead. The renderer
+    never checks itself."""
+    en = ["Prices rose."]
+    lines = [{"i": 1, "hi": "दाम बढ़े।"}]
+    asked = []
+
+    def generate_with(provider, prompt, **kw):
+        asked.append(provider)
+        if provider == "gemini":
+            raise RuntimeError("503 UNAVAILABLE: This model is currently experiencing high demand")
+        return json.dumps({"lines": [{"i": 1, "same": True, "why": ""}]})
+
+    monkeypatch.setattr(llm, "generate_with", generate_with)
+    assert hinglish.meaning_check(en, lines, "claude") == ([], "groq")
+    assert asked == ["gemini", "groq"]
+
+    asked.clear()
+    assert hinglish.meaning_check(en, lines, "gemini") == ([], "groq")
+    assert "gemini" not in asked  # never the renderer's own provider
+
+    def all_down(provider, prompt, **kw):
+        asked.append(provider)
+        raise RuntimeError("503 UNAVAILABLE")
+
+    monkeypatch.setattr(llm, "generate_with", all_down)
+    monkeypatch.setenv("HINGLISH_STRICT", "true")
+    failures, _checker = hinglish.meaning_check(en, lines, "claude")
+    assert failures and "could not run" in failures[0]

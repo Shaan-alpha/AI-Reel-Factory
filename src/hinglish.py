@@ -441,7 +441,9 @@ def render(en_lines: list[str], title: str, tone: str,
 # --- the meaning check (design 7.4) ----------------------------------------------------------
 
 # Always another provider than the renderer's, so one model's mistake is not checked by itself.
-_CHECKER_FOR = {"claude": "gemini", "gemini": "groq", "groq": "gemini"}
+# The first is design 7.4's checker; the next answers when it cannot run (2026-11-13: Gemini's
+# 503 "high demand" sent a rendering that had passed every code check to English narration).
+_CHECKERS_FOR = {"claude": ("gemini", "groq"), "gemini": ("groq",), "groq": ("gemini",)}
 
 _MEANING_PROMPT = """You check a translation for a news video. Each numbered pair below is an \
 English sentence and the spoken Hinglish line written for it.
@@ -460,18 +462,28 @@ Return ONLY a JSON object with one entry per pair: {{"lines": [{{"i": 1, "same":
 def meaning_check(en_lines: list[str], lines: list[dict],
                   renderer: str) -> tuple[list[str], str]:
     """Failures from a second model's line-by-line check, and that model's provider. A line
-    judged different, or given no verdict, fails. A checker that cannot run fails under
-    HINGLISH_STRICT (default on); off, it passes with a warning. Every verdict is logged: these
-    checks were tested only on pairs written for the purpose (design 7.4)."""
-    checker = _CHECKER_FOR.get(renderer, "gemini")
+    judged different, or given no verdict, fails. The checker is design 7.4's for the renderer,
+    else the next provider independent of it; when none can run, the lines fail under
+    HINGLISH_STRICT (default on), or pass with a warning when it is off. Every verdict is logged:
+    these checks were tested only on pairs written for the purpose (design 7.4)."""
     by_number = {line.get("i"): str(line.get("hi") or "") for line in lines}
     pairs = "\n".join(f"{i}. EN: {en}\n   HI: {by_number.get(i, '')}"
                       for i, en in enumerate(en_lines, 1))
-    try:
-        data = llm.parse_json_object(llm.generate_with(
-            checker, _MEANING_PROMPT.format(pairs=pairs), json=True, max_tokens=2048))
-        verdicts = {int(v.get("i")): v for v in data.get("lines") or [] if isinstance(v, dict)}
-    except Exception as e:  # noqa: BLE001 — strict decides
+    checkers = _CHECKERS_FOR.get(renderer, ("gemini", "groq"))
+    verdicts, error = None, None
+    for checker in checkers:  # never the renderer's own provider
+        try:
+            data = llm.parse_json_object(llm.generate_with(
+                checker, _MEANING_PROMPT.format(pairs=pairs), json=True, max_tokens=2048))
+            verdicts = {int(v.get("i")): v for v in data.get("lines") or []
+                        if isinstance(v, dict)}
+            break
+        except Exception as e:  # noqa: BLE001 — the next independent checker, then strict
+            log.warning("hinglish: the meaning check (%s) could not run (%s)", checker,
+                        str(e)[:200])
+            error = e
+    if verdicts is None:
+        e = error
         if config.get_bool("HINGLISH_STRICT", True):
             log.warning("hinglish: the meaning check (%s) could not run (%s); strict, so it fails",
                         checker, str(e)[:200])
