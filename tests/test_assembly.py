@@ -632,3 +632,89 @@ def test_rendered_loudness_lands_on_target(tmp_path):
     peak = float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", summary).group(1))
     assert -16.0 <= loud <= -12.5, loud
     assert peak <= -0.5, peak
+
+
+# --- the cut list (design 11.2): shots first on the narration's pauses, then one reframe -----
+
+_TEST4 = os.path.join(os.path.dirname(__file__), "fixtures", "hinglish_test4.json")
+
+
+def _test4_trimmed() -> tuple[float, list[tuple[float, float]]]:
+    """Test 4's narration as voice.trim_silence leaves it: the leading pause gone, every other
+    pause 0.285 s earlier."""
+    import json
+
+    with open(_TEST4, encoding="utf-8") as f:
+        data = json.load(f)
+    lead = data["pauses"][0][1]
+    assert data["pauses"][0][0] == 0.0 and lead == 0.285
+    pauses = [(round(s - lead, 3), round(e - lead, 3)) for s, e in data["pauses"][1:]]
+    return round(data["duration"] - lead, 3), pauses
+
+
+def _bounds(cuts) -> list[float]:
+    """Shot boundaries: each shot's first start, then the reel's end."""
+    starts = {}
+    for seg in cuts:
+        starts.setdefault(seg.shot, seg.start)
+    return [starts[k] for k in sorted(starts)] + [cuts[-1].end]
+
+
+def _tiles(cuts, duration) -> bool:
+    return (cuts[0].start == 0.0 and cuts[-1].end == pytest.approx(duration, abs=1e-6)
+            and all(a.end == b.start for a, b in zip(cuts, cuts[1:])))
+
+
+def test_cut_list_on_test_4():
+    duration, pauses = _test4_trimmed()
+    cuts = assembly.cut_list(duration, pauses)
+    assert _bounds(cuts) == pytest.approx([0, 4.906, 9.906, 13.052, 17.706, 22.706, 26.755],
+                                          abs=0.002)
+    assert len(cuts) == 11 and _tiles(cuts, duration)
+    parts = {}
+    for seg in cuts:
+        parts.setdefault(seg.shot, []).append(seg)
+    assert sorted(k for k, v in parts.items() if len(v) == 2) == [0, 1, 3, 4, 5]
+    assert len(parts[2]) == 1  # the third shot, 3.15 s, is not reframed
+    for shot, segs in parts.items():
+        assert segs[0].zoom == 1.0 and segs[0].offset == 0.0
+        if len(segs) == 2:
+            assert segs[1].zoom == assembly.REFRAME_ZOOM == 1.15
+            assert segs[1].offset == pytest.approx(segs[1].start - segs[0].start, abs=1e-6)
+    assert assembly.shot_lengths(cuts) == pytest.approx(
+        [4.906, 5.0, 3.146, 4.654, 5.0, 4.049], abs=0.002)
+
+
+def test_clip_mode_is_one_segment_per_shot():
+    duration, pauses = _test4_trimmed()
+    cuts = assembly.cut_list(duration, pauses, mode="clip")
+    assert len(cuts) == 6 and _tiles(cuts, duration)
+    assert [seg.shot for seg in cuts] == [0, 1, 2, 3, 4, 5]
+    assert all(seg.zoom == 1.0 and seg.offset == 0.0 for seg in cuts)
+
+
+def test_no_shot_is_a_flash_or_too_long():
+    """Review Focus 1: the clock alone gave 5, 5, 5, 5, 5 and a 0.3 s flash for 25.3 s; and a
+    pause just before the end would have cut there and left 1.15 s."""
+    for duration, pauses in ((25.3, []), (21.2, [(20.0, 20.1)])):
+        cuts = assembly.cut_list(duration, pauses)
+        lengths = assembly.shot_lengths(cuts)
+        assert all(1.5 - 1e-6 <= x <= 5.0 + 1e-6 for x in lengths), (duration, lengths)
+        assert lengths[-1] == pytest.approx(1.5, abs=1e-6)
+        assert _tiles(cuts, duration)
+
+
+def test_short_narrations():
+    four = assembly.cut_list(4.0, [])
+    assert {seg.shot for seg in four} == {0} and [seg.start for seg in four] == [0.0, 2.0]
+    two = assembly.cut_list(2.0, [])
+    assert len(two) == 1 and (two[0].start, two[0].end) == (0.0, 2.0)
+    with pytest.raises(ValueError):
+        assembly.cut_list(0, [])
+
+
+def test_a_reframe_snaps_to_a_pause_near_the_middle():
+    near = assembly.cut_list(5.0, [(2.85, 2.95)])  # centred 0.4 s from the middle (2.5)
+    assert [seg.start for seg in near] == [0.0, 2.9]
+    far = assembly.cut_list(5.0, [(3.35, 3.45)])  # 0.9 s away: ignored
+    assert [seg.start for seg in far] == [0.0, 2.5]

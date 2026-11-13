@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 from src import config
 
@@ -225,6 +226,82 @@ def slice_count(duration: float) -> int:
     ask the module that does the cutting (rule 7).
     """
     return _slice_count(duration, _xfade_seconds() if _xfade_enabled() else 0.0)
+
+
+# --- The cut list (ai_video reels, design 6.3 and 11.2) -----------------------------------------
+# A Kling clip is 5.04 s of 24 fps video and is never slowed, so a shot lasts at most SHOT_MAX.
+# Shots end on the narration's pauses (a cut on the clock fell mid-sentence); then each longer
+# shot is cut once more inside its own clip. On both test narrations the picture then changed
+# every 2.2-2.4 s, the genre's rhythm, at no extra spend.
+SHOT_MIN = 3.0       # a shot ends at a pause no earlier than this...
+SHOT_MAX = 5.0       # ...and no later than this: the usable length of one clip
+TAIL_MIN = 1.5       # the reel never ends on a flash of a shot
+REFRAME_OVER = 3.6   # a shot longer than this is cut once more, inside its own clip,
+REFRAME_SNAP = 0.6   # at a pause this close to its middle, else at the middle;
+REFRAME_ZOOM = 1.15  # the second part punches in, which reads as a new picture
+
+
+@dataclass(frozen=True)
+class Segment:
+    """One stretch of an ai_video reel's screen time."""
+
+    shot: int      # the shot it shows, from 0
+    start: float   # reel seconds
+    end: float
+    offset: float  # seconds into that shot's own clip (or Ken Burns still) where it begins
+    zoom: float    # 1.0, or REFRAME_ZOOM after a reframe
+
+
+def _shot_ends(duration: float, points: list[float]) -> list[float]:
+    """Each shot ends at the latest pause that keeps it within [SHOT_MIN, SHOT_MAX], else at
+    SHOT_MAX; near the end the window shrinks so the last shot keeps at least TAIL_MIN."""
+    ends, t = [], 0.0
+    while duration - t > SHOT_MAX:
+        rest = duration - t
+        hi = SHOT_MAX if rest >= SHOT_MAX + TAIL_MIN else rest - TAIL_MIN
+        inside = [p for p in points if t + SHOT_MIN <= p <= t + hi]
+        t = inside[-1] if inside else t + hi
+        ends.append(t)
+    return ends + [duration]
+
+
+def cut_list(duration: float, pauses: list[tuple[float, float]],
+             mode: str = "pauses") -> list[Segment]:
+    """The shots and every cut of an ai_video reel, from its narration's length and pauses.
+
+    One function decides both, so the number of shots bought (ai_video) and the render cannot
+    disagree. `mode="clip"` (AI_VIDEO_CUTS) gives one segment per shot, with no reframe. There is
+    no reprise of the first shot at the end: the loop back to frame 1 is a plain cut."""
+    if not duration or duration <= 0:
+        raise ValueError(f"cut_list: no narration to cut ({duration!r} s)")
+    points = sorted(m for m in ((s + e) / 2 for s, e in pauses or [])
+                    if 0.05 < m < duration - 0.05)
+    cuts: list[Segment] = []
+    start = 0.0
+    for shot, end in enumerate(_shot_ends(duration, points)):
+        bounds = [start, end]
+        if mode != "clip" and end - start > REFRAME_OVER:
+            middle = (start + end) / 2
+            near = min(points, key=lambda p: abs(p - middle), default=None)
+            snap = near is not None and abs(near - middle) <= REFRAME_SNAP
+            bounds.insert(1, near if snap else middle)
+        first = round(start, 3)
+        for k, (a, b) in enumerate(zip(bounds, bounds[1:])):
+            a3 = round(a, 3)
+            cuts.append(Segment(shot, a3, round(b, 3), round(a3 - first, 3),
+                                REFRAME_ZOOM if k else 1.0))
+        start = end
+    return cuts
+
+
+def shot_lengths(cuts: list[Segment]) -> list[float]:
+    """Each shot's screen time, in shot order: what its clip or still must cover."""
+    first: dict[int, float] = {}
+    last: dict[int, float] = {}
+    for seg in cuts:
+        first.setdefault(seg.shot, seg.start)
+        last[seg.shot] = seg.end
+    return [round(last[k] - first[k], 3) for k in sorted(first)]
 
 
 def _ordered_clips(clip_paths: list[str], duration: float,
