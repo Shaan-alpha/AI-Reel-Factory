@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3a (the Higgsfield client, the ledger, the sweep) built and reviewed** on `feat/stage-3-ai-video`, not yet pushed; nothing is bought yet. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) built** on `feat/stage-4-picture-sound`, not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -66,10 +66,11 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   fresh final review and its fixes); **stage 2 (Hinglish) is merged** (PR #19, behind
   `NARRATION_LANGUAGE`). Stage 3 (AI video) came in two plans: **3a (the Higgsfield client,
   the ledger, the sweep) is merged** (PR #20) and **3b (the shots, the cut list, the wiring) is
-  merged** (PR #21), behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13 log). Next: one test
-  renders are done (see the 2026-11-13 log: four renders, five fixes, the target format
-  shown); next is stage 4 (picture and sound: the still gate first, then the number card and the
-  music level). State and decisions are in
+  merged** (PR #21), behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13 log). The test renders
+  are done and their fixes merged (PR #22). Stage 4 comes in two plans: **4a, the picture gates,
+  is built** (not yet pushed; see the 2026-11-13 log); next is its final review, then **4b** (the
+  key-number card, the banner hold, the source line and logo, the music level, the vignette and
+  the stings). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ~~**Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4~~ Done 2026-11-13 at the
   operator's request, through the Supabase CLI (`supabase db query --linked`): every table and
@@ -142,6 +143,79 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 ---
 
 ## Log
+
+### 2026-11-13 — Stage 4a: the picture gates (built on `feat/stage-4-picture-sound`, not pushed)
+
+The test renders' fixes were **merged as PR #22** first (merge b6e6216, CI 1125 pass), with the
+operator's go-ahead. Stage 4 is split like stage 3: **4a, the gates** (this entry; plan
+`docs/superpowers/plans/2026-11-13-stage-4a-picture-gates.md`, 6 tasks, test-first, built
+inline) and 4b, the text on screen and the sound.
+
+**Calibrated before the plan, at $0:** the six paid clips of idea 561, re-downloaded from the
+ledger, and 32 klein stills drawn for the purpose (8 planner-like prompts, 2 style lines, 2 seeds,
+free tier), read by Tesseract 5.4:
+- the design's rule (a word of 3+ letters at confidence 70+) missed FLUX's lettering: FLUX writes
+  gibberish, and Tesseract reads it at low confidence (the render's "TBEREOROIN" caption at 46, a
+  dark "Welcome" at 11; real words at 92-96; clean stills' noise at up to 59). Reading a
+  grayscale 2x copy too lifted the caption to 90;
+- **screens are the source:** every laptop prompt drew lettering (4 of 4), no other prompt did;
+- one still of seven was letterboxed and dark (middle half 36); every clean frame was 83+;
+- the style line ("cinematic ... film still") made no difference to captions or bars, so it
+  stays;
+- a vision model as the checker could not be compared: Gemini's Developer API answered 503, then
+  429, on all 38 frames locally. It stays a follow-up.
+
+**What a reel now does:**
+- **each still is checked** (`gates.still_problems`, new module `src/gates.py`): a word of 3+
+  letters at confidence 70+ read from the still or its 2x copy, a middle half darker than 60, or
+  letterbox bars means one redraw with a new seed. The redraw is used unless it fails more
+  checks; a redraw that cannot be drawn keeps the first. Every hit is logged;
+- **the shot planner is sent back** for words that draw lettering or a screen (laptop, screen,
+  phone, sign, chart and more), in the same one retry as the name check. It never costs a reel
+  its clips: after the retry, the last plan that names no one is used;
+- **each bought clip is checked** (`gates.clip_problems`): a readable video at least 4.5 s long
+  that covers its shot, no black stretch of 0.5 s or more, no frozen stretch of 1.5 s or more (a
+  freeze to the end counts). A failed clip becomes a still;
+- **every finished reel, of any format, is checked before the upload** (`gates.reel_problems`):
+  within 0.2 s of its narration, video and audio present, no black stretch of 1.0 s or more, no
+  frozen stretch of 2.0 s or more. A failing reel is not uploaded: its attempt fails at stage
+  `check` with the reason, and its idea goes back to the digest with an alert. Black and frozen
+  stretches refuse only an AI-video reel that has its shots; in today's formats they are logged
+  (see the final review). A check that cannot run is skipped with a warning; only a reel that
+  cannot be probed is refused;
+- **CI installs `tesseract-ocr`** with the cached apt packages (new key
+  `apt-ubuntu-24.04-ffmpeg-espeak-ng-tesseract-v2`, so each workflow's first run refills it).
+  Without a binary the text check is skipped with one warning.
+
+**On real media** (Tesseract from the official installer, unpacked into a scratch folder: the
+machine-wide install stopped at Windows' admin prompt): the stills, 4 of 5 lettered frames
+caught and 1 of 33 clean ones flagged (a chip read as "Ait", a free redraw); the frame missed is
+the dark laptop screen the noun check now keeps out. The six paid clips pass the clip check. The
+four test renders, and the suite's real render of today's format (Kokoro, Pexels, FFmpeg), pass
+the reel check.
+
+**Final review** (a fresh reviewer over `b6e6216..1e7f6ef`): no critical finding; the five
+review-focus cases hold. Three important findings, each fixed test-first:
+- **the reel check could refuse a sound reel of today's format.** A Ken Burns move ends 4.0-4.4 s
+  into its 7 s clip; after a failed image fetch a clip is replayed from 3.5 s, about 3 s with no
+  motion, and a held Hinglish sentence does not break the freeze. Black and frozen stretches now
+  refuse only an AI-video reel with its shots (there every clip passed its own check); elsewhere
+  they are logged;
+- **a Tesseract that runs but fails** (missing language data: exit 1, a bare header) made the
+  text check a silent no-op; it now raises, and the skip is logged;
+- **the 4.5 s clip floor broke the neighbour cover** (review I-3 of 3b): a still's Ken Burns clip
+  is its shot plus 0.1 s, so cover is a length-only check again.
+
+**Deferred minors:** a redraw tie goes to a schnell redraw over a klein first still; the redraw
+comparison ignores the problems' kinds; the planner keeps the last name-free plan rather than the
+one with fewer lettering words; the lettering list is broad (`tablet`, `title`, `sign`) and lacks
+Indian-English `hoarding`, `mobile`, `cheque`; the reel's length is the container's, not the video
+stream's; gate timeouts are not tied to the reel's deadline; gates calls assembly's private binary
+helpers.
+
+Tesseract is now installed on the dev machine too (`winget install UB-Mannheim.TesseractOCR`,
+5.4.0, with the operator's admin approval), so the real-Tesseract test runs locally.
+Suite: **1171 passed, 5 skipped**. Next: the push and PR with the operator's go-ahead, then 4b.
 
 ### 2026-11-13 — The first AI-video test renders (approved, nothing uploaded)
 

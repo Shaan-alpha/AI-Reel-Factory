@@ -332,7 +332,8 @@ query, used only if this shot falls back to a Pexels photo.
   and evenly lit; a named shot size and angle. The top fifth and the lower third are simple and
   calm, because the banner and subtitles sit there.
 - Describe the wanted state, not negatives ("all surfaces are plain and unmarked"), and avoid
-  nouns that invite lettering (sign, poster, headline, screen, newspaper, label).
+  nouns that invite lettering or a screen (sign, poster, headline, screen, laptop, phone,
+  computer, television, keyboard, newspaper, book, chart, label, banner, document).
 - End with the fixed look: `Style: cinematic 3D animated film still, stylized shapes, rich saturated
   color, bright clear lighting. Mood: <mood>.` (`AI_VIDEO_STYLE` overrides the look.)
 
@@ -356,6 +357,12 @@ query, used only if this shot falls back to a Pexels photo.
   countries, Indian states and large cities). One retry with the offending names quoted back; if
   it fails again, the plan is built from `extract_keywords` and `_img_prompt` with one generic
   motion line, and **nothing is bought** for that reel.
+- **A second code check** (stage 4a, from the test renders: a laptop of fake code; calibration,
+  2026-11-13: every laptop prompt drew lettering, 4 of 4, and no other prompt did) finds words
+  that make the image model draw lettering or a screen (`ai_video._LETTERING_WORDS`, singular or
+  plural, whole words) and quotes them back in the same one retry. It never costs a reel its
+  clips: after the retry, the last plan that names no one is used, and the still check (11.6)
+  is the backstop.
 
 ### 6.6 The Higgsfield client
 
@@ -896,15 +903,29 @@ them 30.2%, and the finished test reels carried 26-27%. Other sources stay at 30
 Nothing looks at a reel before it is public, and the operator declined manual checks, so the checks
 are automatic. FFmpeg and Tesseract only; no new Python dependency.
 
-- **Stills:** Tesseract OCR (`--psm 11`, TSV output) on each still; any word of three or more
-  letters read with confidence 70 or more means the still is redrawn once with a new seed. Mean
-  brightness of the middle half under a threshold means the same. A second failure is logged and the
-  still is used. Whether OCR catches FLUX's stray lettering is untested, so every hit is logged.
-- **Clips:** a video stream at least 4.5 s long; no black stretch (`blackdetect`) and no frozen
-  stretch over 1.5 s (`freezedetect`); a failed clip becomes a still.
+- **Stills:** Tesseract OCR (`--psm 11`, TSV output) on each still, read as drawn and as a
+  grayscale copy at twice the size; any word of three or more letters read with confidence 70 or
+  more means the still is redrawn once with a new seed. A mean brightness of the middle half under
+  60 (of 255), or letterbox bars (the top and bottom sixteenths both darker than 16 and flatter
+  than a standard deviation of 6), means the same. The redraw is used unless it fails more checks
+  than the first; a second failure is logged. **Measured 2026-11-13** on the renders' six paid
+  clips and 32 klein stills drawn for the purpose: FLUX writes gibberish, and Tesseract reads it at
+  low confidence (the render's "TBEREOROIN" caption at 46 from the still, 90 from the 2x copy;
+  real words at 92-96; clean stills' noise at up to 59). Read both ways, the rule caught 4 of the
+  5 lettered frames, with 1 false alarm in 33 clean ones (a free redraw); the frame it missed was
+  a dark laptop screen, which the planner's noun check (6.5) keeps out. One still of seven was
+  letterboxed and dark (36); every clean frame measured 83 or brighter.
+- **Clips:** a video stream at least 4.5 s long that covers its shot; no black stretch of 0.5 s
+  or more (`blackdetect`) and no frozen stretch over 1.5 s (`freezedetect`; a freeze running to
+  the end counts to the end); a failed clip becomes a still. All six paid clips passed.
 - **The finished reel:** duration within 0.2 s of the narration, audio present, no black stretch over
   1.0 s and no frozen stretch over 2.0 s. A reel that fails is not uploaded; the attempt fails with
-  the reason and the idea goes back to the digest.
+  the reason and the idea goes back to the digest. Every format is checked: the four test renders
+  and the suite's real render of today's format pass. Black and frozen stretches refuse only an
+  `ai_video` reel that has its shots: today's formats can hold a picture still (a Ken Burns move
+  ends before its clip does, and a clip is replayed after a failed image fetch), so there they are
+  logged (stage 4a's final review). A check that cannot run is skipped with a warning; only a
+  reel that cannot be probed is refused for the check's own sake.
 - `tesseract-ocr` joins the cached apt packages on CI (Ubuntu 24.04 ships 5.3.4) and is called as a
   binary. If it is missing, the text check is skipped with one warning.
 - **Every FFmpeg call gets a timeout;** none has one today, so a stalled call waits for the job's kill.

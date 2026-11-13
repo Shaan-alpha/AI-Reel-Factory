@@ -13,6 +13,25 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Added (2026-11-13: stage 4a, the picture gates; details: STATUS.md)
+- **A still check** (`gates.still_problems`, new module `src/gates.py`): Tesseract reads each
+  FLUX still as drawn and as a grayscale 2x copy; a word of 3+ letters at confidence 70+, a
+  middle half darker than 60, or letterbox bars means one redraw with a new seed. Calibrated on
+  the paid clips and 32 free stills: FLUX's gibberish lettering reads at low confidence, so one
+  reading missed it.
+- **The shot planner is sent back** for words that draw lettering or a screen (laptop, screen,
+  phone, sign, chart and more), in its one retry; it never costs a reel its clips.
+- **A clip check** (`gates.clip_problems`): at least 4.5 s and covering its shot, no black
+  stretch of 0.5 s or more, no frozen stretch of 1.5 s or more; a failed clip becomes a still.
+- **A reel check before every upload** (`gates.reel_problems`), for every format: within 0.2 s of
+  the narration, video and audio present, no black stretch of 1.0 s or more, no frozen stretch
+  of 2.0 s or more. A failing reel is not uploaded and its idea goes back to the digest. Black and
+  frozen stretches refuse only an AI-video reel; today's formats can hold a picture still, so
+  there they are logged.
+- **After the final review:** a Tesseract that fails is a warning, not a run of clean stills; a
+  still's Ken Burns clip covers a shorter shot again.
+- **CI installs `tesseract-ocr`** with the cached apt packages; `TESSERACT_BINARY` is optional.
+
 ### Fixed (2026-11-13: the first AI-video test renders; details: STATUS.md)
 - `tools/try_ai_video.py` could crash after paying for clips: a Windows console could not print
   the "🎞️" in its report. Its output is UTF-8 now.

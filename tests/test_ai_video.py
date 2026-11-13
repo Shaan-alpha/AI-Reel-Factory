@@ -220,7 +220,7 @@ def test_tests_never_reach_higgsfield(monkeypatch):
 
 import json  # noqa: E402
 
-from src import llm, visuals  # noqa: E402
+from src import gates, llm, visuals  # noqa: E402
 
 SCRIPT = ("Sunita Williams returned to Earth after 286 days in orbit. NASA says [short pause] the "
           "capsule splashed down safely. Here's why it matters: India's own crew flight is next.")
@@ -310,6 +310,57 @@ def test_a_name_from_the_story_rejects_the_plan(monkeypatch):
     assert not names & {"India", "Delhi", "Earth", "The", "Indian", "Here"}
 
 
+LAPTOP = ("A slim laptop sits open on a plain wooden desk beside a small lamp, its screen glowing "
+          "softly; medium shot from eye level, warm light from the right.")
+
+
+def test_a_laptop_in_a_still_is_sent_back_once(monkeypatch):
+    """Every laptop prompt drew lettering in the calibration (4 of 4): the planner is told."""
+    first = [_shot(i) for i in range(6)]
+    first[2]["still"] = LAPTOP
+    prompts = _llm(monkeypatch, [_reply(first), _reply([_shot(i) for i in range(6)])])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert "laptop (shot 3)" in prompts[1][0] and "screen (shot 3)" in prompts[1][0]
+    assert not any("laptop" in s["still"].lower() for s in plan)
+    assert "laptop" in prompts[0][0]  # the rule names the devices up front
+
+
+def test_lettering_nouns_are_found_in_any_case_and_plural():
+    shots = [{"still": "Two Laptops and a TV on a desk.", "motion": "A touchscreen glows."},
+             {"still": "Headphones, a design sketch and a photograph of the sea.",
+              "motion": "Monitoring lights blink; signals pass. A textured wall."},
+             {"still": "A Number  Plate and a newspaper.", "motion": "A laptop closes."}]
+    assert ai_video._lettering_in(shots) == ["laptop (shot 1)", "tv (shot 1)",
+                                             "touchscreen (shot 1)", "number plate (shot 3)",
+                                             "newspaper (shot 3)", "laptop (shot 3)"]
+
+
+def test_a_plan_still_naming_a_screen_after_the_retry_is_used(monkeypatch):
+    """The noun check never costs a reel its clips: after the retry, a plan that names no one
+    is used (the still check is the backstop)."""
+    first = [_shot(i) for i in range(6)]
+    first[2]["still"] = LAPTOP
+    second = [_shot(i) for i in range(6)]
+    second[4]["still"] = "A television on a wall shows a calm sea; medium shot, bright light."
+    prompts = _llm(monkeypatch, [_reply(first), _reply(second)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert plan[4]["still"].startswith("A television") and "laptop" not in plan[2]["still"]
+
+
+def test_a_retry_that_names_someone_falls_back_to_the_plan_without_names(monkeypatch):
+    first = [_shot(i) for i in range(6)]
+    first[2]["still"] = LAPTOP
+    named = [_shot(i) for i in range(6)]
+    named[1]["still"] = "Sunita Williams waves from a capsule window; bright light."
+    prompts = _llm(monkeypatch, [_reply(first), _reply(named)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert plan[2]["still"].startswith("A slim laptop")  # the first plan, not the fallback
+    assert not any("Sunita" in s["still"] for s in plan)
+
+
 def test_a_second_failure_buys_nothing(monkeypatch):
     named = [_shot(i, still="NASA engineers cheer as Sunita Williams waves.") for i in range(6)]
     prompts = _llm(monkeypatch, [_reply(named), _reply(named)])
@@ -375,7 +426,75 @@ def _draws(monkeypatch, klein=(), schnell=(), photos=()) -> dict:
 
     monkeypatch.setattr(visuals, "ai_still", ai_still)
     monkeypatch.setattr(visuals, "stock_photo", stock_photo)
+    monkeypatch.setattr(gates, "still_problems", lambda path: [])  # every still passes
     return asked
+
+
+def _gate(monkeypatch, failing: dict) -> list:
+    """gates.still_problems replaced: a still whose file name is in `failing` has those
+    problems. Returns the files checked."""
+    checked = []
+
+    def still_problems(path):
+        checked.append(os.path.basename(path))
+        return failing.get(os.path.basename(path), [])
+
+    monkeypatch.setattr(gates, "still_problems", still_problems)
+    return checked
+
+
+def test_a_clean_still_is_drawn_once(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    checked = _gate(monkeypatch, {})
+    ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert len(asked["still"]) == 6 and sorted(checked) == [f"still_{i:02d}.jpg" for i in range(6)]
+
+
+def test_a_still_with_lettering_is_redrawn_with_a_new_seed(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    _gate(monkeypatch, {"still_02.jpg": ["text: 'BER' 90"]})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert os.path.basename(pics[2].path) == "redraw_02.jpg" and pics[2].animatable
+    seeds = sorted(seed for i, _prompt, seed in asked["still"] if i == 2)
+    assert seeds == sorted([visuals._image_seed("idea_7", 2),
+                            visuals._image_seed("idea_7:redraw", 2)])
+    assert len(asked["still"]) == 7  # one redraw, the other shots once
+
+
+def test_a_redraw_that_fails_too_is_used_and_logged(monkeypatch, tmp_path, caplog):
+    _draws(monkeypatch, klein=set(range(6)))
+    _gate(monkeypatch, {"still_02.jpg": ["text: 'BER' 90"], "redraw_02.jpg": ["dark: 41 < 60"]})
+    with caplog.at_level("WARNING", logger="src.ai_video"):
+        pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert os.path.basename(pics[2].path) == "redraw_02.jpg"
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "'BER' 90" in said and "dark: 41 < 60" in said
+
+
+def test_the_first_still_is_kept_when_the_redraw_is_worse(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    checked = _gate(monkeypatch, {"still_02.jpg": ["dark: 50 < 60"],
+                                  "redraw_02.jpg": ["text: 'Welcome' 96", "letterbox bars"]})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert "redraw_02.jpg" in checked and len(asked["still"]) == 7  # the redraw was tried
+    assert os.path.basename(pics[2].path) == "still_02.jpg" and pics[2].animatable
+
+
+def test_a_redraw_that_cannot_draw_keeps_the_first_still(monkeypatch, tmp_path):
+    """Review Focus 2: a Workers AI refusal on the redraw never takes the shot's picture."""
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    drawn, tried = visuals.ai_still, []
+
+    def first_only(prompt, dest, seed):
+        tried.append(os.path.basename(dest))
+        return None if os.path.basename(dest).startswith("redraw_") else drawn(prompt, dest, seed)
+
+    monkeypatch.setattr(visuals, "ai_still", first_only)
+    _gate(monkeypatch, {"still_02.jpg": ["letterbox bars"]})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert "redraw_02.jpg" in tried
+    assert os.path.basename(pics[2].path) == "still_02.jpg" and pics[2].animatable
+    assert asked["photo"] == []
 
 
 def test_only_a_klein_still_is_animatable(monkeypatch, tmp_path):
@@ -673,6 +792,9 @@ def _watch(monkeypatch, states: dict, cancels: dict | None = None, probe: float 
     monkeypatch.setattr(db, "update_ai_video_job",
                         lambda row_id, **fields: seen["update"].append((row_id - 100, fields)))
     monkeypatch.setattr(assembly, "probe_duration", lambda path: probe)
+    # The clip check's probe answers with `probe`; its black and frozen pass finds nothing.
+    monkeypatch.setattr(gates, "_probe", lambda path: gates.Media(probe, True, False))
+    monkeypatch.setattr(gates, "_stretches", lambda *a, **k: ([], []))
     monkeypatch.setattr(ai_video, "_jitter", lambda: 0.0)
     return seen
 
@@ -1005,6 +1127,29 @@ def test_a_still_that_will_not_render_borrows_a_clip(monkeypatch, tmp_path, fres
     assert tries == [3, 3]  # one retry
     assert shots.files[3] == shots.files[2] and shots.kinds[3] == "still"
     assert shots.video == 5 and shots.spend_usd == pytest.approx(5 * PRICE)
+
+
+def test_a_short_still_clip_covers_a_shorter_shot(monkeypatch, tmp_path):
+    """Review 4a I-3: a still's Ken Burns clip is its shot plus 0.1 s, often under 4.5 s. As
+    cover for a shorter shot only its length matters; the 4.5 s floor is for bought clips."""
+    lengths = [3.0, 4.3, 3.2]
+
+    def still_clip(picture, dest, seconds, index):
+        if index == 0:
+            raise RuntimeError("ken burns failed (1)")
+        with open(dest, "wb") as f:
+            f.write(b"mp4")
+        return dest
+
+    real = {f"shot_{i:02d}.mp4": lengths[i] + 0.1 for i in range(3)}
+    monkeypatch.setattr(ai_video, "_still_clip", still_clip)
+    monkeypatch.setattr(assembly, "probe_duration", lambda path: real[os.path.basename(path)])
+    monkeypatch.setattr(gates, "_probe",
+                        lambda path: gates.Media(real[os.path.basename(path)], True, False))
+    monkeypatch.setattr(gates, "_stretches", lambda *a, **k: ([], []))
+    pictures = [ai_video.Picture(str(tmp_path / f"still_{i:02d}.jpg"), False) for i in range(3)]
+    files, kinds = ai_video._files(_req(work_dir=str(tmp_path)), pictures, lengths, {})
+    assert os.path.basename(files[0]) == "shot_01.mp4" and kinds == ["still"] * 3
 
 
 def test_no_shots_carries_the_reels_spend(monkeypatch, tmp_path, fresh_run):

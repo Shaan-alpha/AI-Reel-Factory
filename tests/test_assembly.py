@@ -414,6 +414,9 @@ def test_live_full_reel(monkeypatch, tmp_path):
     assert "codec_type=audio" in probe
     out_dur = assembly.probe_duration(out)
     assert abs(out_dur - dur) < 1.5
+    # The reel check before every upload (design 11.6) passes today's format on a real render.
+    from src import gates
+    assert gates.reel_problems(out, dur) == []
 
 
 # --- cut-rhythm contract (shared with visuals) ------------------------------------------
