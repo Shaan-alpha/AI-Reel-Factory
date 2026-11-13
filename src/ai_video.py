@@ -290,7 +290,7 @@ _LETTERING_WORDS = (
     "spreadsheet", "logo", "banknote", "bank note", "currency note", "rupee note",
     "number plate", "licence plate", "license plate", "screen", "touchscreen", "monitor",
     "laptop", "computer", "tablet", "phone", "smartphone", "cellphone", "television", "tv",
-    "display", "dashboard", "scoreboard", "whiteboard", "blackboard", "chalkboard", "keyboard",
+    "dashboard", "scoreboard", "whiteboard", "blackboard", "chalkboard", "keyboard",
 )
 _LETTERING = re.compile(
     r"\b(" + "|".join(re.escape(w).replace(r"\ ", r"\s+")
@@ -337,13 +337,14 @@ SHOTS: {m}, in narration order, lasting {seconds}.
 Shot 1 shows the opening claim; the last shot shows the payoff, why it matters.
 
 For every shot write:
-- "still": one descriptive paragraph of 60 to 100 words, not a list of tags. The subject and its action first, then the setting, then the light (its source, direction and softness). One main subject, large and centred, filling the middle half of a vertical 9:16 frame, brightly and evenly lit; name the shot size and the camera angle. Keep the top fifth and the lower third of the frame simple and calm: a title and subtitles sit there. Describe what you want, never what to avoid (write "all surfaces are plain and unmarked"), and never use a noun that invites lettering or a screen: sign, poster, headline, screen, laptop, phone, computer, television, keyboard, newspaper, book, chart, label, banner, document. Do not write a style or mood line: one is added.
+- "still": one descriptive paragraph of 60 to 100 words, not a list of tags. The subject and its action first, then the setting, then the light (its source, direction and softness). One main subject, large and centred, filling the middle half of a vertical 9:16 frame, brightly and evenly lit; name the shot size and the camera angle. Keep the top fifth and the lower third of the frame simple and calm: plain sky, wall, floor or water. Describe what you want, never what to avoid (write "all surfaces are plain and unmarked"), and never use a noun that invites lettering or a screen: sign, poster, headline, screen, laptop, phone, computer, television, keyboard, newspaper, book, chart, label, banner, document. Do not write a style or mood line: one is added.
 - "motion": one to three short sentences of motion only. One slow motion of the subject, at most one supporting motion, and what stays still. Exactly one camera instruction: static, or one slow, stable move. Nothing that is not in the picture; say the subject keeps its exact shape and colors.
 - "search": one to three plain words a stock-photo site would have for this shot, such as "cargo ship".
 
 Content rules:
 - No real person and no likeness of one, and no name from the story in any "still" or "motion". Show places, objects, symbols, hands, or small figures seen from behind.
 - No logos, brand marks, flags carrying text, documents, screens or interfaces.
+- Never name text, titles, captions, subtitles, letters or words in a still or motion, not even to say there is none: the image model draws what it reads.
 - Nothing that imitates footage of the real event: no disaster in progress, no violence, no bodies, no crowd in distress.{" This is a somber story: calm, symbolic scenes and minimal motion." if somber else ""}
 
 Return one JSON object and nothing else, with exactly {m} shots:
@@ -413,7 +414,8 @@ def plan_shots(req: ReelRequest, durations: list[float]) -> tuple[list[dict], bo
             log.warning("ai_video: the shot plan named %s", ", ".join(found))
         if lettering:
             note += (f"Your last plan used words that make the image model draw lettering or a "
-                     f"screen: {', '.join(lettering)}. Describe those shots again without them, "
+                     f"screen: {', '.join(lettering)}. Describe those shots again without these "
+                     f"words, not even to exclude them (no 'no text', no 'room for subtitles'), "
                      f"through objects, places, hands or symbols that carry no writing.\n\n")
             log.warning("ai_video: the shot plan asked for lettering: %s", ", ".join(lettering))
     if usable is not None:

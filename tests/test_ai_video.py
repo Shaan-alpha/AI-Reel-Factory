@@ -328,7 +328,7 @@ def test_a_laptop_in_a_still_is_sent_back_once(monkeypatch):
 
 def test_lettering_nouns_are_found_in_any_case_and_plural():
     shots = [{"still": "Two Laptops and a TV on a desk.", "motion": "A touchscreen glows."},
-             {"still": "Headphones, a design sketch and a photograph of the sea.",
+             {"still": "Headphones, a design sketch, a vase on display, a photograph of the sea.",
               "motion": "Monitoring lights blink; signals pass. A textured wall."},
              {"still": "A Number  Plate and a newspaper.", "motion": "A laptop closes."}]
     assert ai_video._lettering_in(shots) == ["laptop (shot 1)", "tv (shot 1)",
@@ -1209,3 +1209,23 @@ def test_a_rejected_plan_is_told_for_each_reel(monkeypatch, tmp_path, fresh_run)
     for _ in range(2):
         shots = ai_video.make_shots(_test4_req(tmp_path))
         assert any("shot plan" in p for p in shots.problems)
+
+
+def test_the_planner_never_names_text_even_to_exclude_it(monkeypatch):
+    """Stage 4b's render: told that "a title and subtitles sit there", the planner wrote them into
+    its stills ("room for the title and subtitles", "free of text"), so the lettering check
+    refused nearly every plan, and FLUX may draw what it reads (render 1's fake caption sat
+    exactly where subtitles go)."""
+    prompts = _llm(monkeypatch, [_reply([_shot(i) for i in range(6)])])
+    ai_video.plan_shots(_req(), DUR6)
+    prompt = prompts[0][0]
+    assert "subtitles sit there" not in prompt and "title and subtitles" not in prompt
+    assert "not even to say there is none" in prompt
+
+
+def test_the_lettering_retry_asks_for_no_negations(monkeypatch):
+    first = [_shot(i) for i in range(6)]
+    first[0]["still"] = "A calm harbour at dawn with no text anywhere, room left for subtitles."
+    prompts = _llm(monkeypatch, [_reply(first), _reply([_shot(i) for i in range(6)])])
+    ai_video.plan_shots(_req(), DUR6)
+    assert "text (shot 1)" in prompts[1][0] and "not even to exclude them" in prompts[1][0]
