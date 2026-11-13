@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -444,3 +445,161 @@ def _still_clip(picture: Picture, dest: str, seconds: float, index: int) -> str:
     shot so its last frame is never short (review finding 7: pace the move to the shot)."""
     visuals._image_to_kenburns_clip(picture.path, dest, seconds + 0.1, index=index, fps=FPS)
     return dest
+
+
+# --- Buying the clips (design 6.2 step 7, 6.4) --------------------------------------------------
+
+_clock = time.monotonic   # the phase deadline's clock; tests replace it and _sleep
+_sleep = time.sleep
+_latch: set[str] = set()     # this run's stop latches (6.4): funds, auth, ledger, slow
+_alerted: set[str] = set()   # the alert kinds already told this run (6.8: one alert per kind)
+_REPEAT_WAITS = (2, 4, 8)    # seconds between repeats of an unanswered submit, then 10
+_CLIP_SECONDS = 5
+
+
+def begin_run() -> None:
+    """A new run: no stop latch is set and no alert has been sent."""
+    _latch.clear()
+    _alerted.clear()
+
+
+def _stop_buying() -> bool:
+    """A stop latch is set, so nothing more is bought this run: Higgsfield is out of funds or
+    refused the key, the ledger table is missing, or a reel's queue gave it no clip in time."""
+    return bool(_latch)
+
+
+def video_shots(m: int, k: int) -> list[int]:
+    """Which of m shots are video when k clips may be bought (design 6.3): shot 0 (the opening
+    claim), then the last (the payoff), then the rest from the start. A still never opens the
+    reel while there is a clip to buy."""
+    order = [0] + ([m - 1] if m > 1 else []) + list(range(1, m - 1))
+    return sorted(order[:max(0, min(m, k))])
+
+
+@dataclass
+class Job:
+    """One Kling job of this attempt, as its ledger row records it."""
+
+    shot: int
+    row_id: int
+    key: str                        # its idempotency key: every repeat of the submit carries it
+    request_id: str | None = None
+    status: str = "reserved"
+    cost: float = 0.0               # the quote until it is known not to be charged
+    submitted_at: float | None = None
+    ambiguous: bool = False         # a submit went unanswered: one job may exist and be charged
+    clip: str | None = None         # the downloaded clip, once usable
+
+
+def _model() -> str:
+    return (config.get("AI_VIDEO_MODEL") or higgsfield.KLING).strip()
+
+
+def _content_type(path: str) -> str:
+    """The still's type from its first bytes: FLUX answers PNG or JPEG under any file name."""
+    with open(path, "rb") as f:
+        head = f.read(12)
+    if head.startswith(b"\x89PNG"):
+        return "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _record(job: Job, **fields) -> None:
+    """Write a job's progress to its row. A failed write is logged and the job goes on: the row
+    keeps what it had, and a reserved row counts at its quote."""
+    try:
+        db.update_ai_video_job(job.row_id, **fields)
+    except Exception as e:  # noqa: BLE001 — the reel goes on; the sweep or the quote covers it
+        log.warning("ai_video: could not record shot %d's job (%s)", job.shot, e)
+
+
+def _refuse(job: Job, why: object) -> None:
+    """Higgsfield refused the job before it existed, so nothing was charged."""
+    job.status, job.cost = "refused", 0.0
+    log.warning("ai_video: shot %d was not bought (%s)", job.shot, higgsfield.redact(why))
+    _record(job, status="refused", cost_usd=0, settled_at=_now())
+
+
+def _wait(seconds: float, phase_end: float) -> bool:
+    """Sleep up to `seconds`, never past the phase's end; True while time is left after it."""
+    left = phase_end - _clock()
+    if left <= 0:
+        return False
+    _sleep(min(seconds, left))
+    return _clock() < phase_end
+
+
+def _submit(job: Job, picture: Picture, motion: str, model: str, phase_end: float) -> None:
+    """Upload the shot's still once, then submit its job, repeating only what may be repeated."""
+    try:
+        url = higgsfield.upload(picture.path, _content_type(picture.path))
+    except higgsfield.HiggsfieldError as e:
+        if e.kind in ("funds", "auth"):
+            _latch.add(e.kind)
+        _refuse(job, f"the still was not uploaded: {e}")  # no still, no job
+        return
+    body = {"prompt": motion, "image_url": url, "duration": _CLIP_SECONDS,
+            "negative_prompt": NEGATIVE}
+    waits = iter(_REPEAT_WAITS)
+    while True:
+        try:
+            answer = higgsfield.submit(model, body, job.key)
+        except higgsfield.HiggsfieldError as e:
+            if e.kind == "unavailable":
+                # It may have been accepted: repeat with the same key and body, which Higgsfield
+                # answers with the original job and no second charge (live check, 2026-11-13).
+                job.ambiguous = True
+                if _wait(next(waits, 10), phase_end):
+                    continue
+                log.warning("ai_video: shot %d's submit never answered; its row stays at its "
+                            "quote", job.shot)
+                return
+            if e.kind == "busy":
+                wait = e.retry_after if e.retry_after is not None else next(waits, 10)
+                if _clock() + wait < phase_end:
+                    _sleep(wait)
+                    continue
+            if e.kind in ("funds", "auth"):
+                _latch.add(e.kind)
+            if job.ambiguous:
+                # An earlier attempt may have created a charged job (3a's I-6): keep the quote.
+                log.warning("ai_video: shot %d was refused after an unanswered submit (%s); its "
+                            "row stays at its quote", job.shot, e)
+                return
+            _refuse(job, e)
+            return
+        job.request_id, job.status = str(answer["request_id"]), "submitted"
+        job.submitted_at = _clock()
+        _record(job, request_id=job.request_id, status="submitted")
+        return
+
+
+def _buy(req: ReelRequest, positions: list[int], pictures: list[Picture], plan: list[dict],
+         price: float, phase_end: float) -> list[Job]:
+    """Buy a clip for each video position: shot 0 first, then the reel's last shot, then the rest
+    in order. Each row is reserved, at the quote and with a fresh key, before its still is
+    uploaded or its job submitted (design 6.2 step 7). A failed reserve buys nothing more for
+    this reel; a stop latch, or the phase's end, stops the buying too."""
+    model = _model()
+    last = len(pictures) - 1
+    jobs: list[Job] = []
+    for shot in sorted(positions, key=lambda s: (s != 0, s != last, s)):
+        if _stop_buying() or _clock() >= phase_end:
+            break
+        if not pictures[shot].animatable:
+            continue  # a schnell still or a stock photo is never animated
+        try:
+            row = db.reserve_ai_video_job(req.idea_id, shot, model, price)
+        except Exception as e:  # noqa: BLE001 — no row, no purchase
+            if isinstance(e, db.LedgerUnavailable):
+                _latch.add("ledger")
+            log.warning("ai_video: shot %d could not be reserved (%s); nothing more is bought "
+                        "for idea %s", shot, e, req.idea_id)
+            break
+        job = Job(shot=shot, row_id=row["id"], key=row["idempotency_key"], cost=float(price))
+        jobs.append(job)
+        _submit(job, pictures[shot], plan[shot]["motion"], model, phase_end)
+    return jobs

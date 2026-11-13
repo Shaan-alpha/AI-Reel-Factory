@@ -418,3 +418,209 @@ def test_a_still_clip_covers_its_shot_at_24_fps(monkeypatch, tmp_path):
     out = ai_video._still_clip(pic, str(tmp_path / "shot_02.mp4"), 4.654, 2)
     assert out == str(tmp_path / "shot_02.mp4")
     assert made == [(pic.path, out, pytest.approx(4.754), 2, 24)]
+
+
+# --- Stage 3b: buying the clips (design 6.2 step 7, 6.4) -----------------------------------------
+
+PRICE = 0.1575  # the live check of 2026-11-13: $0.0315 a second at 720p, 5 s a clip
+
+
+class _Clock:
+    """A fake monotonic clock that only moves when the code under test sleeps."""
+
+    def __init__(self, start: float = 1000.0):
+        self.now, self.slept = start, []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(round(seconds, 3))
+        self.now += seconds
+
+
+@pytest.fixture
+def fresh_run(monkeypatch):
+    """A new run (no latch set) on a fake clock."""
+    clock = _Clock()
+    monkeypatch.setattr(ai_video, "_clock", clock)
+    monkeypatch.setattr(ai_video, "_sleep", clock.sleep)
+    ai_video.begin_run()
+    yield clock
+    ai_video.begin_run()
+
+
+def _shop(monkeypatch, answers: dict, reserve_fails_at: int | None = None,
+          reserve_error: Exception | None = None) -> list:
+    """The ledger and Higgsfield replaced. answers[shot] is the list of submit answers, in turn
+    (a HiggsfieldError is raised; the last one repeats). Returns every call, in order."""
+    events, rows = [], {}
+
+    def reserve(idea_id, shot, endpoint, cost_usd):
+        if reserve_fails_at is not None and len(rows) == reserve_fails_at:
+            events.append(("reserve-failed", shot))
+            raise reserve_error or RuntimeError("insert failed")
+        row = {"id": 100 + shot, "idempotency_key": f"key-{shot}"}
+        rows[row["id"]] = shot
+        events.append(("reserve", shot, endpoint, cost_usd))
+        return row
+
+    def update(row_id, **fields):
+        events.append(("update", rows[row_id], fields))
+
+    def upload(path, content_type):
+        events.append(("upload", path, content_type))
+        return f"https://cdn.example/{os.path.basename(path)}"
+
+    asked: dict[int, int] = {}
+
+    def submit(endpoint, args, key):
+        shot = int(key.split("-")[1])
+        events.append(("submit", shot, dict(args), key))
+        turn = asked[shot] = asked.get(shot, 0) + 1
+        seq = answers.get(shot, [{"request_id": f"req-{shot:04d}-abcd", "status": "queued"}])
+        answer = seq[min(turn, len(seq)) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(db, "reserve_ai_video_job", reserve)
+    monkeypatch.setattr(db, "update_ai_video_job", update)
+    monkeypatch.setattr(higgsfield, "upload", upload)
+    monkeypatch.setattr(higgsfield, "submit", submit)
+    return events
+
+
+def _stills(tmp_path, animatable=(0, 1, 2, 3, 4, 5)) -> list:
+    pictures = []
+    for i in range(6):
+        path = tmp_path / f"still_{i:02d}.jpg"
+        path.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+        pictures.append(ai_video.Picture(str(path), i in animatable))
+    return pictures
+
+
+def _kinds(events) -> list:
+    return [(e[0], e[1]) for e in events]
+
+
+UNANSWERED = higgsfield.HiggsfieldError("unavailable", "submit: ReadTimeout")
+
+
+def test_video_positions():
+    assert ai_video.video_shots(6, 6) == [0, 1, 2, 3, 4, 5]
+    assert ai_video.video_shots(7, 6) == [0, 1, 2, 3, 4, 6]
+    assert ai_video.video_shots(6, 2) == [0, 5]
+    assert ai_video.video_shots(1, 6) == [0]
+    assert ai_video.video_shots(6, 0) == []
+
+
+def test_a_row_is_reserved_before_anything_is_sent(monkeypatch, tmp_path, fresh_run):
+    events = _shop(monkeypatch, {})
+    pictures = _stills(tmp_path)
+    jobs = ai_video._buy(_req(work_dir=str(tmp_path)), [0, 5], pictures, PLAN6, PRICE,
+                         fresh_run.now + 300)
+    assert _kinds(events) == [("reserve", 0), ("upload", pictures[0].path), ("submit", 0),
+                              ("update", 0), ("reserve", 5), ("upload", pictures[5].path),
+                              ("submit", 5), ("update", 5)]
+    assert events[0][2:] == (higgsfield.KLING, PRICE)
+    assert events[1][2] == "image/jpeg"
+    _kind, _shot, body, key = events[2]
+    assert key == "key-0" and body == {"prompt": PLAN6[0]["motion"],
+                                       "image_url": "https://cdn.example/still_00.jpg",
+                                       "duration": 5, "negative_prompt": ai_video.NEGATIVE}
+    assert events[3][2] == {"request_id": "req-0000-abcd", "status": "submitted"}
+    assert [(j.shot, j.status, j.cost, j.request_id) for j in jobs] == [
+        (0, "submitted", PRICE, "req-0000-abcd"), (5, "submitted", PRICE, "req-0005-abcd")]
+
+
+def test_a_failed_reserve_buys_nothing_more(monkeypatch, tmp_path, fresh_run):
+    events = _shop(monkeypatch, {}, reserve_fails_at=1)
+    jobs = ai_video._buy(_req(work_dir=str(tmp_path)), [0, 1, 5], _stills(tmp_path), PLAN6,
+                         PRICE, fresh_run.now + 300)
+    assert [j.shot for j in jobs] == [0]
+    assert _kinds(events)[-1] == ("reserve-failed", 5)  # the reel's last shot is bought second
+    assert not ai_video._stop_buying()  # one failed insert is this reel's, not the run's
+
+    events = _shop(monkeypatch, {}, reserve_fails_at=0,
+                   reserve_error=db.LedgerUnavailable("ai_video_jobs is missing"))
+    assert ai_video._buy(_req(work_dir=str(tmp_path)), [0, 1], _stills(tmp_path), PLAN6, PRICE,
+                         fresh_run.now + 300) == []
+    assert ai_video._stop_buying()  # no table: nothing is bought for the rest of the run
+
+
+def test_an_unanswered_submit_is_repeated_with_the_same_key_and_body(monkeypatch, tmp_path,
+                                                                     fresh_run):
+    answer = {"request_id": "req-0000-abcd", "status": "queued"}
+    events = _shop(monkeypatch, {0: [UNANSWERED, UNANSWERED, answer]})
+    (job,) = ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                           fresh_run.now + 300)
+    submits = [e for e in events if e[0] == "submit"]
+    assert len(submits) == 3 and len({(str(e[2]), e[3]) for e in submits}) == 1
+    assert [e[0] for e in events].count("upload") == 1
+    assert fresh_run.slept == [2, 4]
+    assert (job.status, job.request_id, job.ambiguous) == ("submitted", "req-0000-abcd", True)
+
+    events = _shop(monkeypatch, {0: [UNANSWERED]})
+    (job,) = ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                           fresh_run.now + 20)
+    assert (job.status, job.cost, job.request_id) == ("reserved", PRICE, None)
+    assert not [e for e in events if e[0] == "update"]  # it may have been charged: no refund
+
+
+def test_a_refusal_after_an_unanswered_submit_keeps_the_quote(monkeypatch, tmp_path, fresh_run):
+    """Review Focus 2 (3a's I-6): the first submit may have created a charged job, so a refusal
+    of the repeat does not make the row free."""
+    refused = higgsfield.HiggsfieldError("refused", "submit -> HTTP 422", status=422)
+    events = _shop(monkeypatch, {0: [UNANSWERED, refused]})
+    (job,) = ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                           fresh_run.now + 300)
+    assert (job.status, job.cost) == ("reserved", PRICE)
+    assert not [e for e in events if e[0] == "update"]
+
+
+def test_refusals_cost_nothing(monkeypatch, tmp_path, fresh_run):
+    refused = higgsfield.HiggsfieldError("refused", "submit -> HTTP 422", status=422)
+    events = _shop(monkeypatch, {0: [refused]})
+    jobs = ai_video._buy(_req(work_dir=str(tmp_path)), [0, 5], _stills(tmp_path), PLAN6, PRICE,
+                         fresh_run.now + 300)
+    assert [(j.shot, j.status, j.cost) for j in jobs] == [(0, "refused", 0.0),
+                                                          (5, "submitted", PRICE)]
+    update = next(e for e in events if e[0] == "update" and e[1] == 0)[2]
+    assert update["status"] == "refused" and update["cost_usd"] == 0 and update["settled_at"]
+
+
+@pytest.mark.parametrize("kind, status", [("funds", 403), ("auth", 401)])
+def test_funds_and_auth_stop_buying_for_the_run(monkeypatch, tmp_path, fresh_run, kind, status):
+    stop = higgsfield.HiggsfieldError(kind, f"submit -> HTTP {status}", status=status)
+    events = _shop(monkeypatch, {2: [stop]})
+    jobs = ai_video._buy(_req(work_dir=str(tmp_path)), [0, 1, 2, 3, 4, 5], _stills(tmp_path),
+                         PLAN6, PRICE, fresh_run.now + 300)
+    assert [j.shot for j in jobs] == [0, 5, 1, 2]  # shot 0, the last shot, then in order
+    assert (jobs[-1].status, jobs[-1].cost) == ("refused", 0.0)
+    assert ("reserve", 3) not in _kinds(events) and ai_video._stop_buying()
+
+
+def test_busy_waits_out_retry_after_inside_the_phase(monkeypatch, tmp_path, fresh_run):
+    answer = {"request_id": "req-0000-abcd", "status": "queued"}
+    busy = higgsfield.HiggsfieldError("busy", "account_queue_full", status=429, retry_after=7)
+    events = _shop(monkeypatch, {0: [busy, answer]})
+    (job,) = ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                           fresh_run.now + 60)
+    assert fresh_run.slept == [7] and job.status == "submitted" and not job.ambiguous
+    assert {e[3] for e in events if e[0] == "submit"} == {"key-0"}
+
+    long_wait = higgsfield.HiggsfieldError("busy", "account_queue_full", status=429,
+                                           retry_after=90)
+    _shop(monkeypatch, {0: [long_wait]})
+    (job,) = ai_video._buy(_req(work_dir=str(tmp_path)), [0], _stills(tmp_path), PLAN6, PRICE,
+                           fresh_run.now + 60)
+    assert (job.status, job.cost) == ("refused", 0.0)
+
+
+def test_a_still_that_cannot_animate_is_not_bought(monkeypatch, tmp_path, fresh_run):
+    events = _shop(monkeypatch, {})
+    jobs = ai_video._buy(_req(work_dir=str(tmp_path)), [0, 5],
+                         _stills(tmp_path, animatable=(0, 1, 2, 3, 4)), PLAN6, PRICE,
+                         fresh_run.now + 300)
+    assert [j.shot for j in jobs] == [0] and ("reserve", 5) not in _kinds(events)
