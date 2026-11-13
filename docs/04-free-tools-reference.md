@@ -101,7 +101,8 @@ klein → `flux-1-schnell` → a Pexels photo with Ken Burns (per shot) → Pexe
 
 | Tool | Notes | Link |
 |------|-------|------|
-| **FFmpeg** (binary, called directly) | 1080x1920 H.264: Ken Burns, crossfades, grade, vignette (grain off by default), music bed with ducking, loudness to -14 LUFS, logo bug, burned captions (libass). CI installs apt's FFmpeg on the pinned `ubuntu-24.04` runner; `ubuntu-latest` moves to 26.04 (FFmpeg 8.0.1) from 2026-10-19. | https://ffmpeg.org/ |
+| **FFmpeg** (binary, called directly) | 1080x1920 H.264: Ken Burns, crossfades, grade, vignette (grain off by default), music bed with ducking, loudness to -14 LUFS, logo bug, burned captions (libass). CI installs apt's FFmpeg on the pinned `ubuntu-24.04` runner; `ubuntu-latest` moves to 26.04 (FFmpeg 8.0.1) from 2026-10-19. Also the picture gates' black and frozen check (`blackdetect`, `freezedetect`, `src/gates.py`). | https://ffmpeg.org/ |
+| **Tesseract OCR** (binary, called directly; free, Apache-2.0) | The still check (`src/gates.py`, design 11.6): each FLUX still is read as drawn and as a grayscale 2x copy (`--psm 11`, TSV); a word of 3+ letters at confidence 70+ means the still is redrawn once. CI installs `tesseract-ocr` (5.3.4 on Ubuntu 24.04) with the cached apt packages; locally, `winget install UB-Mannheim.TesseractOCR` (needs an admin prompt) or set `TESSERACT_BINARY`. Without a binary the text check is skipped with one warning. **Calibrated 2026-11-13** on 38 frames: 4 of 5 lettered frames caught, 1 of 33 clean ones flagged (a free redraw). FLUX writes gibberish, which Tesseract reads at low confidence (46 from the still, 90 from the 2x copy); the frame it missed was a dark laptop screen, which the planner's noun check now keeps out. | https://github.com/tesseract-ocr/tesseract |
 | ffmpeg-python (not used) | Pythonic wrapper | https://github.com/kkroening/ffmpeg-python |
 | MoviePy (not used) | Higher-level, slower | https://github.com/Zulko/moviepy |
 

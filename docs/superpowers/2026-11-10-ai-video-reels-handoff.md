@@ -119,9 +119,22 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   dropped" (design 7.2 updated). The fourth is the target format in Hinglish. FLUX drew fake
   lettering and a code-filled laptop screen: stage 4's still gate.
 
-**Next:** stage 4 on `feat/stage-4-picture-sound` (picture and sound: the gates, the number
-card, the banner hold, the music level, the vignette and stings); the branch also holds the
-render fixes, unpushed. Then the relaunch (design section 14).
+- **The render fixes are merged** (PR #22, 2026-11-13, CI 1125 pass).
+
+- **Stage 4a, the picture gates, is built** on `feat/stage-4-picture-sound` (6 tasks; plan
+  `docs/superpowers/plans/2026-11-13-stage-4a-picture-gates.md`; not yet pushed). New module
+  `src/gates.py`: each still is read by Tesseract as drawn and at 2x (lettering), and checked for
+  darkness and letterbox bars, then redrawn once if it fails; the shot planner is sent back for
+  words that draw lettering or a screen; each clip is checked for length, black and frozen
+  stretches; every reel of any format is checked before the upload and is not uploaded if it
+  fails. Calibrated first on the paid clips and 32 free stills (STATUS.md's 2026-11-13 log):
+  the design's one-reading rule missed FLUX's gibberish lettering, so the still is read twice.
+  The 3b seam `_check_still` is gone (`_picture` calls the gate); `_check_clip` stays.
+
+**Next:** stage 4a's final review, then its push and PR with the operator's go-ahead; then
+**stage 4b** on the same branch or a new one (the key-number card, the banner hold, the source
+line and the logo, the subtitles' safe zone, the music level 4 LU, the vignette and the stings
+off, the key-point cards off). Then the relaunch (design section 14).
 
 ## 1. What the operator wants
 
