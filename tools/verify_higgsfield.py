@@ -123,10 +123,19 @@ def main(argv: list[str] | None = None) -> int:
 
         key = str(uuid.uuid4())
         first = higgsfield.submit(higgsfield.KLING, body, key)
-        second = higgsfield.submit(higgsfield.KLING, body, key)
-        ids = list(dict.fromkeys([first["request_id"], second["request_id"]]))
-        result.update(first_status=first.get("status"), same_request_id=len(ids) == 1)
-        print(f"Same request_id for two submits with one key: {result['same_request_id']}")
+        result["first_status"] = first.get("status")
+        ids = [first["request_id"]]
+        try:
+            second = higgsfield.submit(higgsfield.KLING, body, key)
+            ids = list(dict.fromkeys(ids + [second["request_id"]]))
+            result["same_request_id"] = len(ids) == 1
+            print(f"Same request_id for two submits with one key: {result['same_request_id']}")
+        except higgsfield.HiggsfieldError as e:
+            # The first job exists and may be charged: it is still settled below (review M-1).
+            result["second_submit_error"] = {"kind": e.kind, "status": e.status,
+                                             "message": str(e)}
+            print(f"The second submit failed ({e.kind}); settling the first job anyway.")
+        result["request_ids"] = ids  # recorded before settling, in case a status read fails
         result["jobs"] = [_settle(rid, work) for rid in ids]
     except higgsfield.HiggsfieldError as e:
         result["error"] = {"kind": e.kind, "status": e.status, "message": str(e)}

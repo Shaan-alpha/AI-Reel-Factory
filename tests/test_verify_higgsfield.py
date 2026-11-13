@@ -43,9 +43,10 @@ def _tool():
     return module
 
 
-def _run(monkeypatch, tmp_path, cancel_status: int, states: list[dict]):
+def _run(monkeypatch, tmp_path, cancel_status: int, states: list[dict], second=None):
+    """`second`, when given, is the answer to the second submit."""
     monkeypatch.setenv("HF_API_KEY", KEY)
-    calls = []
+    calls, submits = [], []
 
     def fake(method, url, **kwargs):
         calls.append((method, url))
@@ -57,6 +58,9 @@ def _run(monkeypatch, tmp_path, cancel_status: int, states: list[dict]):
         if "/estimate/" in url:
             return _Resp(200, {"usd": 0.179})
         if url.endswith(higgsfield.KLING):
+            submits.append(url)
+            if second is not None and len(submits) == 2:
+                return second
             return _Resp(200, {"request_id": RID, "status": "queued"})
         if url.endswith("/cancel"):
             return _Resp(cancel_status)
@@ -101,6 +105,19 @@ def test_a_started_job_is_waited_for_and_downloaded(monkeypatch, tmp_path):
     assert (job["cancel_confirmed"], job["final_status"], job["charged"]) == (False, "completed",
                                                                               "one clip")
     assert job["clip_bytes"] == 3000 and "sig=s" not in job["clip_url"]
+
+
+def test_a_failed_second_submit_still_settles_the_first(monkeypatch, tmp_path):
+    """Review M-1: the first job exists and may be charged, so a second submit that fails must not
+    leave it running and unrecorded: it is still cancelled (or waited for) and reported."""
+    code, result, calls = _run(monkeypatch, tmp_path, 202, [{"status": "canceled"}],
+                               second=_Resp(503, {"detail": "admission_control_unavailable"}))
+    assert code == 1  # the idempotency question went unanswered
+    assert result["second_submit_error"]["kind"] == "unavailable"
+    assert "same_request_id" not in result and result["request_ids"] == [RID]
+    (job,) = result["jobs"]
+    assert (job["request_id"], job["final_status"], job["charged"]) == (RID, "canceled", "nothing")
+    assert ("POST", f"{higgsfield.BASE}/requests/{RID}/cancel") in calls
 
 
 def test_a_refused_key_is_reported_not_raised(monkeypatch, tmp_path):
