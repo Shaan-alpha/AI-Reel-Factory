@@ -55,6 +55,10 @@ Sources: [invideo](https://invideo.io/blog/youtube-kills-ai-faceless-channels/) 
   (Cloudflare FLUX.2 klein illustrations under `VISUAL_SOURCE=ai`, the live setting) and the
   music (four beds generated with Google Lyria 2, SynthID-watermarked). A shot falls back to a
   Pexels photo, and a reel to Pexels/Pixabay stock video, only when image generation fails.
+  **From the relaunch** (`VISUAL_SOURCE=ai_video`) the shots are video too: each shot's FLUX.2
+  klein still animated by Kling 2.5 Turbo through Higgsfield. The description's disclosure line
+  then says "AI-generated narration, video and music." (images, when no clip was shown), and the
+  narration may be Hinglish.
 - **The image rule:** AI images are illustrations. **Never** fake photoreal footage of real,
   named people or specific real events presented as real. The default image style in
   `src/visuals.py` (`IMAGE_STYLE` overrides it) asks for a "symbolic and stylized" editorial
@@ -62,6 +66,15 @@ Sources: [invideo](https://invideo.io/blog/youtube-kills-ai-faceless-channels/) 
   digital rupee", not a fabricated photo of a named official). Places the story names stay in
   the shot, and an India story is set in India, with rupees only in money shots. That's the safe
   side of the line.
+- **The AI-shot rules** (the AI-video design, 6.5 and 6.10), enforced in code where code can:
+  no real person and no likeness, and no name from the story in any still or motion prompt (a
+  code check sends the plan back once; a second failure buys nothing); show places, objects,
+  symbols, hands, or small figures seen from behind; nothing that imitates footage of the real
+  event (no disaster in progress, no violence, no bodies, no crowd in distress); calm, symbolic
+  scenes for somber stories. The shot planner is never told to show or mention text, and words
+  that draw lettering or a screen send its plan back; every still is checked for stray lettering
+  (Tesseract), darkness and letterbox bars and redrawn once, and every clip and finished reel is
+  checked before it is shown or uploaded.
 - **We disclose on every reel**, in code rather than by asking the model:
   - YouTube's "altered or synthetic content" flag, `status.containsSyntheticMedia=true`, on
     every upload (`AI_DISCLOSURE`, default true; Module 9);
@@ -85,9 +98,11 @@ Sources: [YouTube disclosure](https://blog.youtube/news-and-events/disclosing-ai
   so **rewrite in your own words + cite**, never copy phrasing.
 - **Narration + original analysis is the primary asset; B-roll is secondary/supporting** — this
   is what makes it commentary/documentary rather than a re-upload.
-- Use **our own AI illustrations** (Cloudflare FLUX.2 klein, symbolic stand-ins) or
-  **Pexels/Pixabay** stock. Generated images are ours and illustrative — never broadcaster
-  footage. Maps, charts and data visualizations would be safe too, but nothing generates them
+- Use **our own AI illustrations** (Cloudflare FLUX.2 klein, symbolic stand-ins), from the
+  relaunch **our own AI video clips** (Kling through Higgsfield: its Terms of Use §4.4 claim no
+  ownership of outputs and do not restrict their commercial use; §5.5 asks for disclosure where
+  the law requires it, which we give; details in docs/04), or **Pexels/Pixabay** stock. Generated
+  images and clips are ours and illustrative — never broadcaster footage. Maps, charts and data visualizations would be safe too, but nothing generates them
   today; maps appear only when the B-roll keywords ask for them.
 - **The stock licences are not CC0** (checked 2026-09-28). The Pexels License and the Pixabay
   Content License are free for commercial use with no attribution, but Pexels says identifiable
@@ -219,6 +234,11 @@ there, not by re-tightening the gate.
 
 **Still excluded** (widened what may be *said*, not what may be *targeted*):
 - Communal/religious incitement or hate; anything that could inflame violence.
+- **India's selection rules** (the AI-video design, 8.7; information, not legal advice): an
+  allegation names the court record or official order it rests on; in a live conflict a reel
+  explains terms and mechanisms only; trending terms naming a faith or a communal incident are
+  excluded; and no election matter is chosen for a state inside the 48 hours before its polling
+  closes (`ELECTION_SILENCE`, state and date pairs, kept by hand).
 - Unverified claims stated as fact; deepfakes/impersonation.
 - Graphic tragedy exploitation; medical/financial advice stated as fact.
 
@@ -241,8 +261,8 @@ Everything else rests on your tap in the digest.
 | **2 Approval** | The digest shows each idea's hook, angle and up to three source outlets as links, so you can sanity-check before approving, and flags deaths or serious harm as "⚠️ Sensitive". Up to 3 approvals a run. |
 | **3 Scriptwriter** | Template N only; **rewrite facts in own words**; the core of the script is **original "why it matters" analysis**; a verdict only where the evidence supports it (§5); a plain explainer's voice with no jokes at anyone's expense (the sarcastic voice was retired on 2026-11-12), and a calm, respectful read for somber stories. |
 | **11 Fact check** | §5: two samples, one repair, idea `blocked` on fabrication, reel held under strict mode when the checker cannot run. |
-| **5 Visuals** | Our own AI illustrations (no recognizable real people) or Pexels/Pixabay stock without identifiable faces; **no broadcaster footage**; AI images never photoreal fakes of real people/events; places named in the story kept; a cut every ~3.5 s. |
-| **7 Subtitles** | Burn an on-screen **"Source: <publisher>"** citation for the first ~3 s. The frame-1 hook banner (the title) and the key-point cards are published claims, so the gate checks them too. |
+| **5 Visuals** | Our own AI illustrations (no recognizable real people) or Pexels/Pixabay stock without identifiable faces; **no broadcaster footage**; AI images never photoreal fakes of real people/events; places named in the story kept; a cut every ~3.5 s (AI-video reels: the AI-shot rules in §2, and a hard cut on the narration's pauses every 2-3 s). |
+| **7 Subtitles** | Burn an on-screen **"Source: <publisher>"** citation with the first sentence, under the banner (since stage 4b; it sat under the Shorts interface). The frame-1 banner (the title) and the key number are published claims, so the gate checks them too (the key-point cards are off, and checked only when switched on). |
 | **9 Publish** | Set the **AI-disclosure / synthetic-content flag**; the description is the claim + why it matters + Sources block + disclosure line + a one-line footer + at most three hashtags ending `#ButItMatters` (`#Shorts` no longer added, 2026-11-12). |
 | **10 Analytics** | Daily view snapshots; the best and worst recent titles feed the ideation prompt. Retention is not pulled: nothing calls the YouTube Analytics API, and the token would first need the `yt-analytics.readonly` scope. |
 

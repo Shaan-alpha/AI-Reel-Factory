@@ -8,6 +8,11 @@ narrates in a near-human voice, generates story-specific visuals, edits a polish
 vertical video, and publishes faceless Shorts. The human part happens in Telegram: start a run
 with `/makeshort`, then approve the ideas worth making from the digest (up to 3 a run).
 
+**The new format** (built 2026-11-10 → 11-14, live from the relaunch): AI-video shots (FLUX
+stills animated by Kling 2.5 Turbo through Higgsfield), Hinglish narration with English
+subtitles, for Indian viewers, about 20 reels a month. Design:
+[docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md).
+
 > **Primary goal:** Reliably turn every approved idea into a **fact-checked, captioned YouTube Short.**
 > Consistency beats sophistication. Don't chase perfection early.
 
@@ -48,10 +53,10 @@ with `/makeshort`, then approve the ideas worth making from the digest (up to 3 
 | Approval UI | Telegram digest: ✅ Approve / ⏭️ Pass / ❌ Reject (up to 3 a run) | Free |
 | Scripts | `gemini-3.8-flash` on Vertex writes a grounded draft (grounded write on `gemini-3.5-flash-lite` → `3.5-flash`); **Claude** rewrites it into the final script with the draft as its only fact base (a script that adds a number or name is dropped and the draft ships); Groq `openai/gpt-oss-120b` failover | Vertex: per token; Anthropic API: ≤ $4/month cap |
 | **Fact-check gate** | `gemini-3.5-flash` → `3.5-flash-lite` on Vertex, grounded: 2 samples, blocks fabrication, one repair pass | Vertex: per token |
-| **Narration** | **Gemini TTS** `gemini-3.1-flash-tts-preview`, Zubenelgenubi (Developer API, then the same voice on Vertex) → Chirp 3 HD → edge-tts (en-IN) → Kokoro | Developer API free; Vertex + Chirp billed |
-| **Visuals** | **AI B-roll: Cloudflare Workers AI FLUX.2 klein → FLUX.1 schnell + Ken Burns** → Pexels photos → Pexels/Pixabay stock video | Free |
-| **Video edit** | FFmpeg: crossfade transitions · cinematic grade · vignette · **music ducking** · **brand-logo bug** · loop-friendly endings · -14 LUFS | Free |
-| Captions | faster-whisper word timings on the script's own text: karaoke (3-word groups) + frame-1 hook + key-point cards + **source lower-third** | Free |
+| **Narration** | **Gemini TTS** `gemini-3.1-flash-tts-preview` on Vertex (Charon from the relaunch; Zubenelgenubi before), in **Hinglish** behind `NARRATION_LANGUAGE` (Claude renders it, an independent model checks the meaning) → Chirp 3 HD → edge-tts (en-IN) → Kokoro | Vertex + Chirp billed (cents a reel) |
+| **Visuals** | From the relaunch (`VISUAL_SOURCE=ai_video`): a FLUX.2 klein still per shot, **animated by Kling 2.5 Turbo through Higgsfield** (5 s clips, up to $1.10 a reel); every still, clip and reel checked automatically (Tesseract, FFmpeg). Today: **Cloudflare Workers AI FLUX.2 klein → FLUX.1 schnell + Ken Burns** → Pexels photos → Pexels/Pixabay stock video | Higgsfield about $0.95 a reel; the rest free |
+| **Video edit** | FFmpeg: hard cuts on the narration's pauses at 24 fps (AI video) or crossfades · grade · **music ducking** (the bed 4 LU under the voice) · **brand-logo bug** · -14 LUFS · a check before every upload | Free |
+| Captions | Karaoke (3-word groups, faster-whisper timings on the script's own text) or, for Hinglish, English subtitles timed from the narration's pauses; the title held for the first sentence, the source line under it, **one key number** when it is said; all inside the Shorts safe area | Free |
 | Publishing | YouTube Data API v3 (synthetic-content flag + disclosure) | Free |
 
 **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription. The billed parts are
@@ -59,7 +64,9 @@ Vertex AI (Gemini text, grounding, the fact-check gate, the same-voice TTS fallb
 Text-to-Speech (Chirp), both on Google Cloud project `but-it-matters-tts`, watched by a
 ₹450/month budget with 50/90/100% alerts. Spend so far fits the cap; everything else runs on
 free tiers. Claude's scripts (since 2026-10-22) are billed on the Anthropic API under their own,
-separate **≤ $4/month** cap, enforced in code, so metered spend can reach about $9 a month in all.
+separate **≤ $4/month** cap, enforced in code. **Higgsfield** (the Kling clips) is
+operator-approved at up to **$1.10 a reel** (about $0.95 for six clips), with no cap in code:
+every job is reserved in a ledger before it is bought and reported on Telegram.
 
 ---
 
@@ -75,7 +82,8 @@ See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.m
 - [x] **Premium auto-editing** — crossfade transitions, cinematic grade, music ducking, brand-logo bug, loop-friendly endings
 - [x] **News-niche compliance** — ≥ 2 source links per idea, every script fact-checked against live search before voicing, on-screen source citation, AI-disclosure + synthetic-content flag, licence-clean visuals/own words
 - [x] **On-demand operation**: `/makeshort` or the `make-short` workflow → ideas → Telegram digest → approve → render → published link
-- [ ] **Volume:** about 0.7 Shorts a day so far, against the 4–5 goal
+- [x] **The new format, built:** AI-video shots, Hinglish narration, English subtitles, stories for Indian viewers (stages 0-4, PRs #17-#24); the relaunch waits for the operator's go-ahead
+- [ ] **Volume:** about 0.7 Shorts a day so far; the goal from the relaunch is about 20 a month
 
 ---
 
@@ -115,13 +123,13 @@ flowchart TD
 
     subgraph EDIT ["4 · Assembly — FFmpeg"]
         direction TB
-        E1["crossfade transitions · cinematic grade<br/>vignette · music ducking<br/>brand-logo bug · loop-friendly ending"]
-        E2["<b>Captions</b> · faster-whisper<br/>word-by-word karaoke · frame-1 hook<br/>key-point cards · source lower-third"]
+        E1["hard cuts on pauses or crossfades · grade<br/>music ducking · brand-logo bug<br/>a check before every upload"]
+        E2["<b>Captions</b> · karaoke or Hinglish subtitles<br/>title held for sentence one<br/>source line · one key number"]
         E1 --> E2
     end
 
     PUB["<b>YouTube Data API v3</b><br/>synthetic-content flag + AI disclosure"]
-    OUT(["<b>@butitmatters</b><br/>captioned Shorts · goal 4–5 a day"])
+    OUT(["<b>@butitmatters</b><br/>captioned Shorts · about 20 a month"])
     LINK["Telegram replies with the live link"]
     DB[("<b>Supabase Postgres</b><br/>ideas · scripts · posts · view stats")]
 

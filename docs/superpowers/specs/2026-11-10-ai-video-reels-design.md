@@ -1084,8 +1084,11 @@ Each step waits for the operator's go-ahead, as the working rules require:
    (same `request_id`, one charge?) and a cancel of a queued job. The result goes into docs/04.
 4. Deploy the bot (`vercel deploy --prod` from `telegram-bot/`, account `shaan-alpha`).
 5. At relaunch, set the repository variables `NARRATION_LANGUAGE=hinglish`,
-   `VISUAL_SOURCE=ai_video`, `GEMINI_TTS_VOICE=Charon` and `GOOGLE_TTS_VOICE` to the Hindi Charon
-   voice; set `WINNERS_SINCE` to that date.
+   `VISUAL_SOURCE=ai_video`, `GEMINI_TTS_VOICE=Charon` and `GOOGLE_TTS_VOICE` to the English Charon
+   voice (`en-IN-Chirp3-HD-Charon`: it is the English fallback; the Hindi one,
+   `hi-IN-Chirp3-HD-Charon`, is `GOOGLE_TTS_VOICE_HI`'s default, as section 12 says); set
+   `WINNERS_SINCE` to that date. Before it, `production.FORMAT_VERSION` becomes 2 (10.2 counts
+   version 2 posts): done on `feat/relaunch-prep`.
 6. Optional, in YouTube Studio on a phone: Content > Automatic dubbing > "Publish manually" for the
    first 20 reels, so English dubs of Hinglish audio do not confuse the first measurements.
 7. Keep the Higgsfield balance topped up. When it runs out, reels revert to stills and one alert is

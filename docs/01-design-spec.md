@@ -27,8 +27,12 @@ The operator acts as the *creative director* of an autonomous media machine.
 *As built:* there is no morning schedule. The operator starts each run on demand (`/makeshort`
 in the Telegram bot, or the `make-short` workflow's Run button) and approves from that run's
 digest. A digest offers a few ideas (3 from the Run button, 5 from a bare `/makeshort`, topped
-up around any still pending) and a run takes at most 3 approvals (`APPROVAL_CAP`). The 4–5/day
-goal is unchanged.
+up around any still pending) and a run takes at most 3 approvals (`APPROVAL_CAP`).
+
+*Changed for the relaunch (design 18.4, the AI-video design):* the goal is **about 20 reels a
+month**, the operator's own budget figure, in a new format: AI-video shots, Hinglish narration
+with English subtitles, for Indian viewers
+([docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](superpowers/specs/2026-11-10-ai-video-reels-design.md)).
 
 ---
 
@@ -90,7 +94,10 @@ These were confirmed with the operator and drive every downstream choice:
    API → the same model on Vertex AI (billed) → Developer `gemini-2.5-flash-preview-tts` → Vertex
    `gemini-2.5-flash-tts` → Chirp 3 HD `en-IN-Chirp3-HD-Zubenelgenubi` → edge-tts
    `en-IN-PrabhatNeural` → Kokoro `am_michael`. The Developer API shuts down both of its TTS
-   models on 2026-11-17; the successor voice is to be picked by ear first (see STATUS.md).
+   models on 2026-11-17: the operator kept 3.1 over both 3.8 models by ear (2026-11-12), and the
+   voice moved to Vertex. *For the relaunch:* the narrator is **Charon** (male, informative;
+   operator, 2026-11-10), and Hinglish narration goes only to Hindi-capable voices (Gemini, then
+   Chirp's `hi-IN-Chirp3-HD-Charon`), else the reel is narrated in English.
 7. **Subtitles (now MVP).** **faster-whisper** (CPU-friendly, word timestamps) is the
    default for karaoke word-by-word captions; **WhisperX** is the higher-accuracy upgrade.
 8. **AI images, not generative video, at daily volume.** Free Veo/Runway *video* tiers are
@@ -98,7 +105,11 @@ These were confirmed with the operator and drive every downstream choice:
    FLUX.2 klein, then FLUX.1 schnell; free tier) + Ken Burns motion as the primary source
    (`VISUAL_SOURCE=ai`), falling back to **Pexels/Pixabay stock**. The stock licences are free
    but **not CC0**: no identifiable person may appear in a bad light, so the queries keep faces
-   out of frame. Generative *video* remains a later garnish.
+   out of frame. ~~Generative *video* remains a later garnish.~~ *Changed 2026-11-10 (the
+   operator):* generative video is the format. Each shot's FLUX.2 klein still is animated by
+   **Kling 2.5 Turbo through Higgsfield** (billed, up to $1.10 a reel, about $0.95 for six 5 s
+   clips) behind `VISUAL_SOURCE=ai_video`; a shot without a clip shows its still as a Ken Burns
+   move, and a reel that cannot have its shots takes the `ai` path above.
 9. **Hosting.** **GitHub Actions** is the best free runner for the deterministic Python
    pipeline (unlimited minutes on public repos; ~2,000/mo private; runs in **UTC**).
    ~~Anthropic **Routines** handles the Claude ideation step (sidesteps the known

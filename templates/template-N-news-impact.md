@@ -38,8 +38,9 @@ in sync. Design: [section 9 of the AI-video reels design](../docs/superpowers/sp
 - **Caption:** line 1 restates the claim with its main keyword; line 2 is one sentence on why it
   matters. No links and no question to the viewer.
 - **Hashtags:** at most two, naming the story's subject or event. **Tags:** at most six (names and
-  alternate spellings, Hindi spellings allowed). **Key points:** 2–3 on-screen cards, ≤ 4 words
-  each.
+  alternate spellings, Hindi spellings allowed). **Key number:** the one number that carries the
+  story, copied exactly from the narration with its unit or sign; it shows large while it is
+  said (since stage 4b). **Key points:** 2–3 cards, ≤ 4 words each, off by default since stage 4b.
 - The "Sources:" block and the AI-disclosure line are added in code, never by the model.
 
 ## Prompt skeleton (filled by scriptwriter)
@@ -65,8 +66,8 @@ responsible, but the sharper the verdict, the more certain its facts. An indepen
 runs on this script before it is voiced.
 
 Also return: "title" (≤ 7 words, ≤ 44 characters), "caption" (two lines, no links, no question),
-"hashtags" (≤ 2), "tags" (≤ 6), "key_points" (2-3 cards), "payoff" and "optional" (sentences
-copied from the narration), "structure".
+"hashtags" (≤ 2), "tags" (≤ 6), "key_points" (2-3 cards), "key_number" (copied exactly, or
+empty), "payoff" and "optional" (sentences copied from the narration), "structure".
 Return ONLY JSON.
 
 + EMPHASIS (ENABLE_HUMAN_ANGLE): develop the ANGLE in your own words; never copy its sentences.
@@ -75,7 +76,8 @@ Return ONLY JSON.
 ```
 
 ## Output
-`{ title, script_body, caption, hashtags[], tags[], key_points[], payoff, optional[], structure }`.
+`{ title, script_body, caption, hashtags[], tags[], key_points[], key_number, payoff, optional[], structure }`.
 Module 3 writes the title, body, caption and hashtags to the `scripts` table (the fact-check
-verdict joins them in `scripts.factcheck`); tags go into the upload metadata and key points become
-the on-screen cards.
+verdict joins them in `scripts.factcheck`); tags go into the upload metadata; the key number
+becomes the on-screen number card when the narration says it exactly; key points become cards
+only when `ENABLE_TEXT_CARDS` is on.

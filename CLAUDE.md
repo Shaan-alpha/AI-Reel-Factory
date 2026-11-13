@@ -5,13 +5,16 @@
 
 ## What this project is
 
-A near-zero-cost **autonomous content system** built to publish **4–5 captioned YouTube
-Shorts per day**. The human part: start a run (`/makeshort` in Telegram, or the `make-short`
-workflow button) and approve the ideas worth making from the Telegram digest, up to 3 a run.
+A low-cost **autonomous content system** that publishes captioned YouTube Shorts. From the
+relaunch (design `docs/superpowers/specs/2026-11-10-ai-video-reels-design.md`): AI-video shots,
+Hinglish narration with English subtitles, for Indian viewers. The human part: start a run
+(`/makeshort` in Telegram, or the `make-short` workflow button) and approve the ideas worth making
+from the Telegram digest, up to 3 a run.
 
 - **Channel:** *But It Matters* — daily impact news/info explainers (India + world), truth-first: verdicts allowed when the facts carry them (rule 6).
-- **Primary goal:** Reliably ship 4–5 captioned Shorts/day. **Consistency beats sophistication.**
-- **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2). The Anthropic API has its own, **separate ≤ $4/month** for Claude's scripts (operator, 2026-10-22), enforced in code, so metered spend can reach about $9 a month in all.
+- **Primary goal:** Reliably ship **about 20 reels a month** (the operator's own budget figure,
+  design 18.4; it was 4–5 Shorts a day). **Consistency beats sophistication.**
+- **Cost target:** **≤ $5/month** beyond the existing Claude Pro subscription (raised from $0 on 2026-06-15 to fund near-human voice; stay free-first — see rule 2). The Anthropic API has its own, **separate ≤ $4/month** for Claude's scripts (operator, 2026-10-22), enforced in code. **Higgsfield** (the Kling clips) is operator-approved at up to **$1.10 a reel** with no cap in code (about $0.95 for an all-video reel at $0.1575 a clip, about $19 a month at 20 reels; the operator's stated budget is $60–80 a month).
 
 ## Onboarding (do this before working)
 
@@ -50,9 +53,15 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
    alerts, it does not stop spending. The **Anthropic API** (Claude writes each reel's final
    script; operator, 2026-10-22) has its own cap of **$4/month**, separate from the $5 above
    (operator's choice, 2026-10-22) and enforced in code: the `claude_spend` ledger refuses any
-   call whose worst case would pass it (`ANTHROPIC_MONTHLY_BUDGET_USD`). Any **new** billed
-   service, or any spend that could exceed either cap, is **stop-and-flag** — never sign up
-   silently. (Rule 4's Claude-ToS boundary still holds absolutely.)
+   call whose worst case would pass it (`ANTHROPIC_MONTHLY_BUDGET_USD`). **Higgsfield** (Kling
+   2.5 Turbo image-to-video) is an operator-approved billed service (2026-11-10). Each reel may
+   spend up to $1.10 (operator, 2026-11-12, `AI_VIDEO_BUDGET_USD`): six clips at $0.1575, about
+   $0.95 for an all-video reel and about $19 a month at 20 reels; the operator's stated budget is
+   $60–80 a month. There is no cap in code, by the operator's choice: every job is reserved in
+   `ai_video_jobs` before it is bought, and every dollar is reported on Telegram with the
+   month-to-date. Any **new** billed service, or any spend that could exceed a cap, is
+   **stop-and-flag** — never sign up silently. (Rule 4's Claude-ToS boundary still holds
+   absolutely.)
 3. **Never self-attribute.** No `Co-Authored-By`, no "Generated with Claude Code," no AI
    credit anywhere — commits, PRs, code comments, or docs. *(This overrides default git
    behavior. Applies to this repo.)*
@@ -115,12 +124,14 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
     fallback chain: ideation **Gemini on Vertex (grounded) → Groq**, with the free Google News
     RSS search topping up sources (a Claude Routine may feed ideas first, but it is optional and
     dormant); scripts **Claude (writing from Gemini's grounded draft) → that grounded draft →
-    ungrounded Gemini → Groq**; voice **Gemini TTS (one voice: Developer API → Vertex)
-    → Chirp 3 HD → edge-tts → Kokoro**, and for Hinglish text (behind `NARRATION_LANGUAGE`)
-    **Gemini → Chirp's Hindi voice → English narration** (Hindi rendering: **Claude → Gemini →
-    Groq**); visuals **FLUX.2 klein → FLUX.1 schnell (Cloudflare
-    Workers AI) → Pexels photos → Pexels/Pixabay video**. A single upstream failure must never
-    kill a run.
+    ungrounded Gemini → Groq**; voice **Gemini TTS (one voice: Vertex 3.1 → Vertex 2.5; the
+    Developer API only where Vertex is not set up) → Chirp 3 HD → edge-tts → Kokoro**, and for
+    Hinglish text (behind `NARRATION_LANGUAGE`) **Gemini → Chirp's Hindi voice → English
+    narration** (Hindi rendering: **Claude → Gemini → Groq**); visuals, for `VISUAL_SOURCE=ai_video`,
+    **Kling clips through Higgsfield → each shot's FLUX.2 klein still as a Ken Burns move**, and a
+    reel that cannot have its shots takes the `ai` path: **FLUX.2 klein → FLUX.1 schnell
+    (Cloudflare Workers AI) → Pexels photos → Pexels/Pixabay video**. A single upstream failure
+    must never kill a run.
 12. **Idempotent, safe reruns.** Runs can and will repeat (a re-run, a second `/makeshort`).
     Check Supabase state before acting — never double-publish, double-insert, or re-spend
     quota. Every step is safe to run twice.
@@ -129,8 +140,10 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
     Developer-API TTS links, and a 429 there moves the reel to Vertex); on Vertex every token
     is billed and Gemini 3 grounding is free up to 5,000 queries/month; Groq per-model limits;
     Claude $4/month (every call is logged to `claude_spend`; about $0.037 a script on Opus 5.5
-    at low effort); Cloudflare Workers AI 10,000 neurons/day; Supabase 500 MB DB. Log usage; alert via
-    Telegram on a hard failure.
+    at low effort); Cloudflare Workers AI 10,000 neurons/day; Higgsfield's prepaid balance ($0.1575
+    a 5 s clip, the free `/estimate` is the price; every job reserved in `ai_video_jobs` before it
+    is bought; an empty balance stops the run's buying with one alert); Supabase 500 MB DB. Log
+    usage; alert via Telegram on a hard failure.
 14. **Fail loud on misconfig, soft on runtime.** A missing required secret/env var = hard stop
     with a clear message (`config.py` fails loudly). One reel failing inside a run's batch =
     log it, skip it, keep the rest going.
@@ -162,7 +175,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
     - **Logically-grouped commits** — one coherent change each; no giant catch-all dumps.
     - **`CHANGELOG.md`** is kept current ([Keep a Changelog] style).
     - **Tag releases:** `v0.1.0` = Phase-1 MVP done (2026-06-09); every minor version since is
-      a feature release within Phase 1 (latest `v0.18.0`; later work sits under `[Unreleased]`).
+      a feature release within Phase 1 (latest `v0.19.0`, the AI-video format built; later work
+      sits under `[Unreleased]`).
     - Keep [STATUS.md](STATUS.md) and the version in sync.
     - **Never force-push** shared history. Commit/push only when asked.
     - **No self-attribution in any commit or PR** (see rule 3).
@@ -175,8 +189,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
 
 - **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
   Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
-  runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day against the 4–5
-  goal. Every module in [src/](src/) is implemented and tested (1213 pass, 5 skipped, 2026-11-14). Since 2026-10-22 Claude
+  runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day (the goal was
+  4–5 a day; about 20 a month from the relaunch). Every module in [src/](src/) is implemented and tested (1213 pass, 5 skipped, 2026-11-14). Since 2026-10-22 Claude
   (Anthropic API, $4/month cap of its own) writes each script from Gemini's grounded draft.
 - **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
   workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
@@ -192,17 +206,14 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
   operator kept 3.1 over both `gemini-3.8-flash-tts` models by ear and asked for the move at once,
   so wherever Vertex is set up the voice comes from Vertex (billed, cents a reel) and the
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
-- **In progress since 2026-11-10: stages 0, 1, 2 (Hinglish, behind `NARRATION_LANGUAGE`) and 3
-  (AI-video shots, behind `VISUAL_SOURCE=ai_video`) merged (PRs #17-#21), with the test
-  renders' fixes (PR #22) and stage 4a (the picture gates, `src/gates.py`, PR #23); stage 4b
-  (the text on screen and the sound) built on `feat/stage-4b-text-sound`.** The operator chose a new
-  format: AI-video
-  shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
-  for Indian viewers. Higgsfield is approved by the operator as a billed service for this
-  (about $1 a reel, about 20 reels a month, **no spend cap in code by the operator's choice**),
-  so it is not a rule-2 stop-and-flag; the rules above get their new wording when the format
-  is built. Research and a full audit are done, the audit was checked against the code and the
-  design rewritten (2026-11-12); stage 1 retired the sarcastic script voice for a plain explainer
-  for Indian viewers. Start at
+- **The new format is built (2026-11-10 → 11-14); the relaunch is next.** The operator chose
+  AI-video shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English
+  subtitles, for Indian viewers. Every build stage is merged: stages 0-2 (safety and measuring,
+  stories and script, Hinglish behind `NARRATION_LANGUAGE`), stage 3 (AI-video shots behind
+  `VISUAL_SOURCE=ai_video`), the test renders' fixes and stage 4 (the picture gates in
+  `src/gates.py`, and the text on screen and the sound): PRs #17-#24. Until the relaunch's
+  repository variables are set, production keeps today's English `ai` format, with stage 4's
+  text and sound. The relaunch's steps (design 14-15) each wait for the operator's go-ahead.
+  Start at
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.
