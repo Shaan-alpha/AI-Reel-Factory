@@ -279,6 +279,37 @@ def _names_in(shots: list[dict], names: set[str]) -> list[str]:
     return sorted(found)
 
 
+# Words that make the image model draw lettering or a screen (design 6.5; calibration
+# 2026-11-13: every laptop prompt drew lettering, 4 of 4, and no other prompt did). Singular or
+# plural, any case, whole words only: "headphones", "design" and "photograph" are not matches.
+_LETTERING_WORDS = (
+    "sign", "signboard", "signage", "poster", "billboard", "banner", "placard", "plaque",
+    "nameplate", "headline", "caption", "subtitle", "title", "text", "lettering", "letter",
+    "word", "writing", "inscription", "graffiti", "newspaper", "magazine", "book", "notebook",
+    "document", "label", "menu", "ticket", "receipt", "calendar", "chart", "graph",
+    "spreadsheet", "logo", "banknote", "bank note", "currency note", "rupee note",
+    "number plate", "licence plate", "license plate", "screen", "touchscreen", "monitor",
+    "laptop", "computer", "tablet", "phone", "smartphone", "cellphone", "television", "tv",
+    "display", "dashboard", "scoreboard", "whiteboard", "blackboard", "chalkboard", "keyboard",
+)
+_LETTERING = re.compile(
+    r"\b(" + "|".join(re.escape(w).replace(r"\ ", r"\s+")
+                      for w in sorted(_LETTERING_WORDS, key=len, reverse=True))
+    + r")(?:s|es)?\b", re.IGNORECASE)
+
+
+def _lettering_in(shots: list[dict]) -> list[str]:
+    """Each word in a still or motion prompt that draws lettering, as "laptop (shot 3)", in
+    shot order (counted from 1, as the planner reads them), each word once per shot."""
+    found = []
+    for i, shot in enumerate(shots, 1):
+        said = f"{shot.get('still', '')} {shot.get('motion', '')}"
+        words = dict.fromkeys(re.sub(r"\s+", " ", m.group(1).lower())
+                              for m in _LETTERING.finditer(said))
+        found += [f"{w} (shot {i})" for w in words]
+    return found
+
+
 def _style_line(mood: str, somber: bool) -> str:
     style = (config.get("AI_VIDEO_STYLE") or _DEFAULT_STYLE).strip().rstrip(".")
     mood = re.sub(r"[^A-Za-z ,'-]", "", mood or "").strip(" ,-")[:40].strip()
@@ -306,7 +337,7 @@ SHOTS: {m}, in narration order, lasting {seconds}.
 Shot 1 shows the opening claim; the last shot shows the payoff, why it matters.
 
 For every shot write:
-- "still": one descriptive paragraph of 60 to 100 words, not a list of tags. The subject and its action first, then the setting, then the light (its source, direction and softness). One main subject, large and centred, filling the middle half of a vertical 9:16 frame, brightly and evenly lit; name the shot size and the camera angle. Keep the top fifth and the lower third of the frame simple and calm: a title and subtitles sit there. Describe what you want, never what to avoid (write "all surfaces are plain and unmarked"), and never use a noun that invites lettering: sign, poster, headline, screen, newspaper, label, banner, document. Do not write a style or mood line: one is added.
+- "still": one descriptive paragraph of 60 to 100 words, not a list of tags. The subject and its action first, then the setting, then the light (its source, direction and softness). One main subject, large and centred, filling the middle half of a vertical 9:16 frame, brightly and evenly lit; name the shot size and the camera angle. Keep the top fifth and the lower third of the frame simple and calm: a title and subtitles sit there. Describe what you want, never what to avoid (write "all surfaces are plain and unmarked"), and never use a noun that invites lettering or a screen: sign, poster, headline, screen, laptop, phone, computer, television, keyboard, newspaper, book, chart, label, banner, document. Do not write a style or mood line: one is added.
 - "motion": one to three short sentences of motion only. One slow motion of the subject, at most one supporting motion, and what stays still. Exactly one camera instruction: static, or one slow, stable move. Nothing that is not in the picture; say the subject keeps its exact shape and colors.
 - "search": one to three plain words a stock-photo site would have for this shot, such as "cargo ship".
 
@@ -356,6 +387,7 @@ def plan_shots(req: ReelRequest, durations: list[float]) -> tuple[list[dict], bo
     names = _story_names([_plain(req.script_body), req.story])
     somber = (req.tone or "").lower() == "somber"
     note = ""
+    usable = None  # the last plan that named no one: it beats the fallback plan
     for _attempt in range(2):
         try:
             raw = llm.generate(_planner_prompt(req, durations, note), json=True, max_tokens=4096)
@@ -368,13 +400,28 @@ def plan_shots(req: ReelRequest, durations: list[float]) -> tuple[list[dict], bo
         except Exception as e:  # noqa: BLE001 — every provider failed: the fallback plan
             log.warning("ai_video: the shot planner failed (%s); no clips for this reel", e)
             break
-        found = _names_in(shots, names)
+        found, lettering = _names_in(shots, names), _lettering_in(shots)
+        if not found:
+            usable = (shots, mood)
+            if not lettering:
+                break
+        note = ""
         if found:
-            note = (f"Your last plan named these names from the story: {', '.join(found)}. No "
-                    f"name from the story may appear in any still or motion; show the scene "
-                    f"without them.\n\n")
+            note += (f"Your last plan named these names from the story: {', '.join(found)}. No "
+                     f"name from the story may appear in any still or motion; show the scene "
+                     f"without them.\n\n")
             log.warning("ai_video: the shot plan named %s", ", ".join(found))
-            continue
+        if lettering:
+            note += (f"Your last plan used words that make the image model draw lettering or a "
+                     f"screen: {', '.join(lettering)}. Describe those shots again without them, "
+                     f"through objects, places, hands or symbols that carry no writing.\n\n")
+            log.warning("ai_video: the shot plan asked for lettering: %s", ", ".join(lettering))
+    if usable is not None:
+        shots, mood = usable
+        left = _lettering_in(shots)
+        if left:
+            log.warning("ai_video: the shot plan still asks for %s; the still check is the "
+                        "backstop", ", ".join(left))
         style = _style_line(mood, somber)
         # A stock-photo search for a name could put that person on screen: such a search, or a
         # missing one, becomes a word from the script that names no one.

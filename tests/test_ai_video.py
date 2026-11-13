@@ -310,6 +310,57 @@ def test_a_name_from_the_story_rejects_the_plan(monkeypatch):
     assert not names & {"India", "Delhi", "Earth", "The", "Indian", "Here"}
 
 
+LAPTOP = ("A slim laptop sits open on a plain wooden desk beside a small lamp, its screen glowing "
+          "softly; medium shot from eye level, warm light from the right.")
+
+
+def test_a_laptop_in_a_still_is_sent_back_once(monkeypatch):
+    """Every laptop prompt drew lettering in the calibration (4 of 4): the planner is told."""
+    first = [_shot(i) for i in range(6)]
+    first[2]["still"] = LAPTOP
+    prompts = _llm(monkeypatch, [_reply(first), _reply([_shot(i) for i in range(6)])])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert "laptop (shot 3)" in prompts[1][0] and "screen (shot 3)" in prompts[1][0]
+    assert not any("laptop" in s["still"].lower() for s in plan)
+    assert "laptop" in prompts[0][0]  # the rule names the devices up front
+
+
+def test_lettering_nouns_are_found_in_any_case_and_plural():
+    shots = [{"still": "Two Laptops and a TV on a desk.", "motion": "A touchscreen glows."},
+             {"still": "Headphones, a design sketch and a photograph of the sea.",
+              "motion": "Monitoring lights blink; signals pass. A textured wall."},
+             {"still": "A Number  Plate and a newspaper.", "motion": "A laptop closes."}]
+    assert ai_video._lettering_in(shots) == ["laptop (shot 1)", "tv (shot 1)",
+                                             "touchscreen (shot 1)", "number plate (shot 3)",
+                                             "newspaper (shot 3)", "laptop (shot 3)"]
+
+
+def test_a_plan_still_naming_a_screen_after_the_retry_is_used(monkeypatch):
+    """The noun check never costs a reel its clips: after the retry, a plan that names no one
+    is used (the still check is the backstop)."""
+    first = [_shot(i) for i in range(6)]
+    first[2]["still"] = LAPTOP
+    second = [_shot(i) for i in range(6)]
+    second[4]["still"] = "A television on a wall shows a calm sea; medium shot, bright light."
+    prompts = _llm(monkeypatch, [_reply(first), _reply(second)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert plan[4]["still"].startswith("A television") and "laptop" not in plan[2]["still"]
+
+
+def test_a_retry_that_names_someone_falls_back_to_the_plan_without_names(monkeypatch):
+    first = [_shot(i) for i in range(6)]
+    first[2]["still"] = LAPTOP
+    named = [_shot(i) for i in range(6)]
+    named[1]["still"] = "Sunita Williams waves from a capsule window; bright light."
+    prompts = _llm(monkeypatch, [_reply(first), _reply(named)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert plan[2]["still"].startswith("A slim laptop")  # the first plan, not the fallback
+    assert not any("Sunita" in s["still"] for s in plan)
+
+
 def test_a_second_failure_buys_nothing(monkeypatch):
     named = [_shot(i, still="NASA engineers cheer as Sunita Williams waves.") for i in range(6)]
     prompts = _llm(monkeypatch, [_reply(named), _reply(named)])
