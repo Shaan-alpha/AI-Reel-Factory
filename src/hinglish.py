@@ -49,20 +49,33 @@ _ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
 _TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
 _ORDINAL_WORDS = {"one": "first", "two": "second", "three": "third", "five": "fifth",
                   "eight": "eighth", "nine": "ninth", "twelve": "twelfth"}
-_CURRENCY = {"₹": ("rupee", "rupees"), "$": ("dollar", "dollars"), "€": ("euro", "euros"),
-             "£": ("pound", "pounds")}
+_CURRENCY = {"₹": ("rupee", "rupees"), "rs": ("rupee", "rupees"), "$": ("dollar", "dollars"),
+             "€": ("euro", "euros"), "£": ("pound", "pounds")}
 _SCALE_WORDS = ("lakh", "crore", "thousand", "million", "billion", "trillion")
 # A four-digit number before one of these is an amount, not a year.
 _UNIT_WORDS = _SCALE_WORDS + ("rupees", "dollars", "people", "jobs", "students", "km",
                               "kilometres", "kilometers", "kg", "tonnes", "tons", "units", "mw",
-                              "gw", "crores", "lakhs")
+                              "gw", "crores", "lakhs",
+                              # the Hindi words that follow an amount in a Hinglish line
+                              "लोग", "लोगों", "रुपये", "रुपए", "रुपयों", "साल", "सालों",
+                              "किलोमीटर", "मीटर", "टन", "छात्र", "छात्रों", "नौकरियां",
+                              "नौकरियों", "गांव", "गांवों", "परिवार", "परिवारों", "बच्चे",
+                              "बच्चों")
+
+# Devanagari letters and signs, without the danda (। ॥): a number before a full stop is read.
+_DEVANAGARI_WORD = "ऀ-ॣ०-ॿ"
 
 # The space after a currency symbol belongs to the symbol: an optional space of its own let a
-# match start at the space after a Hindi vowel sign and swallow it ("यानीtwenty-five").
+# match start at the space after a Hindi vowel sign and swallow it ("यानीtwenty-five"). "Rs" and
+# "Rs." count as the rupee sign. The scale may be compound or hyphenated ("₹1.5 lakh crore",
+# "₹500-crore"), and the currency is said after the last scale word. A number glued to letters
+# ("5G", "10x", "10km", "21वीं") is left for the voice to read, except an ordinal or a decade.
 _NUMBER_RE = re.compile(
-    r"(?<![\w.,])(?:(?P<cur>[₹$€£])\s?)?(?P<num>\d{1,3}(?:,\d{2,3})+|\d+)(?P<dec>\.\d+)?"
-    r"(?:(?P<ord>st|nd|rd|th)\b|(?P<pct>%))?"
-    r"(?P<scale>\s+(?:" + "|".join(_SCALE_WORDS) + r")\b)?")
+    r"(?<![\w.,])(?:(?P<cur>[₹$€£]|Rs\.?)\s?)?(?P<num>\d{1,3}(?:,\d{2,3})+|\d+)"
+    r"(?:(?P<dec>\.\d+)|:(?P<min>\d{2}))?"
+    r"(?:(?P<ord>st|nd|rd|th)|(?P<pct>%)|(?P<decade>s))?"
+    r"(?P<scale>(?:[\s-]+(?:" + "|".join(_SCALE_WORDS) + r")\b)+)?"
+    r"(?![\w" + _DEVANAGARI_WORD + r"])")
 _INDIAN_GROUPS = re.compile(r"\d{1,2}(?:,\d{2})+,\d{3}")
 
 
@@ -118,27 +131,48 @@ def _ordinal(n: int) -> str:
     return "".join(pieces[:-1]) + last
 
 
+def _plural(words: str) -> str:
+    """'nineteen ninety' -> 'nineteen nineties' (a decade, "1990s")."""
+    head, _, last = words.rpartition(" ")
+    last = last[:-1] + "ies" if last.endswith("y") else last + "s"
+    return f"{head} {last}".strip()
+
+
+def _is_year(raw: str, value: int, m: re.Match, after: str) -> bool:
+    if not re.fullmatch(r"\d{4}", raw) or not 1800 <= value <= 2099:
+        return False
+    if m.group("dec") or m.group("cur") or m.group("pct") or m.group("scale"):
+        return False
+    return not re.match(r"\s+(?:" + "|".join(_UNIT_WORDS) + r")(?![\w" + _DEVANAGARI_WORD
+                        + r"])", after, re.I)
+
+
 def _say(m: re.Match, text: str) -> str:
     raw, dec, cur = m.group("num"), m.group("dec"), m.group("cur")
     value = int(raw.replace(",", ""))
-    scale = (m.group("scale") or "").strip()
+    scale = " ".join(re.findall(r"[a-z]+", (m.group("scale") or "").lower()))
     after = text[m.end():]
+    if m.group("min") is not None:  # a time, "9:30"
+        minutes = int(m.group("min"))
+        hour = _cardinal(value)
+        return hour + (" o'clock" if not minutes else
+                       f" oh {_ONES[minutes]}" if minutes < 10 else f" {_below_100(minutes)}")
     if m.group("ord"):
         words = _ordinal(value)
-    elif (re.fullmatch(r"\d{4}", raw) and 1800 <= value <= 2099 and not dec and not cur
-          and not m.group("pct") and not scale
-          and not re.match(r"\s+(?:" + "|".join(_UNIT_WORDS) + r")\b", after, re.I)):
+    elif _is_year(raw, value, m, after):
         words = _year(value)
     else:
         words = _cardinal(value, indian=bool(_INDIAN_GROUPS.fullmatch(raw)))
         if dec:
             words += " point " + " ".join(_ONES[int(d)] for d in dec[1:])
+    if m.group("decade"):
+        words = _plural(words)
     if scale:
         words += f" {scale}"
     if m.group("pct"):
         words += " percent"
     if cur:
-        one, many = _CURRENCY[cur]
+        one, many = _CURRENCY["rs" if cur.lower().startswith("rs") else cur]
         words += f" {one if value == 1 and not dec and not scale else many}"
     return words
 
@@ -164,10 +198,12 @@ _HINDI_NUMBER_WORDS = frozenset(unicodedata.normalize("NFD", w) for w in (
     "अठारह उन्नीस बीस इक्कीस बाईस तेईस चौबीस पच्चीस छब्बीस सत्ताईस अट्ठाईस उनतीस तीस चालीस पचास "
     "साठ सत्तर अस्सी नब्बे सौ हज़ार हजार लाख करोड़ करोड अरब").split())
 _HI_TOKEN_SPLIT = re.compile(r"[\s,.;:!?।॥()\"'’‘“”—–\-]+")
-_CHECK_NUMBER_RE = re.compile(r"(?<![\w.,])[₹$€£]?\s?(\d{1,3}(?:,\d{2,3})+|\d+)(\.\d+)?")
+# "Rs" and "Rs." count as the rupee sign: without them "Rs.900" was invisible to the guard.
+_CHECK_NUMBER_RE = re.compile(
+    r"(?<![\w.,])(?:[₹$€£]|Rs\.?)?\s?(\d{1,3}(?:,\d{2,3})+|\d+)(\.\d+)?")
 _DEVANAGARI_LETTER = re.compile(r"[ऀ-ॣॱ-ॿ]")
 _PUNCTUATION = frozenset(".,;:!?'\"()-–—…।॥’‘“”/&")
-_SYMBOLS = frozenset("₹$€£%")
+_SYMBOLS = frozenset("₹$€£%°+")  # "45°C" and "50+" are ordinary in news
 _JOINERS = frozenset("‌‍")  # ZWNJ and ZWJ: part of how Devanagari is written
 # Capitalised words that start a clause, not names.
 _NOT_NAMES = frozenset((
@@ -240,8 +276,12 @@ def check(en_lines: list[str], lines: list[dict], min_seconds: float | None = No
         failures.append(f"lines {extra} do not exist (there are {len(en_lines)} sentences)")
 
     for i, en in enumerate(en_lines, 1):
-        hi = numbered.get(i)
+        if i not in numbered:
+            continue  # reported as missing above
+        hi = numbered[i]
         if not hi:
+            # Present but blank used to pass every check: a narration missing a sentence.
+            failures.append(f"line {i} is empty")
             continue
         for n in sorted(numbers_in(en) - numbers_in(hi)):
             failures.append(f"line {i}: the number {n} is missing; keep it as digits")
@@ -343,7 +383,13 @@ def _parse_lines(raw: str) -> list[dict]:
             continue
         parts = [{"hi": str(p.get("hi") or "").strip(), "en": str(p.get("en") or "").strip()}
                  for p in (line.get("parts") or []) if isinstance(p, dict)]
-        out.append({"i": line.get("i"), "hi": str(line.get("hi") or "").strip(), "parts": parts})
+        # A model may number its lines as text ("1"); every later step looks them up as numbers.
+        number = line.get("i")
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            pass
+        out.append({"i": number, "hi": str(line.get("hi") or "").strip(), "parts": parts})
     return out
 
 
@@ -414,7 +460,8 @@ def meaning_check(en_lines: list[str], lines: list[dict],
     failures = []
     for i in range(1, len(en_lines) + 1):
         verdict = verdicts.get(i)
-        same = bool(verdict) and verdict.get("same") is True
+        # A model may write the boolean as text ("true"); anything else is not a yes.
+        same = bool(verdict) and str(verdict.get("same")).strip().lower() in ("true", "yes")
         why = str((verdict or {}).get("why") or "").strip()
         log.info("hinglish: meaning check by %s: line %d %s%s", checker, i,
                  "same" if same else "DIFFERENT" if verdict else "no verdict",

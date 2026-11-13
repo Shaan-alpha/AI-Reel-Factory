@@ -309,3 +309,58 @@ def test_no_renderer_ends_hinglish(monkeypatch):
     _renders(monkeypatch, RuntimeError("hinglish: no renderer answered"))
     spoken, reason = hinglish.to_hinglish(BODY, "t", "plain")
     assert spoken is None and "no renderer" in reason
+
+
+# --- final review of stage 2 (2026-11-12) -----------------------------------------------------
+
+def test_an_empty_line_fails():
+    assert any("empty" in f for f in hinglish.check(EN, _with(2, "")))
+
+
+def test_line_numbers_given_as_text_are_numbers():
+    lines = hinglish._parse_lines(json.dumps({"lines": [{"i": "1", "hi": "x", "parts": []}]}))
+    assert lines[0]["i"] == 1
+
+
+def test_degrees_and_plus_signs_are_allowed():
+    hi = _with(4, "ये decaying plutonium पर चलता है, और हर साल about four watts और 45°C पर 50+ "
+                  "साल से खो रहा है।")
+    assert not any("character" in f for f in hinglish.check(EN, hi))
+
+
+def test_a_verdict_written_as_text_counts(monkeypatch):
+    texts = json.dumps({"lines": [{"i": i, "same": "true", "why": ""} for i in range(1, 7)]})
+    monkeypatch.setattr(hinglish.llm, "generate_with", lambda provider, p, **k: texts)
+    assert hinglish.meaning_check(EN, _lines(), "claude")[0] == []
+
+
+@pytest.mark.parametrize("text, said", [
+    ("₹1.5 lakh crore", "one point five lakh crore rupees"),
+    ("₹500-crore scam", "five hundred crore rupees scam"),
+    ("Rs 500 crore", "five hundred crore rupees"),
+    ("Rs.900 का", "nine hundred rupees का"),
+    ("5G network", "5G network"),
+    ("10x बड़ा", "10x बड़ा"),
+    ("10km दूर", "10km दूर"),
+    ("21वीं सदी", "21वीं सदी"),
+    ("1990s में", "nineteen nineties में"),
+    ("9:30 बजे", "nine thirty बजे"),
+    ("9:05 बजे", "nine oh five बजे"),
+    ("1850 लोग", "one thousand eight hundred fifty लोग"),
+])
+def test_say_numbers_reads_indian_figures_and_leaves_glued_tokens(text, said):
+    assert hinglish.say_numbers(text) == said
+
+
+def test_the_number_guard_sees_rupees_after_rs():
+    assert hinglish.numbers_in("Rs.900") == {"900"}
+    assert hinglish.numbers_in("Rs 1,500") == {"1500"}
+
+
+@pytest.mark.parametrize("text, said", [
+    ("आज भी 1977।", "आज भी nineteen seventy-seven।"),
+    ("कुल 1850 लोग।", "कुल one thousand eight hundred fifty लोग।"),
+    ("कीमत ₹500।", "कीमत five hundred rupees।"),
+])
+def test_a_number_before_the_hindi_full_stop_is_read(text, said):
+    assert hinglish.say_numbers(text) == said
