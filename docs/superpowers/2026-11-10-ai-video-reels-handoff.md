@@ -135,10 +135,14 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   and frozen stretches refuse only an AI-video reel; a failing Tesseract warns; a still's clip
   covers a shorter shot again). Deferred minors are in STATUS.md's 2026-11-13 log.
 
-**Next:** stage 4a's push and PR with the operator's go-ahead; then
-**stage 4b** on the same branch or a new one (the key-number card, the banner hold, the source
-line and the logo, the subtitles' safe zone, the music level 4 LU, the vignette and the stings
-off, the key-point cards off). Then the relaunch (design section 14).
+- **Stage 4a is merged** (PR #23, 2026-11-14; CI 1171 pass, Tesseract and FFmpeg proven on
+  Ubuntu).
+
+**Next:** stage 4b on `feat/stage-4b-text-sound` (plan
+`docs/superpowers/plans/2026-11-14-stage-4b-text-and-sound.md`):
+the key-number card, the banner hold, the source line and the logo, the subtitles' safe zone,
+the music level 4 LU, the vignette and the stings off, the key-point cards off. Then the
+relaunch (design section 14).
 
 ## 1. What the operator wants
 

@@ -194,8 +194,8 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
 - **In progress since 2026-11-10: stages 0, 1, 2 (Hinglish, behind `NARRATION_LANGUAGE`) and 3
   (AI-video shots, behind `VISUAL_SOURCE=ai_video`) merged (PRs #17-#21), with the test
-  renders' fixes (PR #22); stage 4a (the picture gates, `src/gates.py`) built on
-  `feat/stage-4-picture-sound`.** The operator chose a new
+  renders' fixes (PR #22) and stage 4a (the picture gates, `src/gates.py`, PR #23); stage 4b
+  (the text on screen and the sound) on `feat/stage-4b-text-sound`.** The operator chose a new
   format: AI-video
   shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
   for Indian viewers. Higgsfield is approved by the operator as a billed service for this
