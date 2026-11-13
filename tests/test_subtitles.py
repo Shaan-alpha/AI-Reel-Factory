@@ -855,3 +855,102 @@ def test_hinglish_banner_ends_with_line_one(monkeypatch, tmp_path):
     weights = [subtitles._spoken_chars(line["said"]) for line in lines]
     first = subtitles.sentence_ends(pause_list, weights, 7.0)[0]
     assert _event(seen["ass"], "Hook")[1] == subtitles._format_ts(min(4.0, max(1.8, first)))
+
+
+# --- Stage 4b: the key-number card (design 11.5) --------------------------------------------------
+
+NUM_WORDS = [(0.1, 0.5, "Sunita"), (0.5, 0.9, "spent"), (2.0, 2.4, "286"), (2.4, 2.9, "days"),
+             (3.0, 3.4, "in"), (3.4, 4.0, "orbit."), (4.3, 4.7, "Rs"), (4.7, 5.2, "2,000"),
+             (5.2, 5.6, "crore,"), (6.0, 6.3, "not"), (6.3, 6.6, "2"), (6.6, 7.0, "lakh.")]
+
+
+def test_the_number_shows_when_it_is_said():
+    assert subtitles._number_moment_words("286 days", NUM_WORDS) == (2.0, 2.9)
+    card = subtitles._number_card("286 days", (2.0, 2.9), 10.0)
+    ass = subtitles._build_ass(NUM_WORDS, total_dur=10.0, number=card)
+    start, end, fields = _event(ass, "Number")
+    assert (start, end) == ("0:00:02.00", "0:00:03.50")  # at least 1.5 s on screen
+    assert fields[9].endswith("286 DAYS")
+
+
+def test_a_long_spoken_number_stays_longer_but_at_most_2_5_s():
+    start, end, _text = subtitles._number_card("Rs 2,000 crore", (4.3, 5.6), 10.0)
+    assert start == 4.3 and end == pytest.approx(6.1)  # said for 1.3 s, plus half a second
+    assert subtitles._number_card("x 1", (1.0, 4.0), 10.0)[:2] == (1.0, 3.5)
+
+
+def test_the_number_shows_with_its_block():
+    blocks = [(0.0, 3.0, "Sunita Williams is back."), (3.0, 6.2, "After 286 days in orbit,"),
+              (6.2, 8.0, "she landed safely.")]
+    assert subtitles._number_moment_blocks("286 days", blocks) == (3.0, 6.2)
+    assert subtitles._number_moment_blocks("300 days", blocks) is None
+
+
+def test_the_number_scales_in():
+    header = subtitles._ass_header()
+    style = next(ln for ln in header.splitlines() if ln.startswith("Style: Number,"))
+    fields = style.split(",")
+    assert fields[2] == "150" and fields[18] == "8"   # large, top centre
+    assert 700 <= int(fields[21]) <= 960              # the upper middle, under the source line
+    card = subtitles._number_card("40%", (1.0, 1.4), 10.0)
+    assert card[2].startswith("{\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}")
+    assert card[2].endswith("40%")
+
+
+def test_a_number_never_said_has_no_card():
+    """Review Focus 3: a number the narration does not say gets no card, never a wrong one."""
+    assert subtitles._number_moment_words("300 days", NUM_WORDS) is None
+    assert subtitles._number_card("300 days", None, 10.0) is None
+    assert ",Number,," not in subtitles._build_ass(NUM_WORDS, total_dur=10.0, number=None)
+
+
+def test_the_card_stays_inside_the_reel():
+    assert subtitles._number_card("286 days", (9.5, 9.8), 10.0)[:2] == (9.5, 10.0)
+    assert subtitles._number_card("286 days", (9.8, 9.9), 10.0) is None  # too short to read
+
+
+def test_a_number_said_twice_marks_the_first():
+    """Review Focus 2: "2" is the standalone 2, never the digit inside "2,000"."""
+    assert subtitles._number_moment_words("2", NUM_WORDS) == (6.3, 6.6)
+    twice = NUM_WORDS + [(8.0, 8.4, "286"), (8.4, 8.9, "days")]
+    assert subtitles._number_moment_words("286 days", twice) == (2.0, 2.9)
+
+
+def test_no_words_no_card():
+    """Review Focus 4: no word timing, no card."""
+    assert subtitles._number_moment_words("286 days", []) is None
+    assert subtitles._number_moment_words("", NUM_WORDS) is None
+
+
+def _capture_burn(monkeypatch, seen: dict) -> None:
+    monkeypatch.setattr(subtitles, "_burn",
+                        lambda v, ass, out, cards=None, fps=30: seen.update(
+                            ass=open(ass, encoding="utf-8").read()) or open(out, "wb").write(b"x"))
+
+
+def test_burn_captions_draws_the_key_number(monkeypatch, tmp_path):
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
+    monkeypatch.setattr(subtitles, "_cached_words", lambda path: list(NUM_WORDS))
+    seen = {}
+    _capture_burn(monkeypatch, seen)
+    script = "Sunita spent 286 days in orbit. Rs 2,000 crore, not 2 lakh."
+    subtitles.burn_captions(str(video), str(audio), str(tmp_path / "out.mp4"),
+                            script_text=script, key_number="286 days")
+    assert _event(seen["ass"], "Number")[:2] == ("0:00:02.00", "0:00:03.50")
+
+
+def test_burn_hinglish_draws_the_key_number(monkeypatch, tmp_path):
+    video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
+    audio = tmp_path / "a.wav"; audio.write_bytes(b"\x00" * 100)
+    lines = [{"en": "Sunita Williams is back.", "hi": "सुनीता विलियम्स लौट आईं।", "said": "a" * 30},
+             {"en": "After 286 days.", "hi": "286 दिन बाद।", "said": "b" * 30}]
+    monkeypatch.setattr(subtitles, "pauses", lambda path: [(3.0, 3.3)])
+    monkeypatch.setattr(subtitles, "_audio_seconds", lambda path: 7.0)
+    seen = {}
+    _capture_burn(monkeypatch, seen)
+    subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "out.mp4"), lines,
+                            key_number="286 days")
+    blocks = subtitles.subtitle_blocks(lines, [(3.0, 3.3)], 7.0)
+    start = next(b[0] for b in blocks if "286 days" in b[2])
+    assert _event(seen["ass"], "Number")[0] == subtitles._format_ts(start)

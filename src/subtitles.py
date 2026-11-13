@@ -397,6 +397,7 @@ Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,1
 Style: Card,{font},90,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,5,40,40,0,1
 Style: Source,{font},46,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,8,60,60,300,1
 Style: Sub,{font},{_SUB_PX},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,2,48,192,672,1
+Style: Number,{font},150,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,760,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -474,6 +475,59 @@ def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
         return []
 
 
+# The key-number card (design 11.5): a short scale-in, on screen for its spoken length plus half
+# a second, between 1.5 and 2.5 s.
+_NUMBER_SCALE_IN = "{\\fscx70\\fscy70\\t(0,180,\\fscx100\\fscy100)}"
+_NUMBER_MIN, _NUMBER_TAIL, _NUMBER_MAX = 1.5, 0.5, 2.5
+
+
+def _token_run(wanted: list[str], tokens: list[str]) -> int | None:
+    """Where the run `wanted` first starts in `tokens` (both normalized), or None."""
+    n = len(wanted)
+    if not n:
+        return None
+    return next((i for i in range(len(tokens) - n + 1) if tokens[i:i + n] == wanted), None)
+
+
+def _number_tokens(key_number: str | None) -> list[str]:
+    """The key number as the captions' normalized tokens: "Rs 2,000 crore" -> rs 2000 crore."""
+    return [_norm(t) for t in _script_tokens(key_number)]
+
+
+def _number_moment_words(key_number: str | None,
+                         words: list[tuple[float, float, str]]) -> tuple[float, float] | None:
+    """When the narration says the key number: the first run of aligned words that spell it,
+    whole tokens only, so "2" never matches inside "2,000". None when it is not said."""
+    wanted = _number_tokens(key_number)
+    i = _token_run(wanted, [_norm(w[2]) for w in words or []])
+    return None if i is None else (words[i][0], words[i + len(wanted) - 1][1])
+
+
+def _number_moment_blocks(key_number: str | None,
+                          blocks: list[tuple[float, float, str]]) -> tuple[float, float] | None:
+    """The first English subtitle block that carries the key number: a Hinglish narration has
+    no word timings, so the block is when its part of the sentence is spoken."""
+    wanted = _number_tokens(key_number)
+    for start, end, block in blocks or []:
+        if _token_run(wanted, [_norm(t) for t in _script_tokens(block)]) is not None:
+            return start, end
+    return None
+
+
+def _number_card(key_number: str | None, moment: tuple[float, float] | None,
+                 total_dur: float) -> tuple[float, float, str] | None:
+    """(start, end, ASS text) of the key-number card, from the moment it is said, never past
+    the reel's end. None when it is not said or too little time is left to read it."""
+    if not (key_number and moment):
+        return None
+    start, said_end = moment
+    shown = min(_NUMBER_MAX, max(_NUMBER_MIN, said_end - start + _NUMBER_TAIL))
+    end = min(total_dur, start + shown)
+    if end - start < 0.5:
+        return None
+    return start, end, _NUMBER_SCALE_IN + _ass_escape(_NON_RENDERABLE.sub("", key_number)).upper()
+
+
 def _banner_seconds(first_end: float | None) -> float:
     """How long the banner shows: until the first sentence ends, at least HOOK_SECONDS (1.8)
     and at most HOOK_MAX_SECONDS (4.0). It vanished at 1.8 s, the biggest change between two
@@ -498,7 +552,8 @@ def _source_margin(banner: str) -> int:
 
 def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = None,
                key_points: list[str] | None = None, total_dur: float | None = None,
-               source_label: str | None = None, first_end: float | None = None) -> str:
+               source_label: str | None = None, first_end: float | None = None,
+               number: tuple[float, float, str] | None = None) -> str:
     """Render the full .ass subtitle file: active-word karaoke captions, the banner (the title)
     and the source line for the first sentence (`first_end`, when known), and optional sparse
     key-point cards. Everything sits inside the Shorts safe area (design 11.5)."""
@@ -531,6 +586,11 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
             banner = _hook_banner_text(text, max_chars=18, max_lines=2, base_size=90)
             if banner:
                 lines.append(f"Dialogue: 2,{_format_ts(cs)},{_format_ts(ce)},Card,,0,0,0,,{banner}")
+
+    # One key number, large in the upper middle, while the narration says it (design 11.5).
+    if number:
+        start, end, label = number
+        lines.append(f"Dialogue: 2,{_format_ts(start)},{_format_ts(end)},Number,,0,0,0,,{label}")
 
     # Group words into short phrases; each phrase is ONE karaoke line whose words fill to the
     # highlight colour exactly as spoken (active-word highlight — a retention driver).
@@ -612,7 +672,7 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 def burn_captions(video_path: str, audio_path: str, out_path: str,
                   hook_text: str | None = None, key_points: list[str] | None = None,
                   source_label: str | None = None, script_text: str | None = None,
-                  fps: int = 30) -> str:
+                  fps: int = 30, key_number: str | None = None) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
@@ -643,19 +703,20 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
 
     cards = _render_graphic_cards(key_points, total_dur or 0.0, out_dir)
     first_end = _first_sentence_end(words, script_text)
+    number = _number_card(key_number, _number_moment_words(key_number, words), total_dur or 0.0)
 
     # The ASS omits text cards only when PNG cards will draw them, so they never double up.
     ass_path = os.path.join(out_dir, f"captions_{digest}.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(_build_ass(words, hook_text, None if cards else key_points, total_dur, source_label,
-                           first_end=first_end))
+                           first_end=first_end, number=number))
 
     fallback_ass = None
     if cards:  # a full-featured fallback: same captions, cards back as ASS text
         fallback_ass = os.path.join(out_dir, f"captions_{digest}_text.ass")
         with open(fallback_ass, "w", encoding="utf-8") as f:
             f.write(_build_ass(words, hook_text, key_points, total_dur, source_label,
-                               first_end=first_end))
+                               first_end=first_end, number=number))
 
     log.info("subtitles: burning %d word events into %s (graphic cards=%d)",
              len(words), out_path, len(cards))
@@ -896,11 +957,12 @@ def subtitle_blocks(lines: list[dict], pause_list: list[tuple[float, float]],
 
 def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
                   duration: float, source_label: str | None,
-                  first_end: float | None = None) -> str:
+                  first_end: float | None = None,
+                  number: tuple[float, float, str] | None = None) -> str:
     """The banner and the source line as on every reel (held for line 1, `first_end`), then
     the English blocks: plain white, at most two rows each, each held until the next starts."""
     lines = [_build_ass([], hook_text, None, duration, source_label,
-                        first_end=first_end).rstrip("\n")]
+                        first_end=first_end, number=number).rstrip("\n")]
     for i, (start, end, text) in enumerate(blocks):
         until = blocks[i + 1][0] if i + 1 < len(blocks) else max(end, duration)
         rows = [_ass_escape(_NON_RENDERABLE.sub("", row)) for row in _sub_rows(text)]
@@ -911,7 +973,7 @@ def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
 
 def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[dict],
                   hook_text: str | None = None, source_label: str | None = None,
-                  fps: int = 30) -> str:
+                  fps: int = 30, key_number: str | None = None) -> str:
     """Burn English subtitles for a Hinglish narration: no speech recognition; the timing comes
     from the narration's pauses and the text from the checked lines (design 7.7)."""
     if not os.path.exists(video_path):
@@ -927,7 +989,8 @@ def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[d
     digest = hashlib.sha1(os.path.abspath(audio_path).encode("utf-8")).hexdigest()[:12]
     ass_path = os.path.join(out_dir, f"subs_{digest}.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(_hinglish_ass(blocks, hook_text, duration, source_label, first_end))
+        number = _number_card(key_number, _number_moment_blocks(key_number, blocks), duration)
+        f.write(_hinglish_ass(blocks, hook_text, duration, source_label, first_end, number))
     log.info("subtitles: burning %d English blocks for a Hinglish narration into %s",
              len(blocks), out_path)
     _burn(video_path, ass_path, out_path, fps=fps)

@@ -359,6 +359,9 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
                 log.warning("produce: idea %s repaired after the fact-check block (%s)",
                             idea_id, factcheck.summary(check))
                 script["script_body"] = fixed["script_body"]
+                # The key number must still be in the narration it is shown over (design 11.5).
+                script["key_number"] = scriptwriter.checked_key_number(script.get("key_number"),
+                                                                       fixed["script_body"])
                 db.update_script_body(script["script_id"], fixed["script_body"])
                 if new_title != (script.get("title") or ""):
                     script["title"] = new_title
@@ -460,12 +463,13 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
             final = subtitles.burn_hinglish(raw, audio, os.path.join(work, "reel_final.mp4"),
                                             spoken["lines"], hook_text=hook,
                                             source_label=_source_domain(idea.get("sources")),
-                                            **rate)
+                                            key_number=script.get("key_number"), **rate)
         else:
             final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
                                             hook_text=hook, key_points=script.get("key_points"),
                                             source_label=_source_domain(idea.get("sources")),
-                                            script_text=script["script_body"], **rate)
+                                            script_text=script["script_body"],
+                                            key_number=script.get("key_number"), **rate)
         _disclose_what_was_shown(script, shown)
         metadata = _build_metadata(idea, script)
         metadata["voice"] = spoke.get("voice")

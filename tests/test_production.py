@@ -745,6 +745,42 @@ def test_a_blocked_script_is_repaired_once_and_rechecked(monkeypatch, tmp_path):
     assert saved == ["FIXED BODY"] and voiced == ["FIXED BODY"]
 
 
+def test_a_repair_rechecks_the_key_number(monkeypatch, tmp_path):
+    """Review Focus 3: a repair that rewrites the number away drops the card."""
+    _wire_happy(monkeypatch)
+    _verdicts(monkeypatch, _BLOCK, _OK)
+    monkeypatch.setattr(production.scriptwriter, "write_script", lambda idea, **k: {
+        **SCRIPT, "script_body": "It took 286 days. " * 5, "key_number": "286 days"})
+    monkeypatch.setattr(production.scriptwriter, "repair_script",
+                        lambda body, f, topic=None, title=None, **_: {
+                            "script_body": "It took 290 days. " * 5, "title": title})
+    seen = {}
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: seen.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["key_number"] == ""
+
+
+def test_the_key_number_reaches_both_burns(monkeypatch, tmp_path):
+    _wire_happy(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "key_number": "286 days"})
+    english = {}
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: english.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert english["key_number"] == "286 days"
+
+    hinglish = {}
+    _hinglish_wiring(monkeypatch)
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "key_number": "286 days"})
+    monkeypatch.setattr(production.subtitles, "burn_hinglish",
+                        lambda v, a, o, lines, **k: hinglish.update(k) or o)
+    production.produce_one(IDEA, str(tmp_path))
+    assert hinglish["key_number"] == "286 days"
+
+
 def test_a_repair_that_fails_the_gate_again_stays_blocked(monkeypatch, tmp_path):
     _wire_happy(monkeypatch)
     _verdicts(monkeypatch, _BLOCK, _BLOCK)
