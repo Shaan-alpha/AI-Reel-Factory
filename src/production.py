@@ -206,8 +206,9 @@ def _build_metadata(idea: dict, script: dict, include_channel_tags: bool = True)
 
 
 # How reels are made, stamped on every post (posts.format) so the relaunch can be judged on the
-# reels that really used the new format (design 10.1). The AI-video design's stage 1 raises it.
-FORMAT_VERSION = 1
+# reels that really used the new format (design 10.1). 2 from the relaunch: the judging rule
+# counts version 2 posts narrated in Hinglish with mostly video shots (design 10.2).
+FORMAT_VERSION = 2
 
 
 def _format(language: str, visual_meta: dict) -> dict:

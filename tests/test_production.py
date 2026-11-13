@@ -967,7 +967,7 @@ def test_format_stamp_reaches_publish(monkeypatch, tmp_path):
 
     monkeypatch.setattr(production.publish_youtube, "publish", _publish)
     production.produce_one(IDEA, str(tmp_path))
-    assert seen["format"]["version"] == 1 and seen["format"]["language"] == "en"
+    assert seen["format"]["version"] == 2 and seen["format"]["language"] == "en"
     assert seen["format"]["visuals"] == "ai" and seen["audio_language"] == "en"
 
 
