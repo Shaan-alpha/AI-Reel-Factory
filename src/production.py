@@ -21,9 +21,11 @@ import re
 import shutil
 import tempfile
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from src import (
+    ai_video,
     approval,
     assembly,
     config,
@@ -645,6 +647,15 @@ def ensure_ideas_and_digest() -> int:
     return n
 
 
+def _report_ai_video_spend(run_started: datetime) -> None:
+    """After the last reel: settle what this run left open, then send the run's Higgsfield spend
+    line (design 6.7, 6.8). Both are bookkeeping and never raise; no line when nothing was bought."""
+    ai_video.sweep()
+    line = ai_video.spend_line(run_started)
+    if line:
+        _notify(line)
+
+
 def _notify(text: str) -> None:
     """Best-effort Telegram message (links, status). Never raises."""
     try:
@@ -658,6 +669,8 @@ def run() -> None:
     """Run one production cycle. See module docstring for the step order."""
     config.validate()  # fail loud on misconfig (rule 14)
     publish_youtube.preflight()  # a dead YouTube token stops the run before any work
+    run_started = datetime.now(timezone.utc)
+    ai_video.sweep()  # settle Higgsfield jobs earlier runs left open (design 6.7)
 
     ensure_ideas_and_digest()
 
@@ -673,6 +686,7 @@ def run() -> None:
     summary = run_production()
     log.info("production: done — %d published, %d failed.",
              len(summary["published"]), len(summary["failed"]))
+    _report_ai_video_spend(run_started)
 
 
 def _approval_mode() -> str:
@@ -723,6 +737,8 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     # Before the digest: a dead token used to surface at the upload, after the taps and
     # the render.
     publish_youtube.preflight()
+    run_started = datetime.now(timezone.utc)
+    ai_video.sweep()  # settle Higgsfield jobs earlier runs left open (design 6.7); never raises
     try:  # best-effort, like the age-out below: bookkeeping must never block a run (rule 14)
         _release_leftover_approvals()
     except Exception as e:  # noqa: BLE001
@@ -792,6 +808,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
         _notify("Nothing approved — no Short produced this time.")
     log.info("make_on_demand: %d published, %d failed.",
              len(summary["published"]), len(summary["failed"]))
+    _report_ai_video_spend(run_started)
     return summary
 
 

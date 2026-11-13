@@ -1166,3 +1166,53 @@ def test_no_hindi_voice_narrates_in_english(monkeypatch, tmp_path):
     assert "english-narration" in seen["attempt"]["downgrades"]
     assert any("English" in n for n in seen["notes"])
     assert seen["stored"][0]["language"] == "en" and "Hindi" in seen["stored"][0]["reason"]
+
+
+def _spend_events(monkeypatch, line="🎞️ AI video this run: 1 clip, $0.18; $0.18 this month."):
+    """Record the ledger sweep, production and the spend line, in order (design 6.7, 6.8)."""
+    events, notes = [], []
+    monkeypatch.setattr(production.ai_video, "sweep", lambda: events.append("sweep") or {})
+    monkeypatch.setattr(production.ai_video, "spend_line",
+                        lambda since: events.append(("spend", since)) or line)
+    monkeypatch.setattr(production, "run_production", lambda limit=None, only_ids=None:
+                        events.append("produce") or {"published": [], "failed": []})
+    monkeypatch.setattr(production, "_notify", lambda t: notes.append(t))
+    monkeypatch.setattr(production.config, "validate", lambda: None)
+    return events, notes
+
+
+def _order(events) -> list[str]:
+    return [e if isinstance(e, str) else e[0] for e in events]
+
+
+def test_both_entry_points_sweep_before_and_after_and_report_spend(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    events, notes = _spend_events(monkeypatch)
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
+                        lambda n, already_pending=0: 1)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: None)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+
+    production.make_on_demand(num_ideas=1, wait_minutes=1)
+    assert _order(events) == ["sweep", "produce", "sweep", "spend"]
+    since = events[-1][1]
+    assert since.tzinfo is not None
+    assert abs(datetime.now(timezone.utc) - since) < timedelta(minutes=1)
+    assert notes[-1].startswith("🎞️ AI video this run")
+
+    events.clear()
+    monkeypatch.setattr(production, "ensure_ideas_and_digest", lambda: 0)
+    production.run()
+    assert _order(events) == ["sweep", "produce", "sweep", "spend"]
+    assert notes[-1].startswith("🎞️ AI video this run")
+
+
+def test_no_spend_line_is_sent_when_nothing_was_bought(monkeypatch):
+    events, notes = _spend_events(monkeypatch, line=None)
+    monkeypatch.setattr(production, "ensure_ideas_and_digest", lambda: 0)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+    production.run()
+    assert _order(events) == ["sweep", "produce", "sweep", "spend"]
+    assert not any("AI video" in n for n in notes)
