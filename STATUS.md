@@ -248,6 +248,22 @@ default `english` nothing changes:
     and retry fixed it. Gemini passed the meaning. The voice took 27.86 s (ratio 1.04), and there
     were 12 subtitle blocks. About $0.10.
 - **SQL:** `scripts.spoken` (end of docs/03 §4).
+- **Final review of stage 2** by a fresh reviewer found no critical issue and 5 important ones,
+  all fixed test-first:
+  - the voice tests would have turned the daily CI red on 2026-11-17 by the date alone;
+  - subtitle parts could drop words ("did not ban" shown as "ban");
+  - a blank Hinglish line passed the checks;
+  - line numbers given as text blanked the meaning check;
+  - rupee figures with compound scales were garbled.
+  Five minor ones were fixed too:
+  - "Rs", "5G", "10x", "21वीं", decades and times read wrongly;
+  - "°" and "+" were refused;
+  - a verdict of "true" as text failed;
+  - a sentence end with no pause drifted 2.5 s;
+  - a pause-reading timeout could lose the reel.
+
+  963 pass, 5 skipped; with `.env` blanked only the `NICHE` artifact fails. Deferred minors are
+  in the handoff.
 
 **Final review of stage 1 (1a and 1b)** by a fresh reviewer: no critical issue, 8 important, all
 fixed test-first:

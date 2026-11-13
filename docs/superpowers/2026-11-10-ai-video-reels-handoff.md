@@ -65,8 +65,21 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   from the design: the Gemini 3.8 TTS request shape (7.5), since the operator kept 3.1, which
   Vertex serves.
 
-**Next:** stage 2's final review and fixes, push with the operator's go-ahead, then stages 3-4
-and the relaunch (design section 14).
+- **Stage 2's final review is done** (5 important findings and 5 re-graded minors fixed
+  test-first, 963 pass). **Deferred minors from it:**
+  - the Claude ledger settles from the top-level usage, not `usage.iterations`, so a rescued call
+    is under-counted, and the Opus 5 and 4.8 prices are missing, so a rescue is over-counted;
+  - a Hinglish call that times out keeps its $0.41 worst case reserved;
+  - missing Hindi number words: 31-99, लाखों, करोड़ों, हज़ारों, सैकड़ों, डेढ़, ढाई and आधा;
+  - दो as the verb "give" fails as a number word;
+  - "-5%" loses its sign;
+  - a 0.5 s sentence with 4 parts can yield an inverted block;
+  - the 36 s code band and the voice's 1.30x band disagree;
+  - English text with any Devanagari takes the Hindi route;
+  - the Hinglish step has no deadline of its own.
+
+**Next:** push stage 2 with the operator's go-ahead, then stages 3-4 and the relaunch (design
+section 14).
 
 ## 1. What the operator wants
 
