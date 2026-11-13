@@ -38,6 +38,7 @@ _CALL_TIMEOUT = 30    # seconds, every API call
 _FILE_TIMEOUT = 180   # seconds, the upload PUT and the clip download
 _REQUEST_ID = re.compile(r"[0-9A-Za-z-]{8,64}")
 _QUERY = re.compile(r"(?<=\S)\?[^\s'\"<>()]+")
+_VISIBLE_ASCII = re.compile(r"[\x21-\x7e]+")
 _DETAIL_CHARS = 300
 
 
@@ -45,7 +46,8 @@ class HiggsfieldError(Exception):
     """A call that did not do what was asked. `kind` is one of:
 
     - funds: 403, the balance is empty. Never charged.
-    - auth: 401, or no key set. Never charged.
+    - auth: 401; a 403 marked no-store (a disabled or expired key); no key set, or a key holding a
+      space or control character. Never charged.
     - refused: any other 4xx (invalid, not found, a reused key with other arguments, model
       blocked). Never charged; repeating it unchanged will not help.
     - busy: 429, the account's queue is full. Never charged; `retry_after` holds the seconds to
@@ -82,6 +84,11 @@ def _key() -> str:
     key = (config.get("HF_API_KEY") or "").strip()
     if not key:
         raise HiggsfieldError("auth", "HF_API_KEY is not set")
+    # A key with a space or control character inside is refused before a header is built:
+    # requests would reject the header and quote it, escaped, where redact cannot find it.
+    if not _VISIBLE_ASCII.fullmatch(key):
+        raise HiggsfieldError("auth", "HF_API_KEY holds a space or control character; "
+                                      "paste the console key again")
     return key
 
 
@@ -101,16 +108,18 @@ def _send(method: str, url: str, *, auth: bool, timeout: float, **kwargs) -> req
 
 
 def _detail(r: requests.Response) -> str:
+    """The answer's error text, redacted and then cut: cut first, a key straddling the cut would
+    lose its whole match and a prefix of its secret half would survive."""
     try:
         body = r.json()
     except ValueError:
-        return (r.text or "")[:_DETAIL_CHARS]
+        return redact(r.text or "")[:_DETAIL_CHARS]
     detail = body.get("detail", body) if isinstance(body, dict) else body
     if isinstance(detail, dict):
         detail = ": ".join(str(detail[k]) for k in ("code", "message") if detail.get(k)) or detail
     if not isinstance(detail, str):
         detail = json.dumps(detail, ensure_ascii=False)
-    return detail[:_DETAIL_CHARS]
+    return redact(detail)[:_DETAIL_CHARS]
 
 
 def _retry_after(r: requests.Response) -> float | None:
@@ -143,7 +152,10 @@ def _check(r: requests.Response, what: str, *, api: bool = True) -> requests.Res
     if code == 401:
         kind = "auth"
     elif code == 403:
-        kind = "funds"
+        # A disabled or expired key is also a 403, marked no-store (api-reference_headers.md);
+        # told "out of funds", the operator would top up a balance that is not the problem.
+        no_store = "no-store" in (r.headers.get("Cache-Control") or "").lower()
+        kind = "auth" if no_store else "funds"
     elif code == 429:
         raise HiggsfieldError("busy", message, status=code, retry_after=_retry_after(r))
     elif code >= 500:

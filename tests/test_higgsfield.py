@@ -165,6 +165,8 @@ def test_a_request_id_that_is_not_an_id_is_never_sent(monkeypatch):
 
 @pytest.mark.parametrize("status, headers, body, kind, retry_after", [
     (403, {}, {"detail": "Insufficient balance"}, "funds", None),
+    # A disabled or expired key is a 403 too, marked no-store (api-reference_headers.md).
+    (403, {"Cache-Control": "no-store"}, {"detail": "API key expired"}, "auth", None),
     (401, {}, {"detail": "Invalid credentials"}, "auth", None),
     (400, {}, {"detail": "bad image"}, "refused", None),
     (404, {}, {"detail": "not found"}, "refused", None),
@@ -322,3 +324,26 @@ def test_byte_streams_are_accepted_as_upload_data(monkeypatch):
     stream = io.BytesIO(b"abc")
     higgsfield._send("PUT", SIGNED, auth=False, timeout=1, data=stream)
     assert seen["data"] is stream
+
+
+def test_a_key_cut_by_the_detail_limit_is_still_redacted(monkeypatch):
+    """The error detail is cut to 300 characters. Cut first and redacted after, a key straddling
+    the cut lost its whole-key match and a prefix of its second half survived (review I-1)."""
+    echoed = "x" * (300 - len("abc123:def4")) + KEY  # the cut falls inside "def456"
+    _use(monkeypatch, lambda m, u, k: _Resp(401, {"detail": echoed}))
+    with pytest.raises(higgsfield.HiggsfieldError) as err:
+        higgsfield.estimate(higgsfield.KLING, {})
+    assert "abc123" not in str(err.value) and "def4" not in str(err.value)
+
+
+@pytest.mark.parametrize("bad", ["abc123:de\nf456", "abc123:de f456", "abc123:\tdef456"])
+def test_a_malformed_key_is_never_sent(monkeypatch, bad):
+    """A key holding whitespace or a control character is refused before any request is built:
+    requests would reject the header and quote it, escaped, in an error that redact cannot match
+    (review M-2)."""
+    monkeypatch.setenv("HF_API_KEY", bad)
+    fake = _use(monkeypatch, lambda m, u, k: _Resp(200, {"usd": 0.179}))
+    with pytest.raises(higgsfield.HiggsfieldError) as err:
+        higgsfield.estimate(higgsfield.KLING, {})
+    assert err.value.kind == "auth" and fake.calls == []
+    assert not any(part in str(err.value) for part in ("abc123", "f456", "def456"))
