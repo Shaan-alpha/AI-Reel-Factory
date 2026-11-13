@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from src import assembly, config, db, higgsfield, llm, text, visuals
+from src import assembly, config, db, gates, higgsfield, llm, text, visuals
 
 log = logging.getLogger(__name__)
 
@@ -414,19 +414,34 @@ class Picture:
     animatable: bool  # a FLUX.2 klein still (portrait, seeded): the only kind Kling is given
 
 
-def _check_still(path: str) -> bool:
-    """Stage 4's still gate (stray lettering, a dark subject) plugs in here; in 3b every still
-    passes."""
-    return True
-
-
 def _picture(req: ReelRequest, shot: dict, i: int) -> Picture | None:
     """Shot i's still: klein, then schnell, then a Pexels photo found with the planner's search
-    words, never with the still prompt (design 6.9). None when all three fail."""
+    words, never with the still prompt (design 6.9). None when all three fail.
+
+    A drawn still that fails its check (stray lettering, too dark, letterbox bars: design 11.6)
+    is redrawn once with a new seed, the same on every rerun (rule 12). The redraw is used
+    unless it fails more checks than the first; a redraw that cannot be drawn keeps the first.
+    Every failure is logged: whether the check catches FLUX's lettering is measured, not
+    assumed."""
     variant = f"idea_{req.idea_id}"
     still = os.path.join(req.work_dir, f"still_{i:02d}.jpg")
     drew = visuals.ai_still(shot["still"], still, visuals._image_seed(variant, i))
-    if drew and _check_still(still):
+    if drew:
+        problems = gates.still_problems(still)
+        if problems:
+            log.warning("ai_video: shot %d's still failed its check (%s); redrawing it once",
+                        i, "; ".join(problems))
+            again = os.path.join(req.work_dir, f"redraw_{i:02d}.jpg")
+            redrew = visuals.ai_still(shot["still"], again,
+                                      visuals._image_seed(f"{variant}:redraw", i))
+            left = gates.still_problems(again) if redrew else None
+            if left:
+                log.warning("ai_video: shot %d's redrawn still failed its check too (%s)",
+                            i, "; ".join(left))
+            if redrew and len(left) <= len(problems):
+                still, drew = again, redrew
+            elif not redrew:
+                log.warning("ai_video: shot %d could not be redrawn; it keeps its first still", i)
         return Picture(still, drew == "klein")
     photo = os.path.join(req.work_dir, f"photo_{i:02d}.jpg")
     if visuals.stock_photo(shot["search"], photo, variant, i):

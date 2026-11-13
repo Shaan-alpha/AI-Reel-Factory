@@ -220,7 +220,7 @@ def test_tests_never_reach_higgsfield(monkeypatch):
 
 import json  # noqa: E402
 
-from src import llm, visuals  # noqa: E402
+from src import gates, llm, visuals  # noqa: E402
 
 SCRIPT = ("Sunita Williams returned to Earth after 286 days in orbit. NASA says [short pause] the "
           "capsule splashed down safely. Here's why it matters: India's own crew flight is next.")
@@ -375,7 +375,75 @@ def _draws(monkeypatch, klein=(), schnell=(), photos=()) -> dict:
 
     monkeypatch.setattr(visuals, "ai_still", ai_still)
     monkeypatch.setattr(visuals, "stock_photo", stock_photo)
+    monkeypatch.setattr(gates, "still_problems", lambda path: [])  # every still passes
     return asked
+
+
+def _gate(monkeypatch, failing: dict) -> list:
+    """gates.still_problems replaced: a still whose file name is in `failing` has those
+    problems. Returns the files checked."""
+    checked = []
+
+    def still_problems(path):
+        checked.append(os.path.basename(path))
+        return failing.get(os.path.basename(path), [])
+
+    monkeypatch.setattr(gates, "still_problems", still_problems)
+    return checked
+
+
+def test_a_clean_still_is_drawn_once(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    checked = _gate(monkeypatch, {})
+    ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert len(asked["still"]) == 6 and sorted(checked) == [f"still_{i:02d}.jpg" for i in range(6)]
+
+
+def test_a_still_with_lettering_is_redrawn_with_a_new_seed(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    _gate(monkeypatch, {"still_02.jpg": ["text: 'BER' 90"]})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert os.path.basename(pics[2].path) == "redraw_02.jpg" and pics[2].animatable
+    seeds = sorted(seed for i, _prompt, seed in asked["still"] if i == 2)
+    assert seeds == sorted([visuals._image_seed("idea_7", 2),
+                            visuals._image_seed("idea_7:redraw", 2)])
+    assert len(asked["still"]) == 7  # one redraw, the other shots once
+
+
+def test_a_redraw_that_fails_too_is_used_and_logged(monkeypatch, tmp_path, caplog):
+    _draws(monkeypatch, klein=set(range(6)))
+    _gate(monkeypatch, {"still_02.jpg": ["text: 'BER' 90"], "redraw_02.jpg": ["dark: 41 < 60"]})
+    with caplog.at_level("WARNING", logger="src.ai_video"):
+        pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert os.path.basename(pics[2].path) == "redraw_02.jpg"
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "'BER' 90" in said and "dark: 41 < 60" in said
+
+
+def test_the_first_still_is_kept_when_the_redraw_is_worse(monkeypatch, tmp_path):
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    checked = _gate(monkeypatch, {"still_02.jpg": ["dark: 50 < 60"],
+                                  "redraw_02.jpg": ["text: 'Welcome' 96", "letterbox bars"]})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert "redraw_02.jpg" in checked and len(asked["still"]) == 7  # the redraw was tried
+    assert os.path.basename(pics[2].path) == "still_02.jpg" and pics[2].animatable
+
+
+def test_a_redraw_that_cannot_draw_keeps_the_first_still(monkeypatch, tmp_path):
+    """Review Focus 2: a Workers AI refusal on the redraw never takes the shot's picture."""
+    asked = _draws(monkeypatch, klein=set(range(6)))
+    drawn, tried = visuals.ai_still, []
+
+    def first_only(prompt, dest, seed):
+        tried.append(os.path.basename(dest))
+        return None if os.path.basename(dest).startswith("redraw_") else drawn(prompt, dest, seed)
+
+    monkeypatch.setattr(visuals, "ai_still", first_only)
+    _gate(monkeypatch, {"still_02.jpg": ["letterbox bars"]})
+    pics = ai_video._pictures(_req(work_dir=str(tmp_path)), PLAN6)
+    assert "redraw_02.jpg" in tried
+    assert os.path.basename(pics[2].path) == "still_02.jpg" and pics[2].animatable
+    assert asked["photo"] == []
 
 
 def test_only_a_klein_still_is_animatable(monkeypatch, tmp_path):
