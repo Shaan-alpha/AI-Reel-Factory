@@ -95,9 +95,19 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   in STATUS.md's 2026-11-13 log). The run's closing sweep and spend line are now one call,
   `ai_video.close_run(since)`.
 
-**Next:** the operator's go-ahead for push and merge, the `HF_API_KEY` repository secret and the
-live check (design 15 steps 2-3). Then stage 3b (the shots, the cut list, the wiring) with stage 4,
-and the relaunch (design section 14).
+- **Stage 3a is merged** (PR #20). With the operator's go-ahead the `HF_API_KEY` repository secret
+  is set and the live check ran: `/estimate` now answers Kling with a per-second rate ($0.1575 a
+  clip; the client was fixed), and a repeated idempotency key returns the same job (one charge).
+- **Stage 3b is built** on `feat/stage-3b-ai-video-shots` (8 tasks; plan
+  `docs/superpowers/plans/2026-11-13-stage-3b-ai-video-shots.md`), behind `VISUAL_SOURCE=ai_video`:
+  the cut list, 24 fps rendering, the shot planner, the stills, buying and settling the clips with
+  stop latches, and the production wiring. Its seams for stage 4 are `ai_video._check_still` and
+  `ai_video._check_clip`.
+
+**Next:** stage 3b's final review and fix pass, then the operator's go-ahead for push and merge
+and for one test render (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
+number card, the banner hold, the music level, the vignette and stings) and the relaunch (design
+section 14).
 
 ## 1. What the operator wants
 

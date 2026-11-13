@@ -192,8 +192,9 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
   operator kept 3.1 over both `gemini-3.8-flash-tts` models by ear and asked for the move at once,
   so wherever Vertex is set up the voice comes from Vertex (billed, cents a reel) and the
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
-- **In progress since 2026-11-10: stages 0 and 1 merged (PRs #17, #18), stage 2 (Hinglish,
-  behind `NARRATION_LANGUAGE`) built on `feat/stage-2-hinglish`.** The operator chose a new
+- **In progress since 2026-11-10: stages 0, 1, 2 (Hinglish, behind `NARRATION_LANGUAGE`) and 3a
+  (the Higgsfield client and ledger) merged (PRs #17-#20); stage 3b (AI-video shots, behind
+  `VISUAL_SOURCE=ai_video`) built on `feat/stage-3b-ai-video-shots`.** The operator chose a new
   format: AI-video
   shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
   for Indian viewers. Higgsfield is approved by the operator as a billed service for this

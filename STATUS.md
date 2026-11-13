@@ -65,8 +65,9 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
   fresh final review and its fixes); **stage 2 (Hinglish) is merged** (PR #19, behind
   `NARRATION_LANGUAGE`). Stage 3 (AI video) comes in two plans: **3a (the Higgsfield client,
-  the ledger, the sweep) is built and reviewed** (PR #20; see the 2026-11-13 log); 3b (the
-  shots, the cut list, the wiring) is next. State and decisions are in
+  the ledger, the sweep) is merged** (PR #20); **3b (the shots, the cut list, the wiring) is
+  built** on `feat/stage-3b-ai-video-shots`, behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13
+  log). Stage 4 (picture and sound: the gates, the number card, the music level) is next. State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ⚠️ **Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4 in Supabase (two
   columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; three on
@@ -140,7 +141,43 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
-### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (reviewed, not pushed)
+### 2026-11-13 — Stage 3b: AI-video reels behind VISUAL_SOURCE=ai_video (built, not pushed)
+
+Stage 3a was merged as PR #20. Stage 3b was built inline on `feat/stage-3b-ai-video-shots` from
+its plan, `docs/superpowers/plans/2026-11-13-stage-3b-ai-video-shots.md` (8 tasks, each test-first;
+the calls made are in the plan's ledger). With `VISUAL_SOURCE=ai_video` a reel now:
+
+- **cuts on its narration** (`assembly.cut_list`): shots of 3-5 s ending on pauses, each longer one
+  reframed once inside its clip (1.15x punch-in); on test 4's narration, 6 shots and a new picture
+  every 2.4 s, as the design simulated;
+- **plans its pictures** (`ai_video.plan_shots`): one model call, a still and a motion prompt per
+  shot, the look added by code; a prompt naming anyone from the story is retried once, then the
+  reel uses a fallback plan and buys nothing;
+- **buys clips** (`ai_video.make_shots`): a klein still per shot; the quote (`/estimate`, $0.1575),
+  then up to `floor(AI_VIDEO_BUDGET_USD / quote)` clips (6), shot 1 first, then the last; each row
+  reserved before its still is uploaded; a submit with no answer repeated with the same key (the
+  live check showed one job, one charge); refusals at $0, but a refusal after an unanswered submit
+  keeps the quote; polling to a 300 s phase, 120 s more for running jobs, then `late`; a clip too
+  short for its shot becomes a still; paid clips under 7 days old are reused;
+- **stops buying for the run** on an empty balance, a refused key, a missing ledger table, or a
+  reel that got no clip in time, each told once a run;
+- **is rendered at 24 fps** with hard cuts and frame-exact trims (a real FFmpeg test: 216 frames
+  for 9.0 s), stills as Ken Burns moves paced to their shot, and the caption burn at 24 fps;
+- **is wired in production**: the subtitle burn is tried on a blank second before anything is
+  bought; the latest finish (job time left minus 240 s) caps the phase; "Published" gains
+  "🎞️ AI video: 5 of 6 shots, $0.79 ($… this month)"; a failure alert gains the spend; the attempt
+  row gets the spend and the downgrades `ai-path` and `still-shots`; a reel that cannot have its
+  shots takes today's `ai` path; the description says images when no clip was shown.
+
+Also: paid clips keep their idea from the 24-hour age-out for 6 days; `REEL_BUDGET_MINUTES` is 14;
+`JOB_TIMEOUT_MINUTES` is the Python step's limit (85 and 55), so the job clock can never run late.
+Not in 3b (stage 4 next): the still, clip and reel gates (seams `_check_still`, `_check_clip`),
+the key-number card, the banner hold, the source line and logo, the music level, the vignette and
+the stings.
+
+Suite: **1103 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
+
+### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (merged as PR #20)
 
 Stage 2 was merged as PR #19 (CI 963 pass). Stage 3a was built on `feat/stage-3-ai-video` from
 its plan, `docs/superpowers/plans/2026-11-13-stage-3a-higgsfield-client-and-ledger.md`. This is
