@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from postgrest.exceptions import APIError
 
 from src import db
@@ -179,3 +180,118 @@ def test_set_script_spoken_survives_a_missing_column(monkeypatch):
         "spoken": {"language": "hi", "lines": []}}
     _use(monkeypatch, _Fake(errors=[_NO_COLUMN]))
     db.set_script_spoken(5, {"language": "hi", "lines": []})  # logged once, never raised
+
+
+# --- ai_video_jobs, the Higgsfield ledger (design 6.7 and 13) --------------------------------
+
+_NO_LEDGER = {"code": "PGRST205",
+              "message": "Could not find the table 'public.ai_video_jobs' in the schema cache"}
+
+
+class _Ledger(_Fake):
+    """_Fake that records the filters (eq, in_, gte, order) instead of ignoring them."""
+
+    def __init__(self, data=None, errors=None):
+        super().__init__(data, errors)
+        self.filters = []
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def _filter(*args, **_kwargs):
+            self.filters.append((name, args))
+            return self
+
+        return _filter
+
+
+def _gte(fake) -> tuple[str, datetime]:
+    (column, value), = [a for n, a in fake.filters if n == "gte"]
+    return column, datetime.fromisoformat(value)
+
+
+def test_reserve_stamps_a_fresh_key_and_status(monkeypatch):
+    import uuid
+
+    fake = _use(monkeypatch, _Ledger(data={"ai_video_jobs": [{"id": 7}]}))
+    row = db.reserve_ai_video_job(5, 0, "kling-video/v2.5-turbo/standard/image-to-video", 0.17912)
+    (op, table, (sent,), _), = fake.calls
+    assert (op, table) == ("insert", "ai_video_jobs")
+    assert {k: sent[k] for k in ("idea_id", "shot", "status", "cost_usd")} == {
+        "idea_id": 5, "shot": 0, "status": "reserved", "cost_usd": 0.1791}
+    assert sent["endpoint"] == "kling-video/v2.5-turbo/standard/image-to-video"
+    uuid.UUID(sent["idempotency_key"])
+    stamped = datetime.fromisoformat(sent["created_at"])
+    assert abs(datetime.now(timezone.utc) - stamped) < timedelta(minutes=1)
+    assert row["id"] == 7 and row["idempotency_key"] == sent["idempotency_key"]
+    assert db.reserve_ai_video_job(5, 1, "e", 0.179)["idempotency_key"] != row["idempotency_key"]
+
+
+def test_update_writes_the_fields(monkeypatch):
+    fake = _use(monkeypatch, _Ledger())
+    db.update_ai_video_job(7, status="submitted", request_id="0b6f2a4e")
+    (op, table, (sent,), _), = fake.calls
+    assert (op, table, sent) == ("update", "ai_video_jobs",
+                                 {"status": "submitted", "request_id": "0b6f2a4e"})
+    assert ("eq", ("id", 7)) in fake.filters
+
+
+def test_reads_filter_by_idea_age_and_status(monkeypatch):
+    rows = [{"id": 1, "status": "completed", "shot": 0}]
+    fake = _use(monkeypatch, _Ledger(data={"ai_video_jobs": rows}))
+    now = datetime.now(timezone.utc)
+
+    assert db.ai_video_jobs_for_idea(5) == rows
+    assert ("eq", ("idea_id", 5)) in fake.filters
+    column, cutoff = _gte(fake)
+    assert column == "created_at" and timedelta(days=6, hours=23) < now - cutoff < timedelta(days=7, minutes=1)
+
+    fake.filters.clear()
+    assert db.open_ai_video_jobs() == rows
+    statuses = [list(a[1]) for n, a in fake.filters if n == "in_" and a[0] == "status"]
+    assert statuses == [["submitted", "late"]]
+    column, cutoff = _gte(fake)
+    assert timedelta(days=6, hours=23) < now - cutoff < timedelta(days=7, minutes=1)
+
+    fake.filters.clear()
+    since = datetime(2026, 11, 13, 6, 0, tzinfo=timezone.utc)
+    assert db.ai_video_jobs_since(since) == rows
+    assert _gte(fake) == ("created_at", since)
+
+
+def test_the_months_spend_sums_cost(monkeypatch):
+    rows = [{"cost_usd": "0.1790"}, {"cost_usd": 0.179}, {"cost_usd": None}, {"cost_usd": 0}]
+    fake = _use(monkeypatch, _Ledger(data={"ai_video_jobs": rows}))
+    assert db.ai_video_spend_this_month() == 0.358
+    column, start = _gte(fake)
+    now = datetime.now(timezone.utc)
+    assert column == "created_at"
+    assert start == now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def test_a_missing_ledger_table_is_unavailable_not_empty(monkeypatch):
+    """No table must never read as "nothing bought": a caller that took [] for an empty ledger
+    would buy every shot again (design 6.2 step 6: a failed ledger read means nothing is bought)."""
+    calls = [lambda: db.reserve_ai_video_job(5, 0, "e", 0.179),
+             lambda: db.update_ai_video_job(7, status="late"),
+             lambda: db.ai_video_jobs_for_idea(5),
+             db.open_ai_video_jobs,
+             lambda: db.ai_video_jobs_since(datetime.now(timezone.utc)),
+             db.ai_video_spend_this_month]
+    for call in calls:
+        _use(monkeypatch, _Ledger(errors=[_NO_LEDGER]))
+        with pytest.raises(db.LedgerUnavailable):
+            call()
+
+
+def test_a_failed_ledger_read_raises(monkeypatch):
+    _use(monkeypatch, _Ledger(errors=[{"code": "57014", "message": "statement timeout"}]))
+    with pytest.raises(APIError):
+        db.ai_video_jobs_for_idea(5)
+
+
+def test_a_reservation_without_a_row_back_raises(monkeypatch):
+    _use(monkeypatch, _Ledger(data={"ai_video_jobs": []}))
+    with pytest.raises(RuntimeError):
+        db.reserve_ai_video_job(5, 0, "e", 0.179)

@@ -6,7 +6,8 @@ Contract:
     depends on   : supabase-py, src.config (SUPABASE_URL, SUPABASE_KEY = sb_secret_ key).
 
 Tables (see docs/03-setup-guide.md §4): ideas, scripts, posts, analytics, hook_performance, post_metrics, reel_attempts,
-claude_spend (one row per Claude call, the ledger that holds the Anthropic budget).
+claude_spend (one row per Claude call, the ledger that holds the Anthropic budget), ai_video_jobs
+(one row per Higgsfield job, reserved before it is bought).
 RLS is enabled on every table; this layer authenticates with the server-side **secret** key
 (`sb_secret_…`), which bypasses RLS. Never use the publishable key here. Never store video
 here — only rows/metadata (rule 15).
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -659,3 +661,79 @@ def settle_claude_spend(row_id: int, *, input_tokens: int, output_tokens: int,
 def release_claude_spend(row_id: int) -> None:
     """Drop a reservation for a call that was never billed (refused, or answered with an error)."""
     get_client().table("claude_spend").delete().eq("id", row_id).execute()
+
+
+# --- ai_video_jobs (the Higgsfield ledger, design 6.7 and 13) --------------------------------
+# No row, no purchase: a job's row is reserved, at its quoted cost and with its idempotency key,
+# before anything is sent to Higgsfield. Every write and read here raises on failure, because the
+# caller must never mistake "could not read" for "nothing bought" (that would buy shots again).
+
+_LEDGER = "ai_video_jobs"
+_LEDGER_DAYS = 7  # a finished job's clip URL lasts 7 days, so older rows cannot be reused or read
+
+
+class LedgerUnavailable(RuntimeError):
+    """The ai_video_jobs table is missing: the operator has not run its SQL (docs/03 §4). Nothing
+    may be bought until it exists. Any other database failure raises as it is."""
+
+
+def _ledger(run):
+    try:
+        return run()
+    except Exception as e:
+        if not _missing_schema(e):
+            raise
+        _warn_once(_LEDGER, "ai_video_jobs is missing (run the SQL in docs/03); nothing is bought "
+                            "from Higgsfield until it exists")
+        raise LedgerUnavailable("ai_video_jobs is missing; run the SQL in docs/03 §4") from e
+
+
+def _days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def reserve_ai_video_job(idea_id: int, shot: int, endpoint: str, cost_usd: float) -> dict:
+    """Reserve one job before it is submitted; return the row (its `id` and fresh UUID
+    `idempotency_key`). It counts at its quote until it is settled. `created_at` is stamped here,
+    as reserve_claude_spend does, because the month's sum and the 7-day reads filter on it."""
+    row = {"created_at": datetime.now(timezone.utc).isoformat(), "idea_id": idea_id,
+           "shot": shot, "endpoint": endpoint, "idempotency_key": str(uuid.uuid4()),
+           "status": "reserved", "cost_usd": round(float(cost_usd), 4)}
+    data = _ledger(lambda: get_client().table(_LEDGER).insert(row).execute().data)
+    if not data:
+        raise RuntimeError("ai_video_jobs: the reservation returned no row")
+    return {**row, **data[0]}
+
+
+def update_ai_video_job(row_id: int, **fields) -> None:
+    """Write a job's progress: request_id, status, cost_usd, seconds, result_url, settled_at."""
+    _ledger(lambda: get_client().table(_LEDGER).update(fields).eq("id", row_id).execute())
+
+
+def ai_video_jobs_for_idea(idea_id: int, days: int = _LEDGER_DAYS) -> list[dict]:
+    """This idea's jobs from the last `days` days, oldest first (for reusing paid clips)."""
+    return _ledger(lambda: get_client().table(_LEDGER).select("*").eq("idea_id", idea_id)
+                   .gte("created_at", _days_ago(days)).order("created_at").execute().data)
+
+
+def open_ai_video_jobs(days: int = _LEDGER_DAYS) -> list[dict]:
+    """Jobs still to settle: `submitted` or `late`, from the last `days` days (for the sweep).
+    A `reserved` row is not here: its submit never answered, so there is no request to read."""
+    return _ledger(lambda: get_client().table(_LEDGER).select("*")
+                   .in_("status", ["submitted", "late"])
+                   .gte("created_at", _days_ago(days)).order("created_at").execute().data)
+
+
+def ai_video_jobs_since(since: datetime) -> list[dict]:
+    """Every job reserved since `since` (a run's start), for the run's spend line."""
+    return _ledger(lambda: get_client().table(_LEDGER).select("*")
+                   .gte("created_at", since.isoformat()).order("created_at").execute().data)
+
+
+def ai_video_spend_this_month() -> float:
+    """USD recorded against Higgsfield since the start of this calendar month (UTC). For the log
+    and Telegram only; it is not a cap (the operator's choice, design 6.7)."""
+    start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    rows = _ledger(lambda: get_client().table(_LEDGER).select("cost_usd")
+                   .gte("created_at", start.isoformat()).execute().data)
+    return round(sum(float(r.get("cost_usd") or 0) for r in rows), 4)

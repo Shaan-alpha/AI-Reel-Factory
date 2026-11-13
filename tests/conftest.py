@@ -55,6 +55,24 @@ def _no_live_telegram(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_higgsfield(monkeypatch):
+    """Higgsfield is billed per clip, so no test reaches it (design 17), with no exemption: the one
+    live check is tools/verify_higgsfield.py, run by hand with the operator's go-ahead. As with the
+    Telegram guard, a test that patches requests.request still exercises the real client; only a
+    real network call is refused, at `_send`, the client's one way out."""
+    from src import higgsfield
+
+    real_send, real_request = higgsfield._send, higgsfield.requests.request
+
+    def _guarded(*args, **kwargs):
+        if higgsfield.requests.request is real_request:
+            raise RuntimeError("a test tried to reach Higgsfield; patch requests.request for it")
+        return real_send(*args, **kwargs)
+
+    monkeypatch.setattr(higgsfield, "_send", _guarded)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_youtube_preflight(request, monkeypatch):
     """The entry points refresh the YouTube token before any work (publish_youtube.preflight);
     a unit test of make_on_demand must not reach Google for it. Tests of the pre-flight itself

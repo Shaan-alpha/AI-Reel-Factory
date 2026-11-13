@@ -7,8 +7,8 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) built** on `feat/stage-2-hinglish`, behind `NARRATION_LANGUAGE` ([plan](docs/superpowers/plans/2026-11-12-stage-2-hinglish.md)), not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
-**Last updated:** 2026-11-12 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3a (the Higgsfield client, the ledger, the sweep) built and reviewed** on `feat/stage-3-ai-video`, not yet pushed; nothing is bought yet. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
   ↳ the Developer API is no longer asked for 3.1 or the 2.5 preview (it shuts both down 2026-11-17); the operator kept 3.1 over both 3.8 models by ear on 2026-11-12
@@ -63,13 +63,17 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   audit is checked and the design rewritten (2026-11-12,
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
   **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
-  fresh final review and its fixes); **stage 2 (Hinglish) is built** on `feat/stage-2-hinglish`,
-  behind `NARRATION_LANGUAGE`. Next: its final review, then push with the operator's go-ahead;
-  then stage 3 (AI video). State and decisions are in
+  fresh final review and its fixes); **stage 2 (Hinglish) is merged** (PR #19, behind
+  `NARRATION_LANGUAGE`). Stage 3 (AI video) comes in two plans: **3a (the Higgsfield client,
+  the ledger, the sweep) is built and reviewed** (PR #20; see the 2026-11-13 log); 3b (the
+  shots, the cut list, the wiring) is next. State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
-- ⚠️ **Operator, for stages 0 and 1:** run the new SQL at the end of docs/03 §4 in Supabase (two
-  columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; two on
-  `scripts`). The code runs without it, skipping those records. The bot is already redeployed.
+- ⚠️ **Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4 in Supabase (two
+  columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; three on
+  `scripts`; the `ai_video_jobs` table). The code runs without it, skipping those records, and
+  buys nothing from Higgsfield until `ai_video_jobs` exists. The bot is already redeployed.
+- ~~**Operator, before the relaunch:** the `HF_API_KEY` secret and the live check~~ Both done
+  2026-11-13 with the operator's go-ahead (design 15 steps 2-3; result in docs/04 and the log).
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
   - ~~before 2026-11-17: ear-test the 3.8 TTS models~~ Done 2026-11-12: the operator kept
     `gemini-3.1-flash-tts-preview` (Charon, Hinglish) over both 3.8 models, and the voice moved
@@ -135,6 +139,85 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 ---
 
 ## Log
+
+### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (reviewed, not pushed)
+
+Stage 2 was merged as PR #19 (CI 963 pass). Stage 3a was built on `feat/stage-3-ai-video` from
+its plan, `docs/superpowers/plans/2026-11-13-stage-3a-higgsfield-client-and-ledger.md`. This is
+the plumbing that touches money. No reel buys anything yet: stage 3b wires the shots.
+
+- **`src/higgsfield.py`**, the only code that talks to Higgsfield:
+  - estimate, upload, submit, status, cancel and download, through one transport;
+  - the key goes only to `api.higgsfield.ai`, never to the presigned upload or the clip download;
+  - every message is redacted (the key, each half of it, any URL's query string), with no raw
+    exception chained behind it;
+  - each answer is sorted into funds (403), auth (401), refused (other 4xx), busy (429, with
+    `Retry-After`) or unavailable (5xx, a timeout, no `request_id`);
+  - a cancel counts only when Higgsfield confirms it.
+- **The `ai_video_jobs` ledger** (`src/db.py`; SQL at the end of docs/03 §4):
+  - a row is reserved, at the quote and with a fresh idempotency key, before a job is bought;
+  - a missing table raises `LedgerUnavailable`, never an empty list that would read as "nothing
+    bought".
+- **The sweep** (`src/ai_video.py`), at the start of both entry points and after the last reel:
+  - `submitted` and `late` jobs under 7 days old are settled;
+  - a completed job keeps its cost and gains its URL; failed, nsfw or canceled cost 0;
+  - it is fail-soft, and runs only with `HF_API_KEY` set.
+- **The run's spend line** on Telegram, read from the ledger: clips, dollars, paid and not used,
+  and the month to date. It is a report, not a cap.
+- **A conftest guard:** no test can reach Higgsfield.
+- **`tools/verify_higgsfield.py`**, the live check of design 15 step 3:
+  - two submits with one key, then an immediate cancel, at most $0.18;
+  - it is tested offline and has **not been run**: it waits for the operator.
+- **Settings:** `HF_API_KEY` is in `.env.example` and in both workflows as a secret reference;
+  until the secret exists it renders empty and nothing runs. The empty `HF_API_SECRET` line and
+  its "paste both" comment were removed from the local `.env`, with no value printed.
+- **docs/04** records Higgsfield and its licence basis (Terms §4.4: no claim on outputs, commercial
+  use unrestricted; §5.5: disclose AI output, keep its provenance marks).
+
+**Final review** (a fresh reviewer over `42e1beb..24b8f20`): no critical finding, 6 important and 9
+minor; two minors re-graded important. All 7 are fixed test-first, in four commits:
+
+- **The key in an error** (I-1): the detail was cut to 300 characters before redaction, so a key
+  straddling the cut left a prefix of its secret half. It is now redacted, then cut.
+- **"Paid, not used"** (I-2): the closing sweep turned a late clip that had since finished into
+  `completed`, which reads as used. `ai_video.close_run` now reads the unused clips before the
+  sweep, then sends the line.
+- **An expired key** (I-3): a 403 marked `no-store` is a disabled or expired key (Higgsfield's
+  header docs), so it counts as `auth`, not "out of funds".
+- **An outage** (I-4): the sweep stopped only at a refused key; it now stops at the first failure of
+  Higgsfield itself (auth, funds, busy, unavailable), so an outage costs one timeout, not 30 s per
+  row twice a run. A row's own failure (404, a failed write) still leaves just that row (I-5's test).
+- **The live tool** (M-1): a failed second submit left the first job running and unrecorded; it is
+  now still cancelled or waited for, and its id is recorded first.
+- **A malformed key** (M-2): a key holding a space or control character is refused before any header
+  is built, since `requests` would quote it, escaped, where the redactor cannot find it.
+
+**Ruled out of 3a:** I-6 (a refusal after an ambiguous submit may follow a charged job) is a 3b rule:
+a row stays `reserved` at its quote after any ambiguous attempt. Whether a repeated key returns the
+same `request_id`, and whether a cancel is free, only the live check can answer.
+
+**Deferred minors:** an upload or download error carries 300 characters of the storage host's body
+(an S3 error names its access key id); a truthy but malformed `request_id` is stored and refused on
+every sweep; a `completed` status without `video.url` is settled with a null URL; a missing column
+reads as a missing table; no spend line when a run crashes (the next month total has it); authed
+calls follow redirects; `_FILE_TIMEOUT` is per read, not a total, so 3b's phase deadline cannot
+rely on it (carried to 3b).
+
+Suite after the fixes: **1028 passed, 5 skipped**.
+
+**Operator go-ahead, the same day:** push and merge (PR #20), the `HF_API_KEY` repository secret
+(piped from the local `.env`, never printed), and the live check (design 15, steps 2-3):
+
+- **The first run bought nothing.** `/estimate` now answers Kling with a rate, not a total: "720p:
+  $0.0315 per video second. Total price = selected rate × output duration". The client read only
+  `usd`, so every reel would have refused to buy. It now takes the 720p rate (else the highest
+  listed) times the job's `duration`: **$0.1575 a clip**, against $0.179 quoted on 11-10. The
+  estimate needs an `image_url` in its body, but any URL will do.
+- **The second run:** two submits with one idempotency key returned **the same `request_id`**: a
+  repeat is one job and one charge, so 3b may retry a submit that got no answer.
+- The job was `in_progress` a second or two after the submit, so the immediate cancel was refused
+  (HTTP 400). The clip finished and downloaded without the key (1.66 MB). **Spent: one clip,
+  $0.1575.** Whether cancelling a queued job is free stays unmeasured: jobs barely queue here.
 
 ### 2026-11-12 — The voice moves to Vertex now; the audit checked; the design rewritten
 
