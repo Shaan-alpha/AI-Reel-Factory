@@ -61,6 +61,13 @@ def _pick(script_id: int | None) -> tuple[dict, dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A Windows console (cp1252) cannot print "🎞️": the first real render died on it after
+    # paying for its clips, before it wrote the reel (2026-11-13).
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--yes-spend", action="store_true",
                         help="confirm spending up to AI_VIDEO_BUDGET_USD of Kling clips")

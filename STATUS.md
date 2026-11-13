@@ -64,15 +64,17 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
   **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
   fresh final review and its fixes); **stage 2 (Hinglish) is merged** (PR #19, behind
-  `NARRATION_LANGUAGE`). Stage 3 (AI video) comes in two plans: **3a (the Higgsfield client,
-  the ledger, the sweep) is merged** (PR #20); **3b (the shots, the cut list, the wiring) is
-  built** on `feat/stage-3b-ai-video-shots`, behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13
-  log). Stage 4 (picture and sound: the gates, the number card, the music level) is next. State and decisions are in
+  `NARRATION_LANGUAGE`). Stage 3 (AI video) came in two plans: **3a (the Higgsfield client,
+  the ledger, the sweep) is merged** (PR #20) and **3b (the shots, the cut list, the wiring) is
+  merged** (PR #21), behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13 log). Next: one test
+  renders are done (see the 2026-11-13 log: four renders, five fixes, the target format
+  shown); next is stage 4 (picture and sound: the still gate first, then the number card and the
+  music level). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
-- ⚠️ **Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4 in Supabase (two
-  columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; three on
-  `scripts`; the `ai_video_jobs` table). The code runs without it, skipping those records, and
-  buys nothing from Higgsfield until `ai_video_jobs` exists. The bot is already redeployed.
+- ~~**Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4~~ Done 2026-11-13 at the
+  operator's request, through the Supabase CLI (`supabase db query --linked`): every table and
+  column exists, RLS is on, the pipeline's key reads them, and the advisors show nothing above
+  info level.
 - ~~**Operator, before the relaunch:** the `HF_API_KEY` secret and the live check~~ Both done
   2026-11-13 with the operator's go-ahead (design 15 steps 2-3; result in docs/04 and the log).
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
@@ -141,7 +143,51 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
-### 2026-11-13 — Stage 3b: AI-video reels behind VISUAL_SOURCE=ai_video (built, not pushed)
+### 2026-11-13 — The first AI-video test renders (approved, nothing uploaded)
+
+With the operator's go-ahead (`tools/try_ai_video.py`, script 441, idea 561, "Nvidia's Jensen
+Huang and a Suspected Chinese Spy?"):
+
+- **Bought:** 6 Kling clips at $0.1575, **$0.945**, every row `completed` in `ai_video_jobs`. Kling
+  delivered what was measured on 11-10: 724x1268, 24 fps, 121 frames, 5.04 s.
+- **The reel:** 31.9 s English narration, 8 shots (6 clips and 2 Ken Burns stills), 15 segments, a
+  new picture about every 2.1 s; 1080x1920 at 24 fps, 767 frames, as rendered.
+- **The tool crashed after buying,** printing the reel's line ("🎞️") to a cp1252 console, before
+  it wrote the reel. The reel was finished from the paid files, at no new cost. Fixed and tested:
+  the tool now writes UTF-8.
+- **The Hinglish failed twice,** so the reel was narrated in English, as designed. The real
+  renderings showed three causes, each fixed test-first:
+  - the name check read "U.S." as two names, "U" and "S", so "US" failed and the retry message
+    was unusable; an abbreviation is now one name, dots optional;
+  - it matched names case-sensitively, so "NVIDIA" failed; it now checks the script, not the
+    capitals;
+  - told only about line 1, a retry sent back line 1 alone; it now asks for every line.
+  - Not a bug: attempt 1 really did drop "A U.S. intelligence memo reportedly says", and the check
+    was right to refuse it.
+- **What the pictures need** (stage 4 next):
+  - FLUX drew fake lettering into the first still ("TBEREOROIN"), the case the still gate
+    (Tesseract, then a redraw) exists for;
+  - the planner drew a laptop screen of fake code although its rules forbid screens.
+  - The other shots were clean (a map, a chip, a question mark), and the 1.15x punch-in reads as a
+    new picture.
+- **Three more renders,** reusing the six paid clips at $0.00 (the reuse path worked live; Claude
+  cost cents a render):
+  - the second found Gemini answering the meaning check with 503 "high demand", and strict mode
+    sent a rendering that had passed every code check to English. The meaning check now fails over
+    to another provider independent of the renderer (Claude's lines: Gemini, then Groq);
+  - the third found a contradiction in design 7.2: Hinglish line 1 had at most 12 words, and
+    nothing could be dropped, yet 31 of the 40 newest English first sentences run over 12 words
+    (median 17). The renderer cut a clause to comply. Saying all of it now comes first, and
+    design 7.2 says so;
+  - **the fourth is the target format:** Hinglish (Charon) passed every code check on its first
+    attempt; Groq passed all 5 lines after Gemini's 503; 32.5 s, 5 of 7 shots video, English
+    clause subtitles. It is in `test-videos/ai_video_try_441_hinglish.mp4`, sent to the operator.
+- **Spent on the renders:** Higgsfield $0.945; Claude about $0.14 (eight Hinglish renderings, two
+  of them diagnostic), inside its own budget. Suite after the fixes: **1125 passed, 5 skipped.**
+- **Worth deciding:** a shorter English first sentence (12-15 words) would serve reach and the
+  Hinglish line 1 alike. It changes design 9.2's opening rule, so it waits for the operator.
+
+### 2026-11-13 — Stage 3b: AI-video reels behind VISUAL_SOURCE=ai_video (merged as PR #21)
 
 Stage 3a was merged as PR #20. Stage 3b was built inline on `feat/stage-3b-ai-video-shots` from
 its plan, `docs/superpowers/plans/2026-11-13-stage-3b-ai-video-shots.md` (8 tasks, each test-first;
@@ -200,6 +246,19 @@ reel to the `ai` path; an `OSError` after a reserve escapes to the `ai` path wit
 quote; late shots' stills render inside the 240 s tail.
 
 Suite: **1116 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
+
+**Merged as PR #21** (merge 27b2f43; CI green on both pushes) with the operator's go-ahead, with
+`tools/try_ai_video.py`: one test render through a reel's steps into `test-videos/`, never
+uploaded, about $0.95 of clips. It refuses without `--yes-spend`, and without the
+`ai_video_jobs` table before anything is spent. The operator agreed to run the SQL (docs/03 §4)
+so the render can buy clips; checked after the merge, the table was still missing. At the
+operator's request it was then run through the Supabase CLI, already logged in (`supabase db query
+--linked -f`, docs/03 lines 255-323, linked from a scratch folder so the repo gained no files):
+- all three tables (RLS on) and all seven columns exist;
+- the pipeline's key has the same grants as on `claude_spend` and reads all three;
+- the advisors show 15 notes, all info level: no policies on server-only tables (intended), two
+  unindexed foreign keys on `reel_attempts` (a few dozen rows a month), and one new, still unused
+  index.
 
 ### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (merged as PR #20)
 

@@ -217,18 +217,38 @@ def numbers_in(text: str) -> set[str]:
             for m in _CHECK_NUMBER_RE.finditer(text or "")}
 
 
+# "U.S." is one name, not the names "U" and "S" (2026-11-13: the retry was told to write a
+# "U" in Latin script and could not act on it, and "US" failed).
+_ABBREVIATION = re.compile(r"(?:[A-Z]\.){2,}")
+_NAME_TOKEN = re.compile(r"(?:[A-Z]\.){2,}|[A-Za-z][A-Za-z'’\-]*")
+
+
 def names_in(en: str) -> list[str]:
-    """Capitalised words that do not start the sentence or a clause after a colon."""
-    tokens = list(re.finditer(r"[A-Za-z][A-Za-z'’\-]*", en))
+    """Capitalised words that do not start the sentence or a clause after a colon; a dotted
+    abbreviation ("U.S.") is one name."""
+    tokens = list(_NAME_TOKEN.finditer(en))
     names = []
     for k, m in enumerate(tokens):
         if k == 0 or ":" in en[tokens[k - 1].end():m.start()]:
+            continue
+        if _ABBREVIATION.fullmatch(m.group(0)):
+            names.append(m.group(0))
             continue
         for piece in m.group(0).split("-"):
             piece = re.sub(r"['’]s$", "", piece)
             if piece and piece[0].isupper() and piece not in _NOT_NAMES:
                 names.append(piece)
     return names
+
+
+def _name_written(name: str, hi: str) -> bool:
+    """Whether `name` stands in `hi` in Latin script. Capitals do not count ("NVIDIA" is the
+    brand's own spelling of Nvidia) and an abbreviation's dots are optional ("US" is "U.S.")."""
+    if _ABBREVIATION.fullmatch(name):
+        body = r"\.?".join(re.escape(c) for c in name.replace(".", "")) + r"\.?"
+    else:
+        body = re.escape(name)
+    return re.search(rf"(?<![A-Za-z]){body}(?![A-Za-z])", hi, re.IGNORECASE) is not None
 
 
 def _bad_characters(hi: str) -> list[str]:
@@ -293,7 +313,7 @@ def check(en_lines: list[str], lines: list[dict], min_seconds: float | None = No
                             f"{unicodedata.normalize('NFC', word)!r}; write the number as the "
                             f"English has it")
         for name in names_in(en):
-            if not re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", hi):
+            if not _name_written(name, hi):
                 failures.append(f"line {i}: the name {name!r} must appear in Latin script")
         if not _DEVANAGARI_LETTER.search(hi):
             failures.append(f"line {i}: no Devanagari; write the Hindi words in Devanagari")
@@ -348,8 +368,10 @@ sharpened.
 - Keep every number exactly as the English writes it: digits stay digits, with their %, ₹ or $, \
 and a number the English spells as a word stays that English word. Never a Hindi number word.
 - Names, places, months, organisations and brands stay in Latin script exactly as in the English.
-- Line 1 has at most 12 words, with its subject or its surprise inside the first four; it never \
-opens on a date, a place or a greeting, nor on a question about whether the viewer knows.
+- Line 1 has its subject or its surprise inside the first four words, and is as short as saying \
+ALL of its English line allows: at most 12 words when the English line is that short, never a \
+word of its meaning dropped to get there. It never opens on a date, a place or a greeting, nor \
+on a question about whether the viewer knows.
 - End each line with the Hindi full stop । or a question mark. No delivery tags, no emoji.
 
 ALSO give each line its "parts", in spoken order, for the English subtitles: each part pairs a \
@@ -366,7 +388,9 @@ Return ONLY a JSON object: {{"lines": [{{"i": 1, "hi": "...", "parts": [{{"hi": 
 def _render_prompt(en_lines: list[str], title: str, tone: str,
                    failures: list[str] | None) -> str:
     numbered = "\n".join(f"{i}. {line}" for i, line in enumerate(en_lines, 1))
-    fixes = ("\nYOUR LAST VERSION FAILED THESE CHECKS; fix every one:\n"
+    # "all N lines": told only about line 1, a retry once sent back line 1 alone (2026-11-13).
+    fixes = (f"\nYOUR LAST VERSION FAILED THESE CHECKS; fix every one, and return all "
+             f"{len(en_lines)} lines again, not only the lines named:\n"
              + "\n".join(f"- {f}" for f in failures) + "\n") if failures else ""
     return _RENDER_PROMPT.format(title=title or "(untitled)", tone=_TONES.get(tone, _TONES["plain"]),
                                  lines=numbered, failures=fixes)
@@ -419,7 +443,9 @@ def render(en_lines: list[str], title: str, tone: str,
 # --- the meaning check (design 7.4) ----------------------------------------------------------
 
 # Always another provider than the renderer's, so one model's mistake is not checked by itself.
-_CHECKER_FOR = {"claude": "gemini", "gemini": "groq", "groq": "gemini"}
+# The first is design 7.4's checker; the next answers when it cannot run (2026-11-13: Gemini's
+# 503 "high demand" sent a rendering that had passed every code check to English narration).
+_CHECKERS_FOR = {"claude": ("gemini", "groq"), "gemini": ("groq",), "groq": ("gemini",)}
 
 _MEANING_PROMPT = """You check a translation for a news video. Each numbered pair below is an \
 English sentence and the spoken Hinglish line written for it.
@@ -438,18 +464,28 @@ Return ONLY a JSON object with one entry per pair: {{"lines": [{{"i": 1, "same":
 def meaning_check(en_lines: list[str], lines: list[dict],
                   renderer: str) -> tuple[list[str], str]:
     """Failures from a second model's line-by-line check, and that model's provider. A line
-    judged different, or given no verdict, fails. A checker that cannot run fails under
-    HINGLISH_STRICT (default on); off, it passes with a warning. Every verdict is logged: these
-    checks were tested only on pairs written for the purpose (design 7.4)."""
-    checker = _CHECKER_FOR.get(renderer, "gemini")
+    judged different, or given no verdict, fails. The checker is design 7.4's for the renderer,
+    else the next provider independent of it; when none can run, the lines fail under
+    HINGLISH_STRICT (default on), or pass with a warning when it is off. Every verdict is logged:
+    these checks were tested only on pairs written for the purpose (design 7.4)."""
     by_number = {line.get("i"): str(line.get("hi") or "") for line in lines}
     pairs = "\n".join(f"{i}. EN: {en}\n   HI: {by_number.get(i, '')}"
                       for i, en in enumerate(en_lines, 1))
-    try:
-        data = llm.parse_json_object(llm.generate_with(
-            checker, _MEANING_PROMPT.format(pairs=pairs), json=True, max_tokens=2048))
-        verdicts = {int(v.get("i")): v for v in data.get("lines") or [] if isinstance(v, dict)}
-    except Exception as e:  # noqa: BLE001 — strict decides
+    checkers = _CHECKERS_FOR.get(renderer, ("gemini", "groq"))
+    verdicts, error = None, None
+    for checker in checkers:  # never the renderer's own provider
+        try:
+            data = llm.parse_json_object(llm.generate_with(
+                checker, _MEANING_PROMPT.format(pairs=pairs), json=True, max_tokens=2048))
+            verdicts = {int(v.get("i")): v for v in data.get("lines") or []
+                        if isinstance(v, dict)}
+            break
+        except Exception as e:  # noqa: BLE001 — the next independent checker, then strict
+            log.warning("hinglish: the meaning check (%s) could not run (%s)", checker,
+                        str(e)[:200])
+            error = e
+    if verdicts is None:
+        e = error
         if config.get_bool("HINGLISH_STRICT", True):
             log.warning("hinglish: the meaning check (%s) could not run (%s); strict, so it fails",
                         checker, str(e)[:200])

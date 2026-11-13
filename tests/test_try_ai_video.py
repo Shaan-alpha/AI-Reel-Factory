@@ -47,9 +47,8 @@ def test_it_refuses_without_the_ledger_table(monkeypatch, capsys):
     assert "docs/03" in capsys.readouterr().out
 
 
-def test_a_render_goes_to_a_file_at_24_fps(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("HF_API_KEY", "abc123:def456")
-    tool = _tool()
+def _fake_render(monkeypatch, tool) -> dict:
+    """Every paid or slow step of the tool replaced; returns what each was handed."""
     monkeypatch.setattr(db, "ai_video_spend_this_month", lambda: 1.5)
     monkeypatch.setattr(tool, "_pick", lambda script_id: (
         {"id": 70, "idea_id": 7, "body": "Prices rose. Here is why.", "title": "Prices rose"},
@@ -87,6 +86,13 @@ def test_a_render_goes_to_a_file_at_24_fps(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(assembly, "assemble", assemble)
     monkeypatch.setattr(subtitles, "burn_hinglish", burn)
+    return seen
+
+
+def test_a_render_goes_to_a_file_at_24_fps(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HF_API_KEY", "abc123:def456")
+    tool = _tool()
+    seen = _fake_render(monkeypatch, tool)
     out = tmp_path / "try.mp4"
     assert tool.main(["--yes-spend", "--out", str(out)]) == 0
     assert out.read_bytes() == b"mp4"
@@ -94,3 +100,19 @@ def test_a_render_goes_to_a_file_at_24_fps(monkeypatch, tmp_path, capsys):
     assert seen["req"].idea_id == 7 and seen["req"].setting == "India"
     printed = capsys.readouterr().out
     assert "1 of 2 shots" in printed and "abc123" not in printed
+
+
+def test_a_windows_console_cannot_crash_a_paid_render(monkeypatch, tmp_path):
+    """2026-11-13: the first real render bought its six clips, then died printing "🎞️" to a
+    Windows console (cp1252) before it wrote the reel."""
+    import io
+    import sys
+
+    monkeypatch.setenv("HF_API_KEY", "abc123:def456")
+    tool = _tool()
+    _fake_render(monkeypatch, tool)
+    console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", console)
+    out = tmp_path / "try.mp4"
+    assert tool.main(["--yes-spend", "--out", str(out)]) == 0
+    assert out.exists()

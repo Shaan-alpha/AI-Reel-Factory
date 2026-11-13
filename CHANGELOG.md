@@ -13,6 +13,18 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
 `gemini-2.5-flash` on 2026-10-20, and with `FACTCHECK_STRICT=true` nothing would have published.
 **614 pass, 5 skipped** (was 489 + 5). Details and measurements: STATUS.md, 2026-09-27.
 
+### Fixed (2026-11-13: the first AI-video test renders; details: STATUS.md)
+- `tools/try_ai_video.py` could crash after paying for clips: a Windows console could not print
+  the "🎞️" in its report. Its output is UTF-8 now.
+- Hinglish: the name check read "U.S." as two names, "U" and "S", and treated "NVIDIA" in
+  capitals as a missing "Nvidia", so good renderings were refused. An abbreviation is one name,
+  with or without its dots, and case does not count.
+- Hinglish: a retry could return only the line it was told about; it now returns every line.
+- Hinglish: when the meaning check's provider is down (a Gemini 503), another independent
+  provider checks instead (Groq), so a good rendering is no longer voiced in English.
+- Hinglish: line 1 was capped at 12 words and told to drop nothing, which most English openers
+  cannot both meet. Saying all of its English line now comes first (design 7.2).
+
 ### Added (2026-11-13: stage 3b, AI-video reels behind VISUAL_SOURCE=ai_video; details: STATUS.md)
 - **The cut list** (`assembly.cut_list`): shots of 3-5 s ending on the narration's pauses, each
   longer one reframed once inside its own clip with a 1.15x punch-in, never a flash at the end.

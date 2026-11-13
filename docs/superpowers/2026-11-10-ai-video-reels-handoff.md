@@ -107,10 +107,21 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **Stage 3b's final review is done** (4 important findings and 4 re-graded minors fixed
   test-first, 1116 pass; details and the deferred minors in STATUS.md's 2026-11-13 log).
 
-**Next:** the operator's go-ahead for push and merge
-and for one test render (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
-number card, the banner hold, the music level, the vignette and stings) and the relaunch (design
-section 14).
+- **Stage 3b is merged** (PR #21, 2026-11-13; CI green), with `tools/try_ai_video.py`, one test
+  render that is never uploaded.
+
+- **The SQL for stages 0-3 is run** (2026-11-13, through the Supabase CLI at the operator's
+  request; verified: tables, columns, RLS, the pipeline's access, advisors).
+
+- **The test renders are done** (2026-11-13; STATUS.md's log). Four renders of script 441,
+  $0.945 of clips (reused after the first). They found and fixed a tool crash, three name-check
+  bugs, a meaning check with no failover, and a 12-word line-1 rule that contradicted "nothing
+  dropped" (design 7.2 updated). The fourth is the target format in Hinglish. FLUX drew fake
+  lettering and a code-filled laptop screen: stage 4's still gate.
+
+**Next:** stage 4 on `feat/stage-4-picture-sound` (picture and sound: the gates, the number
+card, the banner hold, the music level, the vignette and stings); the branch also holds the
+render fixes, unpushed. Then the relaunch (design section 14).
 
 ## 1. What the operator wants
 

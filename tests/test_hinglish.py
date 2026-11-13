@@ -364,3 +364,85 @@ def test_the_number_guard_sees_rupees_after_rs():
 ])
 def test_a_number_before_the_hindi_full_stop_is_read(text, said):
     assert hinglish.say_numbers(text) == said
+
+
+# --- names after the first AI-video test render (2026-11-13, script 441) -------------------------
+
+_SPY = ("A U.S. intelligence memo reportedly says Nvidia's Jensen Huang met a suspected spy.")
+
+
+def _name_failures(en: str, hi: str) -> list[str]:
+    return [f for f in hinglish.check([en], [{"i": 1, "hi": hi}], 0, 999) if "name" in f]
+
+
+def test_a_dotted_abbreviation_is_one_name():
+    """"U.S." was read as the names "U" and "S": "US", the usual Hinglish, failed, and the retry
+    was told to write a "U" in Latin script, which it could not act on."""
+    names = hinglish.names_in(_SPY)
+    assert "U.S." in names and "U" not in names and "S" not in names
+    for hi in ("एक US intelligence memo के मुताबिक Nvidia के Jensen Huang एक suspected spy से मिले।",
+               "एक U.S. intelligence memo के मुताबिक Nvidia के Jensen Huang एक suspected spy से मिले।"):
+        assert _name_failures(_SPY, hi) == [], hi
+    dropped = "Nvidia के Jensen Huang एक suspected spy से मिले।"  # what attempt 1 really wrote
+    assert _name_failures(_SPY, dropped) == [
+        "line 1: the name 'U.S.' must appear in Latin script"]
+
+
+def test_a_name_in_other_capitals_is_still_in_latin_script():
+    """The check is for the script, not the capitals: "NVIDIA" is the brand's own spelling."""
+    en = "The officials met Nvidia's chief."  # mid-sentence: a sentence's first word is no name
+    assert _name_failures(en, "Officials ने NVIDIA के chief से मुलाकात की।") == []
+    assert _name_failures(en, "Officials ने एनवीडिया के chief से मुलाकात की।") == [
+        "line 1: the name 'Nvidia' must appear in Latin script"]
+
+
+def test_the_retry_asks_for_every_line_again():
+    """Told only about line 1, the retry sent back line 1 alone (lines 2-5 missing)."""
+    prompt = hinglish._render_prompt(["One.", "Two.", "Three."], "t", "plain",
+                                     ["line 1: the name 'U.S.' must appear in Latin script"])
+    assert "all 3 lines" in prompt
+    assert "all 3 lines" not in hinglish._render_prompt(["One.", "Two.", "Three."], "t", "plain",
+                                                        None)
+
+
+def test_the_meaning_check_fails_over_to_another_independent_checker(monkeypatch):
+    """2026-11-13, the second test render: Gemini answered 503 "high demand" to the meaning
+    check, strict mode failed the line, and a Hinglish rendering that had passed every code check
+    was narrated in English. Groq is also independent of Claude: it checks instead. The renderer
+    never checks itself."""
+    en = ["Prices rose."]
+    lines = [{"i": 1, "hi": "दाम बढ़े।"}]
+    asked = []
+
+    def generate_with(provider, prompt, **kw):
+        asked.append(provider)
+        if provider == "gemini":
+            raise RuntimeError("503 UNAVAILABLE: This model is currently experiencing high demand")
+        return json.dumps({"lines": [{"i": 1, "same": True, "why": ""}]})
+
+    monkeypatch.setattr(llm, "generate_with", generate_with)
+    assert hinglish.meaning_check(en, lines, "claude") == ([], "groq")
+    assert asked == ["gemini", "groq"]
+
+    asked.clear()
+    assert hinglish.meaning_check(en, lines, "gemini") == ([], "groq")
+    assert "gemini" not in asked  # never the renderer's own provider
+
+    def all_down(provider, prompt, **kw):
+        asked.append(provider)
+        raise RuntimeError("503 UNAVAILABLE")
+
+    monkeypatch.setattr(llm, "generate_with", all_down)
+    monkeypatch.setenv("HINGLISH_STRICT", "true")
+    failures, _checker = hinglish.meaning_check(en, lines, "claude")
+    assert failures and "could not run" in failures[0]
+
+
+def test_line_one_is_never_shortened_by_dropping_meaning():
+    """2026-11-13: 31 of the 40 newest English first sentences run over 12 words (median 17),
+    and a hard 12-word cap on Hinglish line 1 contradicted "nothing dropped": the renderer cut
+    "A U.S. intelligence memo reportedly says", the checks refused it, and the reel went to
+    English. Saying all of it comes first; the line is as short as that allows."""
+    prompt = hinglish._render_prompt(["A long first sentence of the script."], "t", "plain", None)
+    assert "at most 12 words when" in prompt
+    assert "Line 1 has at most 12 words" not in prompt
