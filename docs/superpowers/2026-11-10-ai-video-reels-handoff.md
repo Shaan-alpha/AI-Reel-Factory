@@ -104,7 +104,10 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   stop latches, and the production wiring. Its seams for stage 4 are `ai_video._check_still` and
   `ai_video._check_clip`.
 
-**Next:** stage 3b's final review and fix pass, then the operator's go-ahead for push and merge
+- **Stage 3b's final review is done** (4 important findings and 4 re-graded minors fixed
+  test-first, 1116 pass; details and the deferred minors in STATUS.md's 2026-11-13 log).
+
+**Next:** the operator's go-ahead for push and merge
 and for one test render (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
 number card, the banner hold, the music level, the vignette and stings) and the relaunch (design
 section 14).

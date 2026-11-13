@@ -30,6 +30,10 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
   bought, the latest finish passed down, the reel's shots and spend under "Published", the spend
   in a failure alert and on the attempt row, the `ai` path when a reel cannot have its shots, and
   a disclosure line that names what was shown. Paid clips keep their idea from the age-out.
+- **After the final review:** latches set while buying are told; a hung Higgsfield cannot
+  outlast the grace (bounded ticks, cancels, uploads and downloads); one still that will not
+  render no longer loses the reel's clips or its spend; a submit blackout stops the run's
+  buying; `Retry-After: 0` waits a second; a search naming someone from the story is replaced.
 - **Settings:** every `AI_VIDEO_*` setting in `.env.example` and both workflows;
   `REEL_BUDGET_MINUTES` 14 (was 12); `JOB_TIMEOUT_MINUTES` is now the Python step's limit (85, 55).
 

@@ -175,7 +175,31 @@ Not in 3b (stage 4 next): the still, clip and reel gates (seams `_check_still`, 
 the key-number card, the banner hold, the source line and logo, the music level, the vignette and
 the stings.
 
-Suite: **1103 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
+**Final review** (a fresh reviewer over `c3bf7c7..b2caf28`): no critical finding; the money
+invariants hold (no job without a ledger row, no double charge, no charged job recorded at $0).
+Four important findings and four minors re-graded by their effect, all fixed test-first:
+
+- **Silent latches:** an empty balance found at a submit, or a missing table found at a reserve,
+  stopped the buying with no Telegram message. Each is now told, once a run.
+- **A hung Higgsfield:** with every status and cancel call hanging, the phase ran 225 s past
+  its deadline, into the job's kill. A polling tick now stops at its end or when the service
+  stops answering, cancels stop at the grace's end, an upload's timeout is what is left of the
+  phase, and a download has a deadline over the whole file, not only a per-read timeout.
+- **One still's failed render** threw the reel's paid clips away and lost its spend report. A
+  render is retried once, then the shot shows the nearest shot's file that covers it; a reel
+  that still cannot have its shots reports what it spent.
+- **A submit blackout** (Higgsfield never answering) tripped no latch, so each reel of a run
+  spent its whole phase on one shot. It now stops the run's buying.
+- `Retry-After: 0` resubmitted in a tight loop (now at least a second); a stock-photo search
+  could name someone from the story (now replaced); a rejected shot plan was silent (now told).
+
+Also checked live, read-only: PostgREST accepts the age-out's `not.in` filter. **Deferred
+minors:** paid clips are not reused while buying is stopped; clips that all fail their check trip
+no latch (the Published line shows "0 of 6 shots, $0.95"); `AI_VIDEO_BUDGET_USD=inf` sends every
+reel to the `ai` path; an `OSError` after a reserve escapes to the `ai` path with the row at its
+quote; late shots' stills render inside the 240 s tail.
+
+Suite: **1116 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
 
 ### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (merged as PR #20)
 
