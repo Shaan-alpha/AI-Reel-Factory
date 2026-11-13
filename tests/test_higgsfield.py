@@ -249,6 +249,14 @@ def test_download_writes_the_file(monkeypatch, tmp_path):
     assert fake.calls[0][2]["stream"] is True and fake.calls[0][2]["timeout"] == 180
 
 
+def test_download_timeout_is_passed_through(monkeypatch, tmp_path):
+    """The reel's phase deadline bounds a clip's download (3a's M-9: 180 s is per read)."""
+    fake = _use(monkeypatch, lambda m, u, k: _Resp(200, content=b"mp4-bytes"))
+    higgsfield.download("https://cdn.example/v.mp4", str(tmp_path / "a.mp4"), timeout=12.5)
+    higgsfield.download("https://cdn.example/v.mp4", str(tmp_path / "b.mp4"))
+    assert [call[2]["timeout"] for call in fake.calls] == [12.5, 180]
+
+
 @pytest.mark.parametrize("answer", [_Resp(403), _Resp(200, content=b"")])
 def test_a_failed_download_leaves_no_file(monkeypatch, tmp_path, answer):
     _use(monkeypatch, lambda m, u, k: answer)
@@ -380,3 +388,37 @@ def test_a_malformed_key_is_never_sent(monkeypatch, bad):
         higgsfield.estimate(higgsfield.KLING, {})
     assert err.value.kind == "auth" and fake.calls == []
     assert not any(part in str(err.value) for part in ("abc123", "f456", "def456"))
+
+
+def test_a_trickling_download_stops_at_its_deadline(monkeypatch, tmp_path):
+    """Review (time paths): the timeout is per read, so a download that trickles in could run
+    past the reel's grace and into the job's kill. The deadline bounds the whole file."""
+    clock = [100.0]
+    monkeypatch.setattr(higgsfield.time, "monotonic", lambda: clock[0])
+
+    class Trickle(_Resp):
+        def iter_content(self, chunk_size=1):
+            for _ in range(1000):
+                clock[0] += 5
+                yield b"x"
+
+    _use(monkeypatch, lambda m, u, k: Trickle(200))
+    dest = tmp_path / "clip.mp4"
+    with pytest.raises(higgsfield.HiggsfieldError) as err:
+        higgsfield.download("https://cdn.example/v.mp4", str(dest), timeout=20, deadline=130.0)
+    assert err.value.kind == "unavailable" and not dest.exists() and clock[0] <= 140
+
+
+def test_upload_timeout_is_passed_through(monkeypatch, tmp_path):
+    still = tmp_path / "still.png"
+    still.write_bytes(b"png")
+
+    def handler(method, url, kwargs):
+        if url.endswith("/files/generate-upload-url"):
+            return _Resp(200, {"upload_url": "https://s3.example/put",
+                               "public_url": "https://cdn.example/in.png"})
+        return _Resp(200)
+
+    fake = _use(monkeypatch, handler)
+    higgsfield.upload(str(still), "image/png", timeout=12.5)
+    assert fake.calls[-1][2]["timeout"] == 12.5

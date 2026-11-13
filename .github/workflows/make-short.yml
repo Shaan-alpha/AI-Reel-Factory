@@ -121,6 +121,15 @@ jobs:
           # Higgsfield (Kling shots): every job is reserved in ai_video_jobs before it is bought;
           # unset, nothing is bought. Shots are bought only with VISUAL_SOURCE=ai_video.
           HF_API_KEY: ${{ secrets.HF_API_KEY }}
+          # The AI-video shots (design 12): what one reel may spend, and its time limits. There is
+          # no monthly or count cap in code, by the operator's choice (2026-11-10).
+          AI_VIDEO_MODEL: ${{ vars.AI_VIDEO_MODEL || 'kling-video/v2.5-turbo/standard/image-to-video' }}
+          AI_VIDEO_BUDGET_USD: ${{ vars.AI_VIDEO_BUDGET_USD || '1.10' }}          # sizes a reel's clips (6 at $0.1575)
+          AI_VIDEO_TIMEOUT_SECONDS: ${{ vars.AI_VIDEO_TIMEOUT_SECONDS || '300' }}  # the whole Higgsfield phase
+          AI_VIDEO_GRACE_SECONDS: ${{ vars.AI_VIDEO_GRACE_SECONDS || '120' }}      # more wait for clips already running
+          AI_VIDEO_TAIL_SECONDS: ${{ vars.AI_VIDEO_TAIL_SECONDS || '240' }}        # what a reel needs after visuals
+          AI_VIDEO_CUTS: ${{ vars.AI_VIDEO_CUTS || 'pauses' }}                    # pauses | clip
+          AI_VIDEO_STYLE: ${{ vars.AI_VIDEO_STYLE }}                              # empty = the 3D film look
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -147,7 +156,7 @@ jobs:
           CARD_SECONDS: ${{ vars.CARD_SECONDS || '1.8' }}            # how long each key-point card flashes
           NEWS_RSS_URL: ${{ vars.NEWS_RSS_URL }}                     # optional: override the news feed seeding ideation
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || 'public' }}   # set var to 'unlisted' for safe first runs
-          VISUAL_SOURCE: ${{ vars.VISUAL_SOURCE || 'photos' }}        # photos | ai | video
+          VISUAL_SOURCE: ${{ vars.VISUAL_SOURCE || 'photos' }}        # photos | ai | video | ai_video
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}                   # optional: Cloudflare Workers AI (VISUAL_SOURCE=ai)
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}                        # optional: AI-image style override
@@ -233,9 +242,10 @@ jobs:
           IDEA_MAX_AGE_HOURS: ${{ vars.IDEA_MAX_AGE_HOURS || '24' }}
           IDEAS: ${{ inputs.ideas || '3' }}
           WAIT_MIN: ${{ inputs.wait_min || '20' }}  # the input's own default; the bot sends 30
-          # Keep equal to timeout-minutes above: the wait is shortened, and a reel is not
-          # started, when the job would be killed before it finished.
-          JOB_TIMEOUT_MINUTES: '90'
+          # The Python step's own timeout-minutes (85), not the job's (90): counted from the
+          # job's start, it can then never be later than the real kill (design 6.4). The wait is
+          # shortened, and a reel is not started, when it would be killed before it finished.
+          JOB_TIMEOUT_MINUTES: '85'
           # The pipeline writes this after telling Telegram about a crash, so the step below
           # stays quiet instead of sending a second message.
           CRASH_NOTE_FILE: ${{ runner.temp }}/crash-notified

@@ -525,13 +525,14 @@ def _stage_font(dest_dir: str) -> None:
 
 
 def _burn(video_path: str, ass_path: str, out_path: str,
-          cards: list[tuple[float, float, str]] | None = None) -> None:
+          cards: list[tuple[float, float, str]] | None = None, fps: int = 30) -> None:
     """Burn the .ass onto the video with FFmpeg. Runs in the subtitle's dir so the filter
     arg is a bare filename — avoids Windows drive-colon/backslash escaping in libass.
 
     `cards` are PIL stat-card PNGs composited centre-frame for their window. Each is a `-loop 1`
     still (so it exists at its timestamps, mirroring assembly's brand-bug pattern) gated by
-    `enable='between(t,...)'`; `-shortest` keeps those infinite inputs from extending the reel."""
+    `enable='between(t,...)'`; `-shortest` keeps those infinite inputs from extending the reel.
+    `fps` is the reel's own rate: the output keeps it, with a keyframe every half second."""
     work_dir = os.path.dirname(os.path.abspath(ass_path))
     _stage_font(work_dir)  # so libass resolves CAPTION_FONT via a relative fontsdir
     cards = cards or []
@@ -554,7 +555,7 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 
     cmd += [
         "-c:a", "copy",
-        *x264_args(final=True),
+        *x264_args(final=True, fps=fps),
         "-movflags", "+faststart",
         os.path.abspath(out_path),
     ]
@@ -570,7 +571,8 @@ def _burn(video_path: str, ass_path: str, out_path: str,
 
 def burn_captions(video_path: str, audio_path: str, out_path: str,
                   hook_text: str | None = None, key_points: list[str] | None = None,
-                  source_label: str | None = None, script_text: str | None = None) -> str:
+                  source_label: str | None = None, script_text: str | None = None,
+                  fps: int = 30) -> str:
     """Transcribe → word-by-word events → burn into video. Return final reel path.
 
     `hook_text` (the punchy video title) is drawn as a bold banner on frame 1 — the first frame
@@ -589,7 +591,7 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     if not os.path.exists(audio_path):
         raise ValueError(f"subtitles: audio not found: {audio_path}")
 
-    words = _transcribe_words(audio_path)
+    words = _cached_words(audio_path)
     if not words:
         raise RuntimeError("subtitles: transcription produced no words — cannot caption reel.")
     words = _align_to_script(words, script_text)
@@ -615,12 +617,12 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
     log.info("subtitles: burning %d word events into %s (graphic cards=%d)",
              len(words), out_path, len(cards))
     try:
-        _burn(video_path, ass_path, out_path, cards=cards)
+        _burn(video_path, ass_path, out_path, cards=cards, fps=fps)
     except RuntimeError:
         if not fallback_ass:
             raise
         log.warning("subtitles: card-overlay burn failed; retrying with ASS text cards.")
-        _burn(video_path, fallback_ass, out_path, cards=None)
+        _burn(video_path, fallback_ass, out_path, cards=None, fps=fps)
 
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
@@ -859,7 +861,8 @@ def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
 
 
 def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[dict],
-                  hook_text: str | None = None, source_label: str | None = None) -> str:
+                  hook_text: str | None = None, source_label: str | None = None,
+                  fps: int = 30) -> str:
     """Burn English subtitles for a Hinglish narration: no speech recognition; the timing comes
     from the narration's pauses and the text from the checked lines (design 7.7)."""
     if not os.path.exists(video_path):
@@ -876,7 +879,68 @@ def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[d
         f.write(_hinglish_ass(blocks, hook_text, duration, source_label))
     log.info("subtitles: burning %d English blocks for a Hinglish narration into %s",
              len(blocks), out_path)
-    _burn(video_path, ass_path, out_path)
+    _burn(video_path, ass_path, out_path, fps=fps)
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
     return out_path
+
+
+# --- The preflight: the burn is tested before any clip is bought (design 6.2 step 1) ----------
+# PyAV 19 broke the caption step on 2026-10-01 and nothing was published for 8 days. With paid
+# clips in the reel, every reel of such a run would have bought its clips and then failed here.
+
+_WORDS: dict[tuple, list] = {}  # one narration's transcription, shared by the preflight and burn
+
+
+def _cached_words(audio_path: str) -> list[tuple[float, float, str]]:
+    """The narration's timed words, transcribed once per file (path, size and mtime)."""
+    st = os.stat(audio_path)
+    key = (os.path.abspath(audio_path), st.st_size, st.st_mtime_ns)
+    if key not in _WORDS:
+        words = _transcribe_words(audio_path)
+        _WORDS.clear()
+        _WORDS[key] = words
+    return _WORDS[key]
+
+
+def _blank_clip(out_dir: str) -> str:
+    """One second of black 1080x1920 at 24 fps with silent audio, to burn the subtitles onto."""
+    path = os.path.join(out_dir, "preflight_blank.mp4")
+    subprocess.run([_ffmpeg(), "-y", "-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=24:d=1",
+                    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", path],
+                   check=True, capture_output=True, timeout=RENDER_TIMEOUT_SECONDS)
+    return path
+
+
+def preflight(audio_path: str, out_dir: str, *, lines: list[dict] | None = None,
+              hook_text: str | None = None, source_label: str | None = None) -> bool:
+    """True when the reel's own subtitle file burns onto a one-second blank clip. Never raises.
+
+    `lines` are a Hinglish narration's checked lines; without them the narration is English, and
+    it is transcribed first, which is the step that broke in October (`burn_captions` then reuses
+    the words). False means nothing is bought for the reel: it would fail at its captions after
+    paying for its clips."""
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        if lines:
+            duration = _audio_seconds(audio_path)
+            ass = _hinglish_ass(subtitle_blocks(lines, pauses(audio_path), duration), hook_text,
+                                duration, source_label)
+        else:
+            words = _cached_words(audio_path)
+            if not words:
+                raise RuntimeError("the transcription produced no words")
+            ass = _build_ass(words, hook_text, None, words[-1][1], source_label)
+        ass_path = os.path.join(out_dir, "preflight.ass")
+        with open(ass_path, "w", encoding="utf-8") as f:
+            f.write(ass)
+        out = os.path.join(out_dir, "preflight.mp4")
+        _burn(_blank_clip(out_dir), ass_path, out, fps=24)
+        if not (os.path.exists(out) and os.path.getsize(out) > 0):
+            raise RuntimeError("the burn produced no file")
+    except Exception as e:  # noqa: BLE001 — a failed test is an answer, not a crash
+        log.warning("subtitles: the preflight burn failed (%s); no clips are bought for this reel",
+                    e)
+        return False
+    return True

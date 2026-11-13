@@ -295,3 +295,52 @@ def test_a_reservation_without_a_row_back_raises(monkeypatch):
     _use(monkeypatch, _Ledger(data={"ai_video_jobs": []}))
     with pytest.raises(RuntimeError):
         db.reserve_ai_video_job(5, 0, "e", 0.179)
+
+
+def test_paid_clips_keep_their_idea_alive(monkeypatch):
+    """Design 6.7, last rule: an idea released after an attempt that left finished, paid clips
+    is not aged out for 6 days (their URLs last 7), so a fresh approval reuses them instead of
+    the money being lost to the 24-hour age-out."""
+    calls = []
+
+    class _Query:
+        def __init__(self, table, rows):
+            self.table, self.rows = table, rows
+
+        @property
+        def not_(self):
+            calls.append((self.table, "not_", ()))
+            return self
+
+        def __getattr__(self, name):
+            def step(*args, **kwargs):
+                calls.append((self.table, name, args))
+                return self
+            return step
+
+        def execute(self):
+            if isinstance(self.rows, Exception):
+                raise self.rows
+            return type("R", (), {"data": self.rows})()
+
+    def client(ledger_rows):
+        tables = {"ai_video_jobs": ledger_rows, "ideas": [{"id": 1}]}
+        return type("C", (), {"table": lambda self, name: _Query(name, tables[name])})()
+
+    monkeypatch.setenv("IDEA_MAX_AGE_HOURS", "24")
+    monkeypatch.setattr(db, "get_client",
+                        lambda: client([{"idea_id": 5}, {"idea_id": 9}, {"idea_id": 5}]))
+    assert db.ideas_with_paid_clips() == {5, 9}
+    calls.clear()
+    assert db.expire_stale_pending_ideas() == 1
+    ledger = [c for c in calls if c[0] == "ai_video_jobs"]
+    assert ("ai_video_jobs", "eq", ("status", "completed")) in ledger
+    ideas = [c for c in calls if c[0] == "ideas"]
+    assert ("ideas", "not_", ()) in ideas and ("ideas", "in_", ("id", [5, 9])) in ideas
+
+    db._WARNED.clear()
+    monkeypatch.setattr(db, "get_client", lambda: client(APIError(_NO_TABLE)))
+    calls.clear()
+    assert db.ideas_with_paid_clips() == set()  # no ledger: the age-out runs as before
+    assert db.expire_stale_pending_ideas() == 1
+    assert not [c for c in calls if c[0] == "ideas" and c[1] == "not_"]

@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 from src import config
 
@@ -58,7 +59,7 @@ PROBE_TIMEOUT_SECONDS = 60
 BT709_TAGS = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
 
 
-def x264_args(final: bool = False) -> list[str]:
+def x264_args(final: bool = False, fps: int = _FPS) -> list[str]:
     """libx264 settings for every video encode, so all three generations agree.
 
     Every frame is encoded three times (Ken Burns clip, this render, the caption burn), and at
@@ -67,7 +68,7 @@ def x264_args(final: bool = False) -> list[str]:
     it measured 44 Mbps (a 183 MB file for 33 s, against 3.8 Mbps before). So the CRF is
     CAPPED: the final encode at YouTube's 1080p30 upload guideline of 8 Mbps (measured about
     5.3 Mbps on grainy footage), the intermediates at 20 Mbps. The final encode also uses
-    YouTube's recommended closed GOP of half the frame rate."""
+    YouTube's recommended closed GOP of half the frame rate (`fps`: 24 for ai_video reels)."""
     if final:
         crf, cap = config.get("X264_CRF_FINAL", "20"), config.get("X264_MAXRATE_FINAL", "8M")
     else:
@@ -76,7 +77,7 @@ def x264_args(final: bool = False) -> list[str]:
     args = ["-c:v", "libx264", "-preset", config.get("X264_PRESET", "veryfast"),
             "-crf", crf, "-maxrate", cap, "-bufsize", bufsize, "-pix_fmt", "yuv420p"]
     if final:
-        args += ["-profile:v", "high", "-g", str(_FPS // 2), "-bf", "2"]
+        args += ["-profile:v", "high", "-g", str(fps // 2), "-bf", "2"]
     return args
 
 
@@ -225,6 +226,82 @@ def slice_count(duration: float) -> int:
     ask the module that does the cutting (rule 7).
     """
     return _slice_count(duration, _xfade_seconds() if _xfade_enabled() else 0.0)
+
+
+# --- The cut list (ai_video reels, design 6.3 and 11.2) -----------------------------------------
+# A Kling clip is 5.04 s of 24 fps video and is never slowed, so a shot lasts at most SHOT_MAX.
+# Shots end on the narration's pauses (a cut on the clock fell mid-sentence); then each longer
+# shot is cut once more inside its own clip. On both test narrations the picture then changed
+# every 2.2-2.4 s, the genre's rhythm, at no extra spend.
+SHOT_MIN = 3.0       # a shot ends at a pause no earlier than this...
+SHOT_MAX = 5.0       # ...and no later than this: the usable length of one clip
+TAIL_MIN = 1.5       # the reel never ends on a flash of a shot
+REFRAME_OVER = 3.6   # a shot longer than this is cut once more, inside its own clip,
+REFRAME_SNAP = 0.6   # at a pause this close to its middle, else at the middle;
+REFRAME_ZOOM = 1.15  # the second part punches in, which reads as a new picture
+
+
+@dataclass(frozen=True)
+class Segment:
+    """One stretch of an ai_video reel's screen time."""
+
+    shot: int      # the shot it shows, from 0
+    start: float   # reel seconds
+    end: float
+    offset: float  # seconds into that shot's own clip (or Ken Burns still) where it begins
+    zoom: float    # 1.0, or REFRAME_ZOOM after a reframe
+
+
+def _shot_ends(duration: float, points: list[float]) -> list[float]:
+    """Each shot ends at the latest pause that keeps it within [SHOT_MIN, SHOT_MAX], else at
+    SHOT_MAX; near the end the window shrinks so the last shot keeps at least TAIL_MIN."""
+    ends, t = [], 0.0
+    while duration - t > SHOT_MAX:
+        rest = duration - t
+        hi = SHOT_MAX if rest >= SHOT_MAX + TAIL_MIN else rest - TAIL_MIN
+        inside = [p for p in points if t + SHOT_MIN <= p <= t + hi]
+        t = inside[-1] if inside else t + hi
+        ends.append(t)
+    return ends + [duration]
+
+
+def cut_list(duration: float, pauses: list[tuple[float, float]],
+             mode: str = "pauses") -> list[Segment]:
+    """The shots and every cut of an ai_video reel, from its narration's length and pauses.
+
+    One function decides both, so the number of shots bought (ai_video) and the render cannot
+    disagree. `mode="clip"` (AI_VIDEO_CUTS) gives one segment per shot, with no reframe. There is
+    no reprise of the first shot at the end: the loop back to frame 1 is a plain cut."""
+    if not duration or duration <= 0:
+        raise ValueError(f"cut_list: no narration to cut ({duration!r} s)")
+    points = sorted(m for m in ((s + e) / 2 for s, e in pauses or [])
+                    if 0.05 < m < duration - 0.05)
+    cuts: list[Segment] = []
+    start = 0.0
+    for shot, end in enumerate(_shot_ends(duration, points)):
+        bounds = [start, end]
+        if mode != "clip" and end - start > REFRAME_OVER:
+            middle = (start + end) / 2
+            near = min(points, key=lambda p: abs(p - middle), default=None)
+            snap = near is not None and abs(near - middle) <= REFRAME_SNAP
+            bounds.insert(1, near if snap else middle)
+        first = round(start, 3)
+        for k, (a, b) in enumerate(zip(bounds, bounds[1:])):
+            a3 = round(a, 3)
+            cuts.append(Segment(shot, a3, round(b, 3), round(a3 - first, 3),
+                                REFRAME_ZOOM if k else 1.0))
+        start = end
+    return cuts
+
+
+def shot_lengths(cuts: list[Segment]) -> list[float]:
+    """Each shot's screen time, in shot order: what its clip or still must cover."""
+    first: dict[int, float] = {}
+    last: dict[int, float] = {}
+    for seg in cuts:
+        first.setdefault(seg.shot, seg.start)
+        last[seg.shot] = seg.end
+    return [round(last[k] - first[k], 3) for k in sorted(first)]
 
 
 def _ordered_clips(clip_paths: list[str], duration: float,
@@ -484,27 +561,63 @@ def _audio_parts(n: int, sfx_idx: int | None, music_idx: int | None, polish: boo
     return parts
 
 
+def _cut_pieces(cuts: list[Segment], clip_paths: list[str],
+                fps: int) -> list[tuple[str, int, int, float]]:
+    """One (shot file, first frame, end frame, zoom) per segment, on the reel's frame grid.
+
+    Frames, not seconds: each segment keeps exactly the frames between its two cuts, so the
+    segments add up to the narration's length and no cut drifts off its pause (seconds-based
+    trims round each segment to whole frames on their own, and eleven of them can drift)."""
+    pieces = []
+    for seg in cuts:
+        first = round(seg.offset * fps)
+        frames = max(1, round(seg.end * fps) - round(seg.start * fps))
+        pieces.append((clip_paths[seg.shot], first, first + frames, seg.zoom))
+    return pieces
+
+
+def _piece_filter(k: int, piece: tuple[str, int, int, float], fps: int) -> str:
+    """A cut-list segment: the shot's own frames at the reel's rate (a no-op for Kling's 24 fps,
+    never a slowdown), filled to 1080x1920, punched in after a reframe."""
+    _path, first, end, zoom = piece
+    punch = (f",scale=trunc(iw*{zoom:g}/2)*2:trunc(ih*{zoom:g}/2)*2,crop={_W}:{_H}"
+             if zoom > 1.0 else "")
+    return (f"[{k}:v]fps={fps},trim=start_frame={first}:end_frame={end},setpts=PTS-STARTPTS,"
+            f"scale={_W}:{_H}:force_original_aspect_ratio=increase,crop={_W}:{_H}{punch},"
+            f"setsar=1[v{k}]")
+
+
 def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: float, out_path: str,
                music_path: str | None = None, sfx_path: str | None = None,
-               polish: bool = True, levels: dict | None = None) -> list[str]:
+               polish: bool = True, levels: dict | None = None, fps: int = _FPS,
+               pieces: list[tuple[str, int, int, float]] | None = None) -> list[str]:
     """Construct the ffmpeg argv: normalize → concat/xfade → grade → trim → mux narration + SFX + music.
 
     `ordered` is [(clip_path, start_offset)] from _ordered_clips; each slice is trimmed at its
     own start so repeated clips show different segments. `polish=False` forces the plain graph
-    (no xfade, no grade) — used by the fail-soft retry in assemble() (rules 11, 14)."""
-    slice_s = _clip_seconds()
-    n = len(ordered)
+    (no xfade, no grade) — used by the fail-soft retry in assemble() (rules 11, 14).
+
+    `pieces` (from a cut list, design 11.2) replaces `ordered`: one input per segment, hard cuts,
+    output at `fps`."""
     parts = []
-    for k, (_clip, start) in enumerate(ordered):
-        parts.append(
-            f"[{k}:v]trim={start:.3f}:{start + slice_s:.3f},setpts=PTS-STARTPTS,"
-            f"scale={_W}:{_H}:force_original_aspect_ratio=increase,"
-            f"crop={_W}:{_H},setsar=1,fps={_FPS}[v{k}]"
-        )
+    if pieces is not None:
+        inputs = [piece[0] for piece in pieces]
+        parts = [_piece_filter(k, piece, fps) for k, piece in enumerate(pieces)]
+    else:
+        inputs = [clip for clip, _start in ordered]
+        slice_s = _clip_seconds()
+        for k, (_clip, start) in enumerate(ordered):
+            parts.append(
+                f"[{k}:v]trim={start:.3f}:{start + slice_s:.3f},setpts=PTS-STARTPTS,"
+                f"scale={_W}:{_H}:force_original_aspect_ratio=increase,"
+                f"crop={_W}:{_H},setsar=1,fps={_FPS}[v{k}]"
+            )
+    n = len(inputs)
     grade = _grade_filters() if polish else ""
     # BT709_TAGS rides on the trim that makes [v]; the logo overlay inherits it from [v].
     grade_suffix = (("," + grade) if grade else "") + "," + BT709_TAGS
-    if polish and _xfade_enabled() and n >= 2:
+    if pieces is None and polish and _xfade_enabled() and n >= 2:
+        slice_s = _clip_seconds()
         xf = _xfade_seconds()
         prev = "[v0]"
         for i in range(1, n):
@@ -520,7 +633,7 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
         parts.append(f"[vc]trim=0:{duration:.3f},setpts=PTS-STARTPTS{grade_suffix}[v]")
 
     cmd = [_ffmpeg(), "-y"]
-    for clip, _start in ordered:
+    for clip in inputs:
         cmd += ["-i", clip]
     cmd += ["-i", audio_path]  # narration = input n
 
@@ -568,14 +681,20 @@ def _build_cmd(ordered: list[tuple[str, float]], audio_path: str, duration: floa
         *x264_args(),
         # 48 kHz: the mix used to inherit the TTS's 24 kHz, which cut the bed off at 12 kHz.
         "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "1",
-        "-r", str(_FPS), "-movflags", "+faststart",
+        "-r", str(fps), "-movflags", "+faststart",
         out_path,
     ]
     return cmd
 
 
-def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
-    """Build the 1080x1920 reel and return its path. Subtitles are burned in next (Module 7)."""
+def assemble(audio_path: str, clip_paths: list[str], out_path: str,
+             cuts: list[Segment] | None = None, fps: int = _FPS) -> str:
+    """Build the 1080x1920 reel and return its path. Subtitles are burned in next (Module 7).
+
+    With `cuts` (an ai_video reel, design 11.2), `clip_paths[i]` is shot i's own clip or Ken
+    Burns still, and the reel follows the cut list with hard cuts at `fps` (24: Kling's own
+    rate, so no frame is ever slowed or converted). There is no crossfade, no seamless loop and
+    no cut sting. Without `cuts`, nothing changes."""
     if not os.path.exists(audio_path):
         raise ValueError(f"assembly: narration not found: {audio_path}")
     if not clip_paths:
@@ -584,14 +703,25 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
     if missing:
         raise ValueError(f"assembly: clip(s) missing: {missing}")
 
+    pieces = None
+    if cuts is not None:
+        shots = len(shot_lengths(cuts))
+        if len(clip_paths) != shots:
+            raise ValueError(f"assembly: the cut list has {shots} shots but "
+                             f"{len(clip_paths)} files were given")
+        pieces = _cut_pieces(cuts, clip_paths, fps)
+
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     duration = probe_duration(audio_path)
-    overlap = _xfade_seconds() if _xfade_enabled() else 0.0
-    ordered = _apply_seamless_loop(
-        _ordered_clips(clip_paths, duration, overlap=overlap), duration, overlap)
+    if pieces is not None:
+        ordered = [(path, first / fps) for path, first, _end, _zoom in pieces]
+    else:
+        overlap = _xfade_seconds() if _xfade_enabled() else 0.0
+        ordered = _apply_seamless_loop(
+            _ordered_clips(clip_paths, duration, overlap=overlap), duration, overlap)
     music = _pick_music(os.path.abspath(audio_path))
     sfx_path = None
-    if _sfx_enabled():
+    if pieces is None and _sfx_enabled():
         try:
             from src import audio_sfx
             events = _build_sfx_events(ordered, duration)
@@ -604,7 +734,7 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
 
     levels = _measure_levels(audio_path, music, duration)
     cmd = _build_cmd(ordered, audio_path, duration, out_path, music_path=music, sfx_path=sfx_path,
-                     levels=levels)
+                     levels=levels, fps=fps, pieces=pieces)
 
     log.info("assembly: rendering %s (%.1fs, %d slices from %d clips, music=%s, sfx=%s, "
              "voice gain %+.1f dB, bed %s)",
@@ -619,9 +749,10 @@ def assemble(audio_path: str, clip_paths: list[str], out_path: str) -> str:
         log.warning("assembly: polished render failed (%s); retrying plain.\n%s",
                     "timed out" if proc is None else proc.returncode,
                     "" if proc is None else proc.stderr[-800:])
-        ordered_plain = _ordered_clips(clip_paths, duration, overlap=0.0)
+        ordered_plain = ordered if pieces is not None else _ordered_clips(
+            clip_paths, duration, overlap=0.0)
         cmd = _build_cmd(ordered_plain, audio_path, duration, out_path,
-                         music_path=music, polish=False, levels=levels)
+                         music_path=music, polish=False, levels=levels, fps=fps, pieces=pieces)
         proc = _run_render(cmd)
         if proc is None:
             raise RuntimeError(f"assembly: ffmpeg timed out after {RENDER_TIMEOUT_SECONDS} s")

@@ -84,11 +84,12 @@ def _seconds_left() -> float | None:
 
 
 def _reel_seconds() -> float:
-    """Time to allow one reel end to end (about 6 min measured on CI, more with a repair pass)."""
+    """Time to allow one reel end to end: about 6 min measured on CI, about 10 for an ai_video
+    reel whose every clip is late, plus a repair pass (design 6.4: 14 minutes, was 12)."""
     try:
-        return float(config.get("REEL_BUDGET_MINUTES", "12")) * 60
+        return float(config.get("REEL_BUDGET_MINUTES", "14")) * 60
     except (TypeError, ValueError):
-        return 720.0
+        return 840.0
 
 
 # Aggregator and redirect hosts: they carry a story, they are not its source.
@@ -206,7 +207,7 @@ FORMAT_VERSION = 1
 def _format(language: str, visual_meta: dict) -> dict:
     """The post's format stamp, from what the chain actually did."""
     return {"version": FORMAT_VERSION, "language": language,
-            "visuals": visual_meta.get("source"), "video_shots": 0,
+            "visuals": visual_meta.get("source"), "video_shots": visual_meta.get("video_shots", 0),
             "shots": visual_meta.get("clips"), "structure": None}
 
 
@@ -226,12 +227,18 @@ def _record_spoken(script: dict, record: dict) -> None:
 
 def _downgrades(voice_meta: dict, visual_meta: dict, english_fallback: bool = False) -> list[str]:
     """What fell back on this reel: English narration in place of Hinglish, another voice than
-    the channel's, or stock video under an image source."""
+    the channel's, an ai_video reel on today's `ai` path or with fewer video shots than its
+    budget buys, or stock video under an image source."""
     out = ["english-narration"] if english_fallback else []
     if voice_meta.get("engine") and voice_meta.get("engine") != "gemini":
         out.append("fallback-voice")
     wanted = str(config.get("VISUAL_SOURCE", "photos")).lower()
-    if visual_meta.get("source") == "video" and wanted in ("ai", "photos"):
+    shown = visual_meta.get("source")
+    if wanted == "ai_video" and shown != "ai_video":
+        out.append("ai-path")
+    if visual_meta.get("video_shots", 0) < visual_meta.get("planned_video", 0):
+        out.append("still-shots")
+    if shown == "video" and wanted in ("ai", "photos", "ai_video"):
         out.append("stock-video")
     return out
 
@@ -244,16 +251,19 @@ def _finish_attempt(attempt: int | None, outcome: str, progress: dict,
                           reason=None if error is None else _redact(f"{type(error).__name__}: "
                                                                     f"{error}"),
                           script_id=progress.get("script_id"),
+                          spend_usd=progress.get("spend_usd"),
                           downgrades=progress.get("downgrades"))
     except Exception as e:  # noqa: BLE001
         log.warning("produce: could not record the attempt (%s)", e)
 
 
-def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
+def produce_one(idea: dict, work_root: str, report: dict | None = None) -> tuple[str, str]:
     """Run the full chain for one approved idea. Returns (video_id, url). Idempotent.
 
     Every call past the idempotency check leaves one reel_attempts row: published, blocked or
-    failed, with the stage it ended at. Failed attempts used to leave no record at all."""
+    failed, with the stage it ended at. Failed attempts used to leave no record at all.
+    `report`, when given, receives the ai_video reel's line (`ai_video`) and its Higgsfield
+    spend (`spend_usd`), whether the reel ships or fails (design 6.8)."""
     idea_id = idea["id"]
 
     # Idea-level idempotency (rule 12): if this idea already shipped, don't re-render/re-upload.
@@ -279,6 +289,9 @@ def produce_one(idea: dict, work_root: str) -> tuple[str, str]:
     except Exception as e:
         _finish_attempt(attempt, "failed", progress, e)
         raise
+    finally:
+        if report is not None:
+            report.update({k: progress[k] for k in ("ai_video", "spend_usd") if k in progress})
     _finish_attempt(attempt, "published", progress)
     return result
 
@@ -406,29 +419,48 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
                     f"{spoke.get('voice')} fallback, not the channel voice: every Gemini "
                     f"attempt failed. It will sound different from the other Shorts.")
         progress["stage"] = "visuals"
-        keywords = visuals.extract_keywords(script["script_body"])
         story = " ".join(str(idea.get(k) or "") for k in ("title", "hook", "angle"))
-        shown: dict = {}
-        clips = visuals.fetch_broll(keywords, duration, work,
-                                    setting="India" if _INDIA_RE.search(story) else None,
-                                    meta=shown)
-        progress["downgrades"] = _downgrades(spoke, shown, english_fallback=fell_back is not None)
-        progress["stage"] = "assembly"
-        raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"))
+        setting = "India" if _INDIA_RE.search(story) else None
         # Pass the punchy title so subtitles burn it as a frame-1 hook banner (the first frame
         # is the in-feed thumbnail). Falls back to the idea title if the SEO title is empty.
         hook = script.get("title") or idea.get("title")
+        shown: dict = {}
+        shots = None
+        if _wants_ai_video():
+            shots = _ai_video_shots(idea, script, audio, duration, setting, work, hook,
+                                    spoken["lines"] if language == "hi" else None, progress)
+        if shots is not None:
+            clips = shots.files
+            shown.update(source="ai_video", clips=len(shots.files), video_shots=shots.video,
+                         planned_video=shots.planned_video)
+            progress.update(spend_usd=shots.spend_usd, ai_video=ai_video.reel_line(shots))
+            for problem in shots.problems:
+                _notify(problem)
+        else:
+            keywords = visuals.extract_keywords(script["script_body"])
+            # An ai_video reel that could not have its shots takes today's `ai` path (6.9).
+            fallback = {"source": "ai"} if _wants_ai_video() else {}
+            clips = visuals.fetch_broll(keywords, duration, work, setting=setting, meta=shown,
+                                        **fallback)
+        progress["downgrades"] = _downgrades(spoke, shown, english_fallback=fell_back is not None)
+        progress["stage"] = "assembly"
+        # An ai_video reel is cut on its cut list at Kling's own 24 fps, end to end (11.1, 11.2).
+        rate = {"fps": ai_video.FPS} if shots is not None else {}
+        cut = {"cuts": shots.cuts, **rate} if shots is not None else {}
+        raw = assembly.assemble(audio, clips, os.path.join(work, "reel_raw.mp4"), **cut)
         progress["stage"] = "subtitles"
         if language == "hi":
             # English subtitles timed from the narration's pauses; no speech recognition (7.7).
             final = subtitles.burn_hinglish(raw, audio, os.path.join(work, "reel_final.mp4"),
                                             spoken["lines"], hook_text=hook,
-                                            source_label=_source_domain(idea.get("sources")))
+                                            source_label=_source_domain(idea.get("sources")),
+                                            **rate)
         else:
             final = subtitles.burn_captions(raw, audio, os.path.join(work, "reel_final.mp4"),
                                             hook_text=hook, key_points=script.get("key_points"),
                                             source_label=_source_domain(idea.get("sources")),
-                                            script_text=script["script_body"])
+                                            script_text=script["script_body"], **rate)
+        _disclose_what_was_shown(script, shown)
         metadata = _build_metadata(idea, script)
         metadata["voice"] = spoke.get("voice")
         # The audio language is what was voiced (design 9.9): hi for Hinglish, en otherwise.
@@ -440,6 +472,76 @@ def _produce_chain(idea: dict, work_root: str, progress: dict) -> tuple[str, str
         return video_id, url
     finally:
         shutil.rmtree(work, ignore_errors=True)  # render artifacts are disposable (rule 15)
+
+
+def _wants_ai_video() -> bool:
+    """VISUAL_SOURCE=ai_video turns on the AI-video shots (design 6.1)."""
+    return str(config.get("VISUAL_SOURCE", "photos") or "").strip().lower() == "ai_video"
+
+
+def _story_text(idea: dict) -> str:
+    """The idea's words for the shot planner's name check: its hook and angle, and its title
+    unless the title is title-cased (every word capitalised would read as a name)."""
+    title = str(idea.get("title") or "")
+    words = [w for w in title.split() if w[:1].isalpha()]
+    title_cased = len(words) >= 3 and 2 * sum(w[0].isupper() for w in words) >= len(words)
+    parts = ([] if title_cased else [title]) + [str(idea.get(k) or "") for k in ("hook", "angle")]
+    return " ".join(p for p in parts if p).strip()
+
+
+def _tail_seconds() -> float:
+    """What a reel still needs after visuals: render, captions, upload (design 6.4; 161.5 s
+    measured)."""
+    try:
+        return float(config.get("AI_VIDEO_TAIL_SECONDS", "240"))
+    except (TypeError, ValueError):
+        return 240.0
+
+
+def _ai_video_shots(idea: dict, script: dict, audio: str, duration: float, setting: str | None,
+                    work: str, hook: str | None, lines: list[dict] | None, progress: dict):
+    """Design 6.2: the narration's pauses, the reel's subtitle burn tried on a blank clip, then
+    the shots, inside the latest finish this job allows. None when the reel cannot have them:
+    it then takes today's `ai` path, and a Higgsfield problem never costs the reel (6.9); the
+    reel's Published line says so and why (6.8)."""
+    try:
+        pause_list = subtitles.pauses(audio)
+        can_buy = subtitles.preflight(audio, os.path.join(work, "preflight"), lines=lines,
+                                      hook_text=hook,
+                                      source_label=_source_domain(idea.get("sources")))
+        left = _seconds_left()
+        deadline = None if left is None else time.monotonic() + left - _tail_seconds()
+        return ai_video.make_shots(ai_video.ReelRequest(
+            idea_id=idea["id"], script_body=script["script_body"], title=hook or "",
+            tone=script.get("tone"), setting=setting, story=_story_text(idea), audio_path=audio,
+            duration=duration, pauses=pause_list, work_dir=os.path.join(work, "shots"),
+            deadline=deadline, can_buy=can_buy))
+    except Exception as e:  # noqa: BLE001 — NoShots included: the `ai` path takes over
+        log.warning("produce: idea %s has no AI-video shots (%s: %s); using today's ai path",
+                    idea.get("id"), type(e).__name__, e)
+        # Clips bought before the fall (NoShots carries them) are still this reel's spend.
+        spend = float(getattr(e, "spend_usd", 0) or 0)
+        for problem in getattr(e, "problems", None) or []:
+            _notify(problem)
+        if spend > 0:
+            progress["spend_usd"] = spend
+        progress["ai_video"] = (f"🎞️ AI video: none ({type(e).__name__}: {str(e)[:200]})"
+                                + (f", ${spend:.2f} spent" if spend > 0 else "")
+                                + "; made from stills on the ai path")
+        return None
+
+
+def _disclose_what_was_shown(script: dict, shown: dict) -> None:
+    """The description's disclosure line names what the reel really shows (design 9.9): an
+    ai_video reel with no clip, or on today's `ai` path, shows images, not video."""
+    caption = script.get("caption") or ""
+    if scriptwriter.DISCLOSURE_LINE_AI_VIDEO not in caption:
+        return
+    if shown.get("source") == "ai_video" and shown.get("video_shots", 0) > 0:
+        return
+    images = shown.get("source") in ("ai", "ai_video")
+    line = scriptwriter.DISCLOSURE_LINE_AI if images else scriptwriter.DISCLOSURE_LINE
+    script["caption"] = caption.replace(scriptwriter.DISCLOSURE_LINE_AI_VIDEO, line)
 
 
 def _mark_produced(idea_id: int, url: str) -> None:
@@ -490,12 +592,16 @@ def _report_claude(idea: dict, script: dict) -> None:
             f"and will be for this run's other reels until it is fixed.")
 
 
-def _notify_failure(idea: dict, error: Exception) -> None:
-    """Best-effort Telegram alert on a hard per-reel failure (rule 13). Never raises."""
+def _notify_failure(idea: dict, error: Exception, spend: float | None = None) -> None:
+    """Best-effort Telegram alert on a hard per-reel failure (rule 13), with the reel's
+    Higgsfield spend when there was any (design 6.8). Never raises."""
+    text = (f"⚠️ Reel failed for idea {idea.get('id')} ({idea.get('title')!r}): "
+            f"{type(error).__name__}: {error}")
+    if spend:
+        text += f"\n🎞️ Higgsfield spend on this reel: ${spend:.2f}"
     try:
         approval._api("sendMessage", chat_id=config.require("TELEGRAM_CHAT_ID"),
-                      text=_redact(f"⚠️ Reel failed for idea {idea.get('id')} "
-                                   f"({idea.get('title')!r}): {type(error).__name__}: {error}"))
+                      text=_redact(text))
     except Exception:  # noqa: BLE001 — alerting must never break the batch
         log.warning("production: failure alert could not be sent.")
 
@@ -619,18 +725,21 @@ def run_production(limit: int | None = None, only_ids: list[int] | None = None) 
             _notify(f"⏱️ Out of time for {len(rest)} approved idea(s) before the job's limit; "
                     f"they go back to the next digest.")
             break
+        report: dict = {}
         try:
-            video_id, url = produce_one(idea, work_root)
+            video_id, url = produce_one(idea, work_root, report)
             published.append({"idea_id": idea["id"], "video_id": video_id, "url": url})
             log.info("production: published idea %s -> %s", idea["id"], url)
             # Announced as it goes live, from both entry points: the batch's end used to be the
-            # only moment, and run() never announced at all.
-            _notify(f"✅ Published: {url}")
+            # only moment, and run() never announced at all. An ai_video reel adds its shots and
+            # spend (design 6.8).
+            line = report.get("ai_video")
+            _notify(f"✅ Published: {url}" + (f"\n{line}" if line else ""))
         except Exception as e:  # noqa: BLE001 — fail soft per reel; keep the batch alive
             log.exception("production: idea %s failed", idea.get("id"))
             failed.append({"idea_id": idea.get("id"), "error": f"{type(e).__name__}: {e}"})
             _release_failed_idea(idea.get("id"), e)
-            _notify_failure(idea, e)
+            _notify_failure(idea, e, spend=report.get("spend_usd"))
     return {"published": published, "failed": failed}
 
 
@@ -669,6 +778,7 @@ def run() -> None:
     config.validate()  # fail loud on misconfig (rule 14)
     publish_youtube.preflight()  # a dead YouTube token stops the run before any work
     run_started = datetime.now(timezone.utc)
+    ai_video.begin_run()  # no stop latch or alert carried over from an earlier run (6.4, 6.8)
     ai_video.sweep()  # settle Higgsfield jobs earlier runs left open (design 6.7)
 
     ensure_ideas_and_digest()
@@ -737,6 +847,7 @@ def make_on_demand(num_ideas: int = 3, wait_minutes: int = 20) -> dict:
     # the render.
     publish_youtube.preflight()
     run_started = datetime.now(timezone.utc)
+    ai_video.begin_run()  # no stop latch or alert carried over from an earlier run (6.4, 6.8)
     ai_video.sweep()  # settle Higgsfield jobs earlier runs left open (design 6.7); never raises
     try:  # best-effort, like the age-out below: bookkeeping must never block a run (rule 14)
         _release_leftover_approvals()

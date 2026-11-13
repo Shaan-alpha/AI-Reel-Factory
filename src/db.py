@@ -166,11 +166,28 @@ def expire_stale_pending_ideas(max_age_hours: int | None = None) -> int:
     if max_age_hours <= 0:
         return 0
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
-    rows = (
-        get_client().table("ideas").update({"status": "passed"})
-        .eq("status", "pending").lt("created_at", cutoff).execute().data
-    )
+    query = (get_client().table("ideas").update({"status": "passed"})
+             .eq("status", "pending").lt("created_at", cutoff))
+    # Paid clips keep their idea alive (design 6.7): its next approval reuses them.
+    keep = ideas_with_paid_clips()
+    if keep:
+        query = query.not_.in_("id", sorted(keep))
+    rows = query.execute().data
     return len(rows or [])
+
+
+def ideas_with_paid_clips(days: int = 6) -> set[int]:
+    """Ideas with a Higgsfield clip finished in the last `days` days (design 6.7, last rule). An
+    idea released after a failed attempt that left paid clips is not aged out while they can be
+    reused (their URLs last 7 days). Never raises: without the ledger, nothing is kept."""
+    try:
+        rows = _ledger(lambda: get_client().table(_LEDGER).select("idea_id")
+                       .eq("status", "completed").gte("created_at", _days_ago(days))
+                       .execute().data)
+    except Exception as e:  # noqa: BLE001 — the age-out runs as before
+        log.warning("db: could not read which ideas have paid clips (%s)", e)
+        return set()
+    return {int(r["idea_id"]) for r in rows or [] if r.get("idea_id") is not None}
 
 
 def existing_idea_titles() -> set[str]:
