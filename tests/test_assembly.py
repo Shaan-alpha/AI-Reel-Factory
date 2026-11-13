@@ -126,10 +126,11 @@ def test_build_cmd_structure(monkeypatch):
 
 
 def test_grade_filters_present_by_default(monkeypatch):
-    for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
+    for k in ("ENABLE_GRADE", "ENABLE_GRAIN"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ENABLE_VIGNETTE", "true")  # off by default since stage 4b
     f = assembly._grade_filters()
-    # Grade and vignette on; grain off by default since 2026-09-27 (incompressible noise).
+    # Grade on; grain off by default since 2026-09-27 (incompressible noise).
     assert "eq=contrast=" in f and "vignette" in f and "noise=" not in f
     monkeypatch.setenv("ENABLE_GRAIN", "true")
     assert "noise=" in assembly._grade_filters()
@@ -144,8 +145,9 @@ def test_grade_filters_empty_when_all_disabled(monkeypatch):
 def test_build_cmd_includes_grade_in_filtergraph(monkeypatch):
     monkeypatch.setattr(assembly, "_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setenv("ENABLE_XFADE", "false")  # isolate the concat path
-    for k in ("ENABLE_GRADE", "ENABLE_VIGNETTE", "ENABLE_GRAIN"):
+    for k in ("ENABLE_GRADE", "ENABLE_GRAIN"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ENABLE_VIGNETTE", "true")  # off by default since stage 4b
     cmd = assembly._build_cmd([("c0.mp4", 0.0), ("c1.mp4", 0.0)], "narr.mp3", 9.0, "out.mp4")
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "eq=contrast=" in fc and "vignette" in fc
@@ -544,6 +546,7 @@ def test_levels_fall_back_to_fixed_when_the_narration_cannot_be_measured(monkeyp
 
 
 def test_levels_put_the_voice_on_target_and_the_bed_under_it(monkeypatch):
+    monkeypatch.setenv("MUSIC_LU_BELOW_VOICE", "11")  # the default is 4 since stage 4b
     reads = iter([-21.0, -24.5, -12.0])  # raw voice, voice after compression at ref, bed
     monkeypatch.setattr(assembly, "_loudness", lambda *a, **k: next(reads))
     monkeypatch.setattr(assembly, "_music_start", lambda *a: 0.0)
@@ -846,3 +849,33 @@ def test_a_cut_list_reel_keeps_every_frame(monkeypatch, tmp_path):
     assert stream["r_frame_rate"] == "24/1"
     assert abs(float(probe["format"]["duration"]) - 9.0) <= 0.1
     assert abs(int(stream["nb_read_frames"]) - 216) <= 2
+
+
+# --- Stage 4b: the look and the sound (design 11.3, 11.4) -------------------------------------
+
+def test_the_vignette_is_off_by_default(monkeypatch):
+    """It darkened the top of the frame by 48% and the bottom by 40% (design 11.3)."""
+    monkeypatch.delenv("ENABLE_VIGNETTE", raising=False)
+    assert "vignette" not in assembly._grade_filters()
+    monkeypatch.setenv("ENABLE_VIGNETTE", "true")
+    assert "vignette" in assembly._grade_filters()
+
+
+def test_cut_stings_are_off_by_default(monkeypatch):
+    """One click a reel at -19.8 dBFS, landing inside speech (design 11.4)."""
+    monkeypatch.delenv("ENABLE_SFX", raising=False)
+    assert assembly._sfx_enabled() is False
+    monkeypatch.setenv("ENABLE_SFX", "true")
+    assert assembly._sfx_enabled() is True
+
+
+def test_the_music_bed_sits_4_lu_under_the_voice(monkeypatch):
+    """After the ducking's 13-14 LU the bed sits 17-18 LU under the voice, not 24-25 (11.4)."""
+    monkeypatch.delenv("MUSIC_LU_BELOW_VOICE", raising=False)
+    monkeypatch.setattr(assembly, "_music_start", lambda *a: 0.0)
+    reads = iter([-21.0, -24.5, -12.0])
+    monkeypatch.setattr(assembly, "_loudness", lambda *a, **k: next(reads))
+    assert assembly._measure_levels("n.wav", "bed.mp3", 20.0)["bed"] == -14.0 - 4.0 - (-12.0)
+    monkeypatch.setenv("MUSIC_LU_BELOW_VOICE", "11")
+    reads = iter([-21.0, -24.5, -12.0])
+    assert assembly._measure_levels("n.wav", "bed.mp3", 20.0)["bed"] == -14.0 - 11.0 - (-12.0)

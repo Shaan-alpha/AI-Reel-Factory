@@ -104,7 +104,7 @@ def test_card_events_empty_when_no_points_or_no_time():
 
 
 def test_build_ass_includes_text_cards(monkeypatch):
-    monkeypatch.delenv("ENABLE_TEXT_CARDS", raising=False)  # default on
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     words = [(0.0, 0.4, "Reusable"), (0.4, 0.9, "rockets"), (5.0, 5.4, "cut"), (5.4, 6.0, "costs")]
     ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
     assert "Style: Card" in ass
@@ -205,6 +205,7 @@ def test_graphic_cards_off_by_default(monkeypatch, tmp_path):
 
 def test_graphic_cards_render_pngs_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     monkeypatch.setenv("CARD_SECONDS", "1.8")
     monkeypatch.setenv("HOOK_SECONDS", "1.8")
     cards = subtitles._render_graphic_cards(["First in Asia", "30% cheaper"], 20.0, str(tmp_path))
@@ -217,6 +218,7 @@ def test_graphic_cards_render_pngs_when_enabled(monkeypatch, tmp_path):
 def test_graphic_cards_fall_back_when_render_fails(monkeypatch, tmp_path):
     """A card renderer breaking must cost us the cards, never the captions (rules 11, 14)."""
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     from src import graphics
     monkeypatch.setattr(graphics, "create_stat_card",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no font")))
@@ -226,6 +228,7 @@ def test_graphic_cards_fall_back_when_render_fails(monkeypatch, tmp_path):
 def test_ass_omits_text_cards_when_png_cards_are_used(monkeypatch, tmp_path):
     """Both treatments at once would double-draw, so exactly one must own the key points."""
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
     audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
     monkeypatch.setattr(subtitles, "_transcribe_words",
@@ -246,6 +249,7 @@ def test_ass_omits_text_cards_when_png_cards_are_used(monkeypatch, tmp_path):
 
 def test_burn_captions_retries_with_text_cards_when_overlay_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("ENABLE_GRAPHIC_CARDS", "true")
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")  # off by default since stage 4b
     video = tmp_path / "in.mp4"; video.write_bytes(b"\x00" * 100)
     audio = tmp_path / "a.mp3"; audio.write_bytes(b"\x00" * 100)
     monkeypatch.setattr(subtitles, "_transcribe_words",
@@ -729,3 +733,14 @@ def test_an_english_preflight_transcribes_once(monkeypatch, tmp_path):
     other = tmp_path / "other.wav"
     other.write_bytes(b"RIFF-another")
     assert subtitles.preflight(str(other), str(tmp_path)) is False  # no words, no purchase
+
+
+def test_key_point_cards_are_off_by_default(monkeypatch):
+    """The key number replaces the key-point cards (design 11.5, 12)."""
+    monkeypatch.delenv("ENABLE_TEXT_CARDS", raising=False)
+    words = [(0.0, 0.4, "Reusable"), (0.4, 0.9, "rockets"), (5.0, 5.4, "cut"), (5.4, 6.0, "costs")]
+    ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
+    assert ",Card,," not in ass
+    monkeypatch.setenv("ENABLE_TEXT_CARDS", "true")
+    ass = subtitles._build_ass(words, key_points=["First in Asia", "30% cheaper"], total_dur=6.0)
+    assert ass.count(",Card,,") == 2

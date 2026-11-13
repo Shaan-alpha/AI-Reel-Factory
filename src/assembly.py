@@ -117,7 +117,7 @@ def _grade_filters() -> str:
         saturation = config.get("GRADE_SATURATION", "1.12")
         parts.append(f"eq=contrast={contrast}:saturation={saturation}:brightness=0.01:gamma=0.98")
         parts.append("colorbalance=rs=0.03:gs=0.01:bs=-0.03")  # slight warmth
-    if config.get_bool("ENABLE_VIGNETTE", True):
+    if config.get_bool("ENABLE_VIGNETTE", False):
         parts.append("vignette=PI/5")
     # Off by default since 2026-09-27: temporal grain is incompressible noise. It pushed an
     # uncapped CRF 18 encode to 44 Mbps, now eats the 8 Mbps cap, and YouTube's own re-encode
@@ -355,7 +355,7 @@ def _apply_seamless_loop(ordered: list[tuple[str, float]], duration: float,
 
 
 def _sfx_enabled() -> bool:
-    return config.get_bool("ENABLE_SFX", True)
+    return config.get_bool("ENABLE_SFX", False)
 
 
 def _sfx_volume() -> float:
@@ -514,7 +514,7 @@ def _measure_levels(audio_path: str, music_path: str | None, duration: float) ->
         levels["music_start"] = start
         bed = _loudness(music_path, start=start, seconds=duration)
         if bed is not None:
-            below = _float_setting("MUSIC_LU_BELOW_VOICE", 11.0, 3.0, 30.0)
+            below = _float_setting("MUSIC_LU_BELOW_VOICE", 4.0, 3.0, 30.0)
             levels["bed"] = target - below - bed
     return levels
 

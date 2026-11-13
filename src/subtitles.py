@@ -439,7 +439,7 @@ def _render_graphic_cards(key_points: list[str] | None, total_dur: float,
     Shares `_card_events` with the ASS path so both treatments use ONE timing rule. Returns []
     when disabled or on any failure, and the caller then falls back to the ASS text cards —
     a card renderer breaking must never cost us the captions (rules 11, 14)."""
-    if not (key_points and config.get_bool("ENABLE_TEXT_CARDS", True) and _graphic_cards_enabled()):
+    if not (key_points and config.get_bool("ENABLE_TEXT_CARDS", False) and _graphic_cards_enabled()):
         return []
     try:
         from src import graphics
@@ -483,7 +483,7 @@ def _build_ass(words: list[tuple[float, float, str]], hook_text: str | None = No
 
     # Sparse on-screen key-point cards (middle of frame) — story-specific text that lifts the
     # generic-stock B-roll. Shown after the hook window; toggle ENABLE_TEXT_CARDS.
-    if key_points and config.get_bool("ENABLE_TEXT_CARDS", True):
+    if key_points and config.get_bool("ENABLE_TEXT_CARDS", False):
         dur = total_dur if total_dur else (words[-1][1] if words else 0.0)
         start_after = float(config.get("HOOK_SECONDS", "1.8"))
         card_dur = float(config.get("CARD_SECONDS", "1.8"))
