@@ -5,6 +5,8 @@ chain wiring, idempotency, fail-soft batching, the daily cap, and the dry-queue 
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from src import production
@@ -196,10 +198,10 @@ def test_footer_env_override(monkeypatch):
 def test_run_production_is_fail_soft(monkeypatch):
     ideas = [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}, {"id": 3, "title": "c"}]
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
-    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e, spend=None: None)
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: None)  # no live Supabase
 
-    def fake_produce(idea, root):
+    def fake_produce(idea, root, report=None):
         if idea["id"] == 2:
             raise RuntimeError("boom")
         return f"V{idea['id']}", f"url{idea['id']}"
@@ -215,7 +217,7 @@ def test_run_production_respects_cap(monkeypatch):
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
     seen = []
     monkeypatch.setattr(production, "produce_one",
-                        lambda idea, root: seen.append(idea["id"]) or ("V", "u"))
+                        lambda idea, root, report=None: seen.append(idea["id"]) or ("V", "u"))
     production.run_production(limit=3)
     assert seen == [0, 1, 2]
 
@@ -433,8 +435,8 @@ def test_an_unchecked_reel_goes_back_to_the_digest(monkeypatch):
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 8, "title": "z"}])
     alerts = []
     monkeypatch.setattr(production, "_notify_failure",
-                        lambda idea, e: alerts.append(f"{type(e).__name__}: {e}"))
-    monkeypatch.setattr(production, "produce_one", lambda idea, root: (_ for _ in ()).throw(
+                        lambda idea, e, spend=None: alerts.append(f"{type(e).__name__}: {e}"))
+    monkeypatch.setattr(production, "produce_one", lambda idea, root, report=None: (_ for _ in ()).throw(
         production.FactCheckUnavailable("idea 8 held back: the fact-check could not run")))
     statuses = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: statuses.append((i, s)))
@@ -455,9 +457,9 @@ def test_factcheck_failure_is_soft_for_the_batch(monkeypatch):
     """One blocked reel must not take the day's other Shorts with it (rule 14)."""
     ideas = [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}, {"id": 3, "title": "c"}]
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: ideas)
-    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e, spend=None: None)
 
-    def _produce(idea, root):
+    def _produce(idea, root, report=None):
         if idea["id"] == 2:
             raise production.FactCheckFailed("idea 2 failed fact check: invented figure")
         return f"V{idea['id']}", f"https://youtu.be/V{idea['id']}"
@@ -474,9 +476,9 @@ def test_factcheck_failure_alerts_the_operator(monkeypatch):
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 9, "title": "t"}])
     alerts = []
     monkeypatch.setattr(production, "_notify_failure",
-                        lambda idea, e: alerts.append(f"{type(e).__name__}: {e}"))
+                        lambda idea, e, spend=None: alerts.append(f"{type(e).__name__}: {e}"))
     monkeypatch.setattr(production, "produce_one",
-                        lambda i, r: (_ for _ in ()).throw(
+                        lambda i, r, report=None: (_ for _ in ()).throw(
                             production.FactCheckFailed("idea 9 failed fact check: bad date")))
     production.run_production()
     assert len(alerts) == 1
@@ -495,10 +497,10 @@ def test_run_production_only_produces_ideas_offered_in_this_run(monkeypatch):
     """
     stale, fresh = {"id": 223, "title": "left over from a failed run"}, {"id": 226, "title": "offered now"}
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [stale, fresh])
-    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e, spend=None: None)
     seen = []
     monkeypatch.setattr(production, "produce_one",
-                        lambda idea, root: seen.append(idea["id"]) or ("V", "u"))
+                        lambda idea, root, report=None: seen.append(idea["id"]) or ("V", "u"))
 
     production.run_production(only_ids=[226])
     assert seen == [226], "a stale approved idea must not be produced without a fresh approval"
@@ -508,10 +510,10 @@ def test_run_production_without_only_ids_still_drains_the_queue(monkeypatch):
     """The scheduled cron path has no 'this run's digest' — it legitimately drains the queue."""
     monkeypatch.setattr(production.db, "get_approved_ideas",
                         lambda: [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}])
-    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e, spend=None: None)
     seen = []
     monkeypatch.setattr(production, "produce_one",
-                        lambda idea, root: seen.append(idea["id"]) or ("V", "u"))
+                        lambda idea, root, report=None: seen.append(idea["id"]) or ("V", "u"))
     production.run_production()
     assert seen == [1, 2]
 
@@ -524,9 +526,9 @@ def test_a_failed_reel_is_released_from_the_approved_queue(monkeypatch):
     three stuck ideas made every future tap answer "capped".
     """
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 5, "title": "x"}])
-    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e, spend=None: None)
     monkeypatch.setattr(production, "produce_one",
-                        lambda idea, root: (_ for _ in ()).throw(RuntimeError("voice died")))
+                        lambda idea, root, report=None: (_ for _ in ()).throw(RuntimeError("voice died")))
     statuses = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: statuses.append((i, s)))
 
@@ -538,8 +540,8 @@ def test_a_failed_reel_is_released_from_the_approved_queue(monkeypatch):
 def test_a_factcheck_failure_stays_rejected_and_is_not_re_offered(monkeypatch):
     """produce_one already rejected it — a content verdict must not be reset to pending."""
     monkeypatch.setattr(production.db, "get_approved_ideas", lambda: [{"id": 6, "title": "y"}])
-    monkeypatch.setattr(production, "_notify_failure", lambda idea, e: None)
-    monkeypatch.setattr(production, "produce_one", lambda idea, root: (_ for _ in ()).throw(
+    monkeypatch.setattr(production, "_notify_failure", lambda idea, e, spend=None: None)
+    monkeypatch.setattr(production, "produce_one", lambda idea, root, report=None: (_ for _ in ()).throw(
         production.FactCheckFailed("idea 6 failed fact check: invented statistic")))
     statuses = []
     monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: statuses.append((i, s)))
@@ -862,8 +864,10 @@ def test_the_wait_leaves_room_for_a_reel(monkeypatch):
     monkeypatch.setattr(production, "run_production",
                         lambda limit=None, only_ids=None: {"published": [], "failed": []})
     monkeypatch.setattr(production, "_notify", lambda t: None)
+    monkeypatch.delenv("REEL_BUDGET_MINUTES", raising=False)
     production.make_on_demand(3, 45)
-    assert waited == [18 * 60], "30 min left minus a 12-minute reel leaves an 18-minute wait"
+    # Design 6.4: a reel is allowed 14 minutes (was 12), for an ai_video reel's clips.
+    assert waited == [16 * 60], "30 min left minus a 14-minute reel leaves a 16-minute wait"
 
 
 # --- an untapped digest is a pass (2026-09-29) --------------------------------------------------
@@ -958,7 +962,7 @@ def test_published_is_sent_as_each_reel_goes_live(monkeypatch, tmp_path):
     monkeypatch.setattr(production, "_notify", lambda text: events.append(("notify", text)))
     real = production.produce_one
 
-    def _tracked(idea, root):
+    def _tracked(idea, root, report=None):
         events.append(("start", idea["id"]))
         return real(idea, root)
 
@@ -1217,3 +1221,194 @@ def test_no_spend_line_is_sent_when_nothing_was_bought(monkeypatch):
     production.run()
     assert _order(events) == ["sweep", "produce", "close"]
     assert not any("AI video" in n for n in notes)
+
+
+# --- stage 3b: AI-video reels behind VISUAL_SOURCE=ai_video (design 6.1, 6.4, 6.8, 9.9) ----------
+
+def _shots(video: int = 6, planned: int = 6, spend: float = 0.945, problems=None):
+    return production.ai_video.Shots(
+        files=[f"s{i}.mp4" for i in range(6)], kinds=["video"] * video + ["still"] * (6 - video),
+        cuts=["CUTS"], planned_video=planned, spend_usd=spend,
+        problems=list(problems or []))
+
+
+def _ai_video_wiring(monkeypatch, shots=None, preflight_ok=True):
+    """The chain with VISUAL_SOURCE=ai_video; make_shots answers `shots`, or raises NoShots when
+    `shots` is an exception. Returns what each step was handed."""
+    _wire_happy(monkeypatch)
+    monkeypatch.setenv("VISUAL_SOURCE", "ai_video")
+    seen = {"req": None, "assemble": None, "burn": None, "broll": None, "notes": [],
+            "attempt": None, "meta": None}
+    monkeypatch.setattr(production.subtitles, "pauses", lambda audio: [(1.0, 1.2)])
+    monkeypatch.setattr(production.subtitles, "preflight",
+                        lambda *a, **k: seen.update(preflight=(a, k)) or preflight_ok)
+
+    def make_shots(req):
+        seen["req"] = req
+        if isinstance(shots, Exception):
+            raise shots
+        return shots or _shots(problems=["🎞️ a problem"])
+
+    monkeypatch.setattr(production.ai_video, "make_shots", make_shots)
+    monkeypatch.setattr(production.ai_video, "reel_line",
+                        lambda s: f"🎞️ AI video: {s.video} of {len(s.files)} shots")
+    monkeypatch.setattr(production.assembly, "assemble",
+                        lambda a, c, o, **k: seen.update(assemble=(c, k)) or o)
+    monkeypatch.setattr(production.subtitles, "burn_captions",
+                        lambda v, a, o, **k: seen.update(burn=k) or o)
+
+    def broll(kw, dur, d, setting=None, meta=None, source=None):
+        seen["broll"] = source
+        meta.update(source="ai", clips=4)
+        return ["c1.mp4"]
+
+    monkeypatch.setattr(production.visuals, "fetch_broll", broll)
+    monkeypatch.setattr(production.publish_youtube, "publish",
+                        lambda v, m, sid: seen.update(meta=m) or ("VID1", "https://y/VID1"))
+    monkeypatch.setattr(production, "_notify", seen["notes"].append)
+    monkeypatch.setattr(production.db, "finish_attempt", lambda *a, **k: seen.update(attempt=k))
+    monkeypatch.setattr(production, "_seconds_left", lambda: 1000.0)
+    return seen
+
+
+def test_ai_video_reels_use_the_shots(monkeypatch, tmp_path):
+    import time
+
+    seen = _ai_video_wiring(monkeypatch)
+    report = {}
+    before = time.monotonic()
+    production.produce_one(IDEA, str(tmp_path), report)
+    req = seen["req"]
+    assert (req.idea_id, req.audio_path, req.duration, req.pauses) == (7, "a.mp3", 30.0,
+                                                                      [(1.0, 1.2)])
+    assert req.can_buy and req.story.startswith("ISRO rocket, explained")
+    assert before + 1000 - 240 <= req.deadline <= time.monotonic() + 1000 - 240
+    clips, kw = seen["assemble"]
+    assert clips == [f"s{i}.mp4" for i in range(6)] and kw == {"cuts": ["CUTS"], "fps": 24}
+    assert seen["burn"]["fps"] == 24
+    fmt = seen["meta"]["format"]
+    assert (fmt["visuals"], fmt["video_shots"], fmt["shots"]) == ("ai_video", 6, 6)
+    assert seen["attempt"]["spend_usd"] == pytest.approx(0.945)
+    assert seen["attempt"]["downgrades"] == []
+    assert report == {"ai_video": "🎞️ AI video: 6 of 6 shots", "spend_usd": 0.945}
+    assert "🎞️ a problem" in seen["notes"]
+
+
+def test_no_shots_falls_back_to_the_ai_path(monkeypatch, tmp_path):
+    seen = _ai_video_wiring(monkeypatch, shots=production.ai_video.NoShots("no picture"))
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["broll"] == "ai"
+    clips, kw = seen["assemble"]
+    assert clips == ["c1.mp4"] and kw == {}  # today's 30 fps render, no cut list
+    assert "fps" not in seen["burn"]
+    assert "ai-path" in seen["attempt"]["downgrades"]
+    assert seen["meta"]["format"]["visuals"] == "ai"
+
+
+def test_fewer_video_shots_than_planned_is_a_downgrade(monkeypatch, tmp_path):
+    seen = _ai_video_wiring(monkeypatch, shots=_shots(video=4, planned=6, spend=0.63))
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["attempt"]["downgrades"] == ["still-shots"]
+
+
+def test_the_disclosure_follows_what_was_shown(monkeypatch, tmp_path):
+    seen = _ai_video_wiring(monkeypatch, shots=production.ai_video.NoShots("no picture"))
+    caption = f"A claim.\n\n{production.scriptwriter.DISCLOSURE_LINE_AI_VIDEO}"
+    monkeypatch.setattr(production.scriptwriter, "write_script",
+                        lambda idea, **k: {**SCRIPT, "caption": caption})
+    production.produce_one(IDEA, str(tmp_path))
+    description = seen["meta"]["description"]
+    assert production.scriptwriter.DISCLOSURE_LINE_AI in description
+    assert production.scriptwriter.DISCLOSURE_LINE_AI_VIDEO not in description
+
+
+def test_a_reel_without_a_clip_discloses_images(monkeypatch, tmp_path):
+    """An ai_video reel that bought nothing (no key, say) shows stills: its description must not
+    say "video". One clip is enough to say it."""
+    caption = f"A claim.\n\n{production.scriptwriter.DISCLOSURE_LINE_AI_VIDEO}"
+    for video, line in ((0, production.scriptwriter.DISCLOSURE_LINE_AI),
+                        (1, production.scriptwriter.DISCLOSURE_LINE_AI_VIDEO)):
+        seen = _ai_video_wiring(monkeypatch, shots=_shots(video=video, spend=0.0))
+        monkeypatch.setattr(production.scriptwriter, "write_script",
+                            lambda idea, **k: {**SCRIPT, "caption": caption})
+        production.produce_one(IDEA, str(tmp_path))
+        assert line in seen["meta"]["description"]
+
+
+def test_a_failed_preflight_buys_nothing(monkeypatch, tmp_path):
+    seen = _ai_video_wiring(monkeypatch, preflight_ok=False)
+    production.produce_one(IDEA, str(tmp_path))
+    assert seen["req"].can_buy is False
+
+
+def test_published_and_failed_lines_carry_the_spend(monkeypatch):
+    monkeypatch.setattr(production.db, "get_approved_ideas",
+                        lambda: [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}])
+    monkeypatch.setattr(production.db, "set_idea_status", lambda i, s, from_status=None: None)
+    notes, alerts = [], []
+    monkeypatch.setattr(production, "_notify", notes.append)
+    monkeypatch.setattr(production.approval, "_api",
+                        lambda method, **params: alerts.append(params["text"]))
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+
+    def produce(idea, root, report=None):
+        if idea["id"] == 1:
+            report.update(ai_video="🎞️ AI video: 6 of 6 shots, $0.95", spend_usd=0.945)
+            return "V1", "https://y/V1"
+        report.update(spend_usd=0.4725)
+        raise RuntimeError("assembly: ffmpeg failed")
+
+    monkeypatch.setattr(production, "produce_one", produce)
+    production.run_production()
+    assert "✅ Published: https://y/V1\n🎞️ AI video: 6 of 6 shots, $0.95" in notes
+    assert len(alerts) == 1 and "Reel failed" in alerts[0] and "$0.47" in alerts[0]
+
+
+def test_both_entry_points_begin_the_run(monkeypatch):
+    events, _notes = _spend_events(monkeypatch)
+    monkeypatch.setattr(production.ai_video, "begin_run", lambda: events.append("begin"))
+    monkeypatch.setattr(production.db, "get_pending_ideas", lambda: [])
+    monkeypatch.setattr(production.ideation_fallback, "seed_ideas",
+                        lambda n, already_pending=0: 1)
+    monkeypatch.setattr(production.approval, "send_digest", lambda: None)
+    monkeypatch.setattr(production.approval, "process_responses", lambda **k: 0)
+    production.make_on_demand(num_ideas=1, wait_minutes=1)
+    assert _order(events)[:2] == ["begin", "sweep"]
+    events.clear()
+    monkeypatch.setattr(production, "ensure_ideas_and_digest", lambda: 0)
+    production.run()
+    assert _order(events)[:2] == ["begin", "sweep"]
+
+
+def test_settings_defaults(monkeypatch):
+    import re
+
+    monkeypatch.delenv("REEL_BUDGET_MINUTES", raising=False)
+    assert production._reel_seconds() == 840
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    names = ("AI_VIDEO_MODEL", "AI_VIDEO_BUDGET_USD", "AI_VIDEO_TIMEOUT_SECONDS",
+             "AI_VIDEO_GRACE_SECONDS", "AI_VIDEO_TAIL_SECONDS", "AI_VIDEO_CUTS", "AI_VIDEO_STYLE")
+    for flow, step in (("make-short.yml", 85), ("production.yml", 55)):
+        with open(os.path.join(root, ".github", "workflows", flow), encoding="utf-8") as f:
+            text = f.read()
+        # The Python step's own limit, not the job's: _seconds_left() must never be later than
+        # the real kill (design 6.4).
+        assert int(re.search(r"(?m)^ {8}timeout-minutes:\s*(\d+)", text).group(1)) == step
+        assert re.search(r"JOB_TIMEOUT_MINUTES:\s*'(\d+)'", text).group(1) == str(step)
+        for name in names:
+            assert f"{name}: ${{{{ vars.{name}" in text, (flow, name)
+    with open(os.path.join(root, ".env.example"), encoding="utf-8") as f:
+        example = f.read()
+    assert all(f"\n{name}=" in example for name in names)
+
+
+def test_a_reel_on_the_ai_path_says_so_under_published(monkeypatch, tmp_path):
+    """Design 6.8: a reel that shipped with fewer video shots than planned is told, with the
+    count. One that could not have its shots at all shipped with none: its Published line says
+    so and why, instead of saying nothing."""
+    _ai_video_wiring(monkeypatch, shots=production.ai_video.NoShots("no picture for any shot"))
+    report = {}
+    production.produce_one(IDEA, str(tmp_path), report)
+    line = report["ai_video"]
+    assert line.startswith("🎞️ AI video: none") and "NoShots: no picture for any shot" in line
+    assert "spend_usd" not in report

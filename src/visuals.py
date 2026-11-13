@@ -480,10 +480,13 @@ def _fetch_image_broll(keywords: list[str], target_seconds: float, out_dir: str,
 
 
 def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str,
-                setting: str | None = None, meta: dict | None = None) -> list[str]:
+                setting: str | None = None, meta: dict | None = None,
+                source: str | None = None) -> list[str]:
     """Return vertical clip paths covering target_seconds. VISUAL_SOURCE picks the strategy:
     'photos' (default, Pexels stock photos + Ken Burns), 'ai' (Cloudflare Flux + Ken Burns),
     or 'video' (Pexels/Pixabay stock video). Image sources fall back to stock video on failure.
+    `source` overrides VISUAL_SOURCE: an ai_video reel that could not have its shots falls back
+    to 'ai' here (design 6.9).
 
     `meta`, when given, receives the path that produced the clips (`source`: photos, ai or
     video) and how many (`clips`), for the post's format stamp (design 10.1).
@@ -494,7 +497,7 @@ def fetch_broll(keywords: list[str], target_seconds: float, out_dir: str,
         raise ValueError("visuals.fetch_broll: no keywords provided.")
     os.makedirs(out_dir, exist_ok=True)
 
-    source = str(config.get("VISUAL_SOURCE", "photos")).lower()
+    source = str(source or config.get("VISUAL_SOURCE", "photos")).lower()
     if source in ("photos", "ai"):
         try:
             # The work dir is per-idea (production names it idea_<id>), so it is a stable,

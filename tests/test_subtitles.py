@@ -679,3 +679,53 @@ def test_burns_keep_the_reels_frame_rate(monkeypatch, tmp_path):
     subtitles.burn_hinglish(str(video), str(audio), str(tmp_path / "final30.mp4"), lines,
                             hook_text="Prices rose")
     assert [cmd[cmd.index("-g") + 1] for cmd in cmds] == ["12", "15"]
+
+
+# --- stage 3b: the subtitle burn is tested before any clip is bought (design 6.2 step 1) ---------
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_preflight(monkeypatch, tmp_path):
+    audio = str(tmp_path / "narr.wav")
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=330:duration=3", "-ar", "24000", "-ac", "1", audio],
+                   check=True, timeout=60)
+    lines = [{"en": "Prices rose.", "hi": "दाम बढ़े।", "said": "दाम बढ़े।"}]
+    assert subtitles.preflight(audio, str(tmp_path / "a"), lines=lines, hook_text="Prices rose",
+                               source_label="example.com")
+    # A missing caption font still burns: libass falls back to a default.
+    monkeypatch.setenv("CAPTION_FONT_FILE", str(tmp_path / "missing.ttf"))
+    assert subtitles.preflight(audio, str(tmp_path / "b"), lines=lines, hook_text="Prices rose")
+
+    def broken(*a, **k):
+        raise RuntimeError("subtitles: ffmpeg burn failed (1)")
+
+    monkeypatch.setattr(subtitles, "_burn", broken)
+    assert subtitles.preflight(audio, str(tmp_path / "c"), lines=lines) is False
+
+
+def test_an_english_preflight_transcribes_once(monkeypatch, tmp_path):
+    """For an English narration the preflight also runs the step that broke in October (the
+    transcription), and the reel's own burn reuses its words instead of transcribing again."""
+    audio, video = tmp_path / "narr.wav", tmp_path / "raw.mp4"
+    audio.write_bytes(b"RIFF-not-really-a-wav")
+    video.write_bytes(b"mp4")
+    asked, burned = [], []
+    monkeypatch.setattr(subtitles, "_transcribe_words", lambda path: asked.append(path) or [
+        (0.0, 0.4, "Prices"), (0.4, 0.9, "rose.")])
+    monkeypatch.setattr(subtitles, "_blank_clip", lambda out_dir: str(video))
+
+    def burn(video_path, ass_path, out_path, cards=None, **kw):
+        burned.append(os.path.basename(out_path))
+        with open(out_path, "wb") as f:
+            f.write(b"x")
+
+    monkeypatch.setattr(subtitles, "_burn", burn)
+    assert subtitles.preflight(str(audio), str(tmp_path), hook_text="Prices rose")
+    subtitles.burn_captions(str(video), str(audio), str(tmp_path / "final.mp4"),
+                            hook_text="Prices rose", script_text="Prices rose.")
+    assert asked == [str(audio)] and burned == ["preflight.mp4", "final.mp4"]
+
+    monkeypatch.setattr(subtitles, "_transcribe_words", lambda path: [])
+    other = tmp_path / "other.wav"
+    other.write_bytes(b"RIFF-another")
+    assert subtitles.preflight(str(other), str(tmp_path)) is False  # no words, no purchase
