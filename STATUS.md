@@ -8,7 +8,7 @@
 **Version:** 0.19.0 (2026-11-14, the AI-video format built; tagged when `feat/relaunch-prep` is
 merged, with the operator's go-ahead). Before it, 0.18.0 (2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); **stage 4b (the text on screen and the sound) merged** (PR #24, 2026-11-14, CI 1213 pass). Every build stage is merged; next is the relaunch, on `feat/relaunch-prep`. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) merged** (PR #19, 2026-11-13, CI 963 pass), behind `NARRATION_LANGUAGE`; **stage 3 (AI video) merged** (PRs #20, #21), behind `VISUAL_SOURCE=ai_video`; the test renders' fixes merged (PR #22, CI 1125 pass); **stage 4a (the picture gates) merged** (PR #23, 2026-11-14, CI 1171 pass); **stage 4b (the text on screen and the sound) merged** (PR #24, 2026-11-14, CI 1213 pass). **The new format went live on 2026-11-13 UTC** (PR #25, v0.19.0, the repository variables): the first two reels published at 6 of 6 video shots each. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-13 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -146,6 +146,43 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 ---
 
 ## Log
+
+### 2026-11-13 (UTC) — The relaunch: the new format is live
+
+With the operator's go-ahead: the relaunch's preparation **merged as PR #25** (merge df0fe34) and
+tagged **v0.19.0**; then the repository variables `NARRATION_LANGUAGE=hinglish`,
+`VISUAL_SOURCE=ai_video`, `GEMINI_TTS_VOICE=Charon`, `GOOGLE_TTS_VOICE=en-IN-Chirp3-HD-Charon` and
+`WINNERS_SINCE=2026-11-13`. That is the **UTC** date (rule 15): the operator's local date was
+already the 14th, and a relaunch date of 2026-11-14 would have left the first reels out of the
+first 20.
+
+**The first run** (make-short 43498230109, started for the operator): 3 ideas, 2 approved, 1
+passed; **2 published, 0 failed**, each about 11 minutes from the tap to live.
+
+| | Reel 1, idea 796 | Reel 2, idea 797 |
+|---|---|---|
+| Short | `6p8FQS6w7z4` "Nvidia Approaches Arm CEO to Replace Huang" | `6Bt_8PI3NCc` "Microsoft Outage: Upgrade, Not Cyberattack" |
+| Script | the grounded draft: Claude's version added "US", which the draft does not carry, and the guard shipped the draft | Claude's ($0.031) |
+| Fact-check | passed, 7 claims; 2 minor waived | passed, 6 claims; 1 minor waived |
+| Hinglish | 3 lines, Claude; Gemini's meaning check passed at once | 5 lines, Claude; passed at once |
+| Voice | Charon, Gemini 3.1 on Vertex, 24.8 s | Charon, Vertex, 26.1 s |
+| Shots | 6 of 6 video, $0.94; shot 4's still read "gal" at 73 and was redrawn once | 6 of 6 video, $0.94 |
+| Edit | 10 segments; no stings; bed +4.1 dB | 11 segments; no stings; bed +4.6 dB |
+| Subtitles | 12 English blocks | 11 English blocks |
+| Upload | public, synthetic-content flag | public, synthetic-content flag |
+
+Both posts are stamped format version 2, `hi`, `ai_video`, 6 of 6 video shots, so both count
+toward the first 20 (design 10.2). The ledger holds 12 completed Kling jobs, $1.89. Claude cost
+$0.11 for the run ($0.40 of $4.00 this month). The planner's lettering check never fired, and no
+reel check was needed.
+
+**Found:** the format stamp's `structure` was null on both posts (the scripts table has it):
+fixed test-first on `fix/relaunch-findings` (the stamp now names the script's structure). The
+"US" guard was right, not a false positive: the draft never names the US, so Claude's "US
+chipmaker"-style descriptor was ungrounded; worth watching if it recurs.
+
+Next: the first 20 new reels (each run's Published line shows its shots and spend); the judging
+rule's Telegram verdict is to be built before the twentieth reel is 72 hours old.
 
 ### 2026-11-14 — The relaunch's preparation (on `feat/relaunch-prep`)
 

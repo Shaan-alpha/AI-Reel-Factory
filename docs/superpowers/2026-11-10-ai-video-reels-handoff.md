@@ -155,11 +155,14 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **The relaunch's preparation is done** on `feat/relaunch-prep` (2026-11-14): format version 2,
   the docs pass (design 16), design 15's voice variable corrected, v0.19.0 in the changelog.
 
-**Next:** the relaunch (design sections 14-15), each step with the operator's go-ahead: the
-push of `feat/relaunch-prep` and the v0.19.0 tag; the repository variables (docs/03 §9:
-`NARRATION_LANGUAGE=hinglish`, `VISUAL_SOURCE=ai_video`, `GEMINI_TTS_VOICE=Charon`,
-`GOOGLE_TTS_VOICE=en-IN-Chirp3-HD-Charon`, `WINNERS_SINCE`); one real reel end to end, watched.
-The judging rule's Telegram verdict is not built (needed once 20 new reels are 72 hours old).
+- **The relaunch is done** (2026-11-13 UTC): PR #25 merged, v0.19.0 tagged, the repository
+  variables set (`WINNERS_SINCE=2026-11-13`, the UTC date). The first run published two reels,
+  `6p8FQS6w7z4` and `6Bt_8PI3NCc`, each Hinglish with the Charon voice and 6 of 6 shots video at
+  $0.94 (STATUS.md's 2026-11-13 relaunch entry).
+
+**Next:** the first 20 new reels; before the twentieth is 72 hours old, build the judging rule's
+Telegram verdict (design 10.2). Follow-ups in design section 19 and the deferred minors in
+STATUS.md.
 
 ## 1. What the operator wants
 
