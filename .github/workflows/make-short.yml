@@ -62,20 +62,20 @@ jobs:
       # minutes in, 63 of the 104 packages (99 MB) had arrived and no digest had gone out. With
       # the cache the mirror serves only the package index and whatever was updated since.
       # tests.yml uses the same key, so its daily run stops the cache expiring (7 days unused).
-      - name: Cache apt packages (FFmpeg + espeak-ng)
+      - name: Cache apt packages (FFmpeg + espeak-ng + Tesseract)
         uses: actions/cache@v6
         with:
           path: ~/apt-archives
-          key: apt-ubuntu-24.04-ffmpeg-espeak-ng-v1
+          key: apt-ubuntu-24.04-ffmpeg-espeak-ng-tesseract-v2
 
-      - name: Install FFmpeg + espeak-ng (Kokoro TTS phonemizer)
+      - name: Install FFmpeg, espeak-ng (Kokoro TTS phonemizer) and Tesseract (the still check)
         run: |
           sudo apt-get update
           mkdir -p ~/apt-archives
           sudo cp ~/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
-          sudo apt-get install -y --download-only ffmpeg espeak-ng
+          sudo apt-get install -y --download-only ffmpeg espeak-ng tesseract-ocr
           cp /var/cache/apt/archives/*.deb ~/apt-archives/ 2>/dev/null || true
-          sudo apt-get install -y ffmpeg espeak-ng
+          sudo apt-get install -y ffmpeg espeak-ng tesseract-ocr
 
       - name: Cache TTS/ASR models (Kokoro + faster-whisper)
         uses: actions/cache@v6
