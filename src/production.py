@@ -650,8 +650,7 @@ def ensure_ideas_and_digest() -> int:
 def _report_ai_video_spend(run_started: datetime) -> None:
     """After the last reel: settle what this run left open, then send the run's Higgsfield spend
     line (design 6.7, 6.8). Both are bookkeeping and never raise; no line when nothing was bought."""
-    ai_video.sweep()
-    line = ai_video.spend_line(run_started)
+    line = ai_video.close_run(run_started)
     if line:
         _notify(line)
 

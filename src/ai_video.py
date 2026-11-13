@@ -7,6 +7,7 @@ Contract:
     sweep()           -> {"settled", "left", "errors"} counts. Settles the Higgsfield jobs that
                          earlier runs left open. Never raises.
     spend_line(since) -> the run's Higgsfield spend for Telegram, read from the ledger, or None.
+    close_run(since)  -> after the last reel: the closing sweep, then the spend line. Never raises.
     depends on        : src.db (the ai_video_jobs ledger), src.higgsfield (free status calls).
 
 Higgsfield has no spend cap in code, by the operator's choice (2026-11-10): every job is reserved
@@ -95,12 +96,14 @@ def _clips(n: int) -> str:
     return f"{n} clip" if n == 1 else f"{n} clips"
 
 
-def spend_line(since: datetime) -> str | None:
+def spend_line(since: datetime, unused: set | None = None) -> str | None:
     """This run's Higgsfield spend for Telegram (design 6.8), from the ledger: clips bought,
     dollars, clips paid for and not used, and the month to date. None when this run reserved
     nothing, when HF_API_KEY is unset (nothing can have been bought), or when the ledger cannot
-    be read. A clip that was paid for and then failed its download or gate is still `completed`
-    in the ledger, so the reel's own report (stage 3b) is where that one shows."""
+    be read. `unused` holds the ids of the rows that were not on screen, read before a sweep
+    could settle them (see close_run); without it the rows' statuses decide. A clip that was paid
+    for and then failed its download or gate is still `completed` in the ledger, so the reel's
+    own report (stage 3b) is where that one shows."""
     if not _have_key():
         return None
     try:
@@ -113,8 +116,31 @@ def spend_line(since: datetime) -> str | None:
         return None
     paid = [r for r in rows if float(r.get("cost_usd") or 0) > 0]
     dollars = sum(float(r["cost_usd"]) for r in paid)
-    unused = sum(1 for r in paid if r.get("status") in _PAID_UNUSED)
+    if unused is None:
+        n_unused = sum(1 for r in paid if r.get("status") in _PAID_UNUSED)
+    else:
+        n_unused = sum(1 for r in paid if r.get("id") in unused)
     line = f"🎞️ AI video this run: {_clips(len(paid))}, ${dollars:.2f}"
-    if unused:
-        line += f" ({unused} paid, not used)"
+    if n_unused:
+        line += f" ({n_unused} paid, not used)"
     return f"{line}; ${month:.2f} this month."
+
+
+def close_run(since: datetime) -> str | None:
+    """After the last reel (design 6.7, 6.8): settle what is still open, then return the run's
+    spend line (None when there is nothing to report).
+
+    Which clips this run paid for and did not use is read before the sweep: the sweep turns a
+    `late` clip that has since finished into `completed`, which would then read as used (review
+    I-2). Never raises."""
+    if not _have_key():
+        return None
+    try:
+        before = db.ai_video_jobs_since(since)
+    except Exception as e:  # noqa: BLE001 — a report must never fail a run
+        log.warning("ai_video: no closing sweep or spend line, the ledger could not be read (%s)",
+                    e)
+        return None
+    sweep()
+    unused = {r.get("id") for r in before if r.get("status") in _PAID_UNUSED}
+    return spend_line(since, unused=unused)

@@ -144,6 +144,48 @@ def test_spend_line(monkeypatch):
     assert ai_video.spend_line(since) == "🎞️ AI video this run: 1 clip, $0.18; $14.30 this month."
 
 
+def test_the_closing_sweep_keeps_paid_not_used(monkeypatch):
+    """Review I-2: after the last reel the sweep settles this run's late clips. One that has since
+    finished becomes `completed`, which reads as used, so what was not used is taken from the
+    ledger as it stood before the sweep; one that failed costs nothing and drops out."""
+    since = datetime(2026, 11, 13, 6, 0, tzinfo=timezone.utc)
+    before = [{"id": 1, "status": "completed", "cost_usd": 0.179},
+              {"id": 2, "status": "late", "cost_usd": 0.179},
+              {"id": 3, "status": "late", "cost_usd": 0.179},
+              {"id": 4, "status": "reserved", "cost_usd": 0.179}]
+    after = [{"id": 1, "status": "completed", "cost_usd": 0.179},
+             {"id": 2, "status": "completed", "cost_usd": 0.179},  # finished after its reel
+             {"id": 3, "status": "failed", "cost_usd": 0},  # never charged
+             {"id": 4, "status": "reserved", "cost_usd": 0.179}]  # may have been charged
+    reads, events = [before, after], []
+    monkeypatch.setattr(db, "ai_video_jobs_since",
+                        lambda s: events.append("read") or reads.pop(0))
+    monkeypatch.setattr(ai_video, "sweep", lambda: events.append("sweep") or dict(ZERO))
+    monkeypatch.setattr(db, "ai_video_spend_this_month", lambda: 2.0)
+    assert ai_video.close_run(since) == (
+        "🎞️ AI video this run: 3 clips, $0.54 (2 paid, not used); $2.00 this month.")
+    assert events == ["read", "sweep", "read"]
+
+
+def test_close_run_needs_the_key_and_the_ledger(monkeypatch):
+    since = datetime(2026, 11, 13, 6, 0, tzinfo=timezone.utc)
+    events = []
+    monkeypatch.setattr(ai_video, "sweep", lambda: events.append("sweep") or dict(ZERO))
+
+    def missing(s):
+        events.append("read")
+        raise db.LedgerUnavailable("ai_video_jobs is missing")
+
+    monkeypatch.setattr(db, "ai_video_jobs_since", missing)
+    assert ai_video.close_run(since) is None
+    assert events == ["read"]  # no table: nothing to sweep either, and nothing raised
+
+    events.clear()
+    monkeypatch.delenv("HF_API_KEY")
+    assert ai_video.close_run(since) is None
+    assert events == []  # no key: nothing can have been bought
+
+
 def test_no_spend_line_without_purchases_a_key_or_a_ledger(monkeypatch):
     since = datetime(2026, 11, 13, 6, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(db, "ai_video_spend_this_month", lambda: 14.3)
