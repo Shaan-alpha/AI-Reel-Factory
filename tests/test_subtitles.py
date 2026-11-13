@@ -625,3 +625,31 @@ def test_pauses_reads_silencedetect(tmp_path):
                     "-ar", "24000", "-ac", "1", path], check=True, timeout=60)
     found = subtitles.pauses(path)
     assert any(0.9 <= s <= 1.1 and 1.4 <= e <= 1.6 for s, e in found), found
+
+
+def test_parts_that_drop_words_are_not_trusted():
+    """A subset check let 'did not' vanish: the screen read 'The court in 2024 / ban the film'."""
+    line = {"en": "The court did not ban the film in 2024.",
+            "hi": "court ने 2024 में film ban नहीं की।", "said": "court ने 2024 में film ban नहीं की।",
+            "parts": [{"hi": "court ने 2024 में", "en": "The court in 2024"},
+                      {"hi": "film ban नहीं की।", "en": "ban the film"}]}
+    assert subtitles._usable_parts(line) is None
+    line["parts"] = [{"hi": "court ने 2024 में", "en": "The court in 2024"},
+                     {"hi": "film ban नहीं की।", "en": "did not ban the film."}]
+    assert subtitles._usable_parts(line) == line["parts"]
+
+
+def test_a_real_end_without_a_pause_keeps_its_estimate():
+    """With breaths only at 7.4 and 12.6 s, five equal sentences over 25 s used to end on the
+    breaths, about 2.5 s from their real ends at 5, 10, 15 and 20 s."""
+    ends = subtitles.sentence_ends([(7.3, 7.5), (12.5, 12.7)], [10] * 5, 25.0)
+    for got, want in zip(ends[:-1], (5.0, 10.0, 15.0, 20.0)):
+        assert abs(got - want) <= 1.5, ends
+
+
+def test_pauses_that_cannot_be_read_mean_estimate_timing(monkeypatch):
+    def _hang(*a, **k):
+        raise subprocess.TimeoutExpired("ffmpeg", 60)
+
+    monkeypatch.setattr(subtitles.subprocess, "run", _hang)
+    assert subtitles.pauses("narration.wav") == []

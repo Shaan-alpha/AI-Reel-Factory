@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 
+from collections import Counter
 from functools import lru_cache
 
 from src import config
@@ -632,9 +633,11 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
 
 # The detector settings test 4's sentence ends were placed with (2026-11-10).
 _PAUSE_FILTER = "silencedetect=noise=-38dB:d=0.12"
-# A boundary that is not at a pause costs this much share error: a last resort for a narration
-# with too few pauses, never preferred over a pause that fits.
-_ESTIMATE_COST = 0.25
+# A boundary that is not at a pause costs this much share error, so a pause is taken only when it
+# lies within about 6% of the narration of where the characters put the end (1.6 s of 27 s). At
+# 0.25 a real end with no pause was pulled to a breath 2.5 s away; test 4's ends are unchanged
+# at 0.06 (final review, 2026-11-12).
+_ESTIMATE_COST = 0.06
 _MIN_SENTENCE_SECONDS = 0.5
 # A part boundary moves to a pause this close (seconds).
 _PART_SNAP_SECONDS = 0.3
@@ -654,10 +657,15 @@ def _audio_seconds(path: str) -> float:
 
 
 def pauses(audio_path: str) -> list[tuple[float, float]]:
-    """The narration's pauses as (start, end) seconds, from FFmpeg's silencedetect."""
-    out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", audio_path,
-                          "-af", _PAUSE_FILTER, "-f", "null", "-"],
-                         capture_output=True, text=True, timeout=60).stderr
+    """The narration's pauses as (start, end) seconds, from FFmpeg's silencedetect. [] when they
+    cannot be read: the subtitles then fall back to the character-share estimates (rule 14)."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", audio_path,
+                              "-af", _PAUSE_FILTER, "-f", "null", "-"],
+                             capture_output=True, text=True, timeout=60).stderr
+    except Exception as e:  # noqa: BLE001 — estimate timing beats a lost reel
+        log.warning("subtitles: could not read the narration's pauses (%s); timing by estimate", e)
+        return []
     starts = [max(0.0, float(x)) for x in re.findall(r"silence_start: (-?[\d.]+)", out)]
     ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", out)]
     if len(ends) < len(starts):  # a pause running to the end of the file has no end line
@@ -734,15 +742,15 @@ def _usable_parts(line: dict) -> list[dict] | None:
     en = line.get("en") or ""
     joined_en = " ".join(p["en"] for p in parts)
 
-    def words(text: str) -> set[str]:
-        return set(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+    def words(text: str) -> Counter:
+        return Counter(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
 
-    if not words(joined_en) <= words(en):
+    # Exactly the sentence's own words, regrouped (design 7.7): a subset let "did not" vanish,
+    # and the screen read "The court in 2024 / ban the film" for "did not ban". Equal words also
+    # carry every number and name.
+    if words(joined_en) != words(en):
         return None
     if not hinglish.numbers_in(en) <= hinglish.numbers_in(joined_en):
-        return None
-    if any(not re.search(rf"(?<![A-Za-z]){re.escape(n)}(?![A-Za-z])", joined_en)
-           for n in hinglish.names_in(en)):
         return None
     return parts
 
