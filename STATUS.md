@@ -70,10 +70,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   render (`tools/try_ai_video.py`, about $0.95, approved) once the SQL below is run, then stage 4
   (picture and sound: the gates, the number card, the music level). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
-- ⚠️ **Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4 in Supabase (two
-  columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; three on
-  `scripts`; the `ai_video_jobs` table). The code runs without it, skipping those records, and
-  buys nothing from Higgsfield until `ai_video_jobs` exists. The bot is already redeployed.
+- ~~**Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4~~ Done 2026-11-13 at the
+  operator's request, through the Supabase CLI (`supabase db query --linked`): every table and
+  column exists, RLS is on, the pipeline's key reads them, and the advisors show nothing above
+  info level.
 - ~~**Operator, before the relaunch:** the `HF_API_KEY` secret and the live check~~ Both done
   2026-11-13 with the operator's go-ahead (design 15 steps 2-3; result in docs/04 and the log).
 - ⚠️ **Operator** (details in the 2026-10-09 and 2026-09-27/28 log entries):
@@ -206,7 +206,14 @@ Suite: **1116 passed, 5 skipped**; with every `.env` name blanked, the known NIC
 `tools/try_ai_video.py`: one test render through a reel's steps into `test-videos/`, never
 uploaded, about $0.95 of clips. It refuses without `--yes-spend`, and without the
 `ai_video_jobs` table before anything is spent. The operator agreed to run the SQL (docs/03 §4)
-so the render can buy clips; checked after the merge, the table is still missing.
+so the render can buy clips; checked after the merge, the table was still missing. At the
+operator's request it was then run through the Supabase CLI, already logged in (`supabase db query
+--linked -f`, docs/03 lines 255-323, linked from a scratch folder so the repo gained no files):
+- all three tables (RLS on) and all seven columns exist;
+- the pipeline's key has the same grants as on `claude_spend` and reads all three;
+- the advisors show 15 notes, all info level: no policies on server-only tables (intended), two
+  unindexed foreign keys on `reel_attempts` (a few dozen rows a month), and one new, still unused
+  index.
 
 ### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (merged as PR #20)
 

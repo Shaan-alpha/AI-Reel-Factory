@@ -110,8 +110,10 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **Stage 3b is merged** (PR #21, 2026-11-13; CI green), with `tools/try_ai_video.py`, one test
   render that is never uploaded.
 
-**Next:** the operator runs the SQL at the end of docs/03 §4 (the `ai_video_jobs` table was still
-missing after the merge); then the approved test render (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
+- **The SQL for stages 0-3 is run** (2026-11-13, through the Supabase CLI at the operator's
+  request; verified: tables, columns, RLS, the pipeline's access, advisors).
+
+**Next:** the approved test render (`python tools/try_ai_video.py --yes-spend`) (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
 number card, the banner hold, the music level, the vignette and stings) and the relaunch (design
 section 14).
 
