@@ -190,7 +190,7 @@ from the Telegram digest, up to 3 a run.
 - **Phase:** 1 (MVP) — **built and live.** After the operator's tap, the full chain (ideation →
   Telegram approval → script → fact-check → voice → visuals → assembly → captions → YouTube)
   runs unattended. About 81 public Shorts as of 2026-10-09, roughly 0.7 a day (the goal was
-  4–5 a day; about 20 a month from the relaunch). Every module in [src/](src/) is implemented and tested (1213 pass, 5 skipped, 2026-11-14). Since 2026-10-22 Claude
+  4–5 a day; about 20 a month from the relaunch). Every module in [src/](src/) is implemented and tested (1214 pass, 5 skipped, 2026-11-14). Since 2026-10-22 Claude
   (Anthropic API, $4/month cap of its own) writes each script from Gemini's grounded draft.
 - **Trigger: on demand only.** Send `/makeshort [N]` to the Telegram bot or run the `make-short`
   workflow, then approve from the digest. The two scheduled digests tried on 2026-09-28 were
@@ -206,14 +206,15 @@ from the Telegram digest, up to 3 a run.
   operator kept 3.1 over both `gemini-3.8-flash-tts` models by ear and asked for the move at once,
   so wherever Vertex is set up the voice comes from Vertex (billed, cents a reel) and the
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
-- **The new format is built (2026-11-10 → 11-14); the relaunch is next.** The operator chose
+- **The new format is live (relaunched 2026-11-13 UTC; v0.19.0).** The operator chose
   AI-video shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English
   subtitles, for Indian viewers. Every build stage is merged: stages 0-2 (safety and measuring,
   stories and script, Hinglish behind `NARRATION_LANGUAGE`), stage 3 (AI-video shots behind
   `VISUAL_SOURCE=ai_video`), the test renders' fixes and stage 4 (the picture gates in
-  `src/gates.py`, and the text on screen and the sound): PRs #17-#24. Until the relaunch's
-  repository variables are set, production keeps today's English `ai` format, with stage 4's
-  text and sound. The relaunch's steps (design 14-15) each wait for the operator's go-ahead.
+  `src/gates.py`, and the text on screen and the sound): PRs #17-#24; the relaunch, PR #25 and
+  the repository variables (`NARRATION_LANGUAGE=hinglish`, `VISUAL_SOURCE=ai_video`,
+  `GEMINI_TTS_VOICE=Charon`, `WINNERS_SINCE=2026-11-13`). The first two reels published at 6 of 6
+  video shots, $0.94 each. `VISUAL_SOURCE=ai` and `NARRATION_LANGUAGE=english` switch it off.
   Start at
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - Always check [STATUS.md](STATUS.md) for the authoritative, up-to-date state.

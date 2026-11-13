@@ -8,7 +8,7 @@ narrates in a near-human voice, generates story-specific visuals, edits a polish
 vertical video, and publishes faceless Shorts. The human part happens in Telegram: start a run
 with `/makeshort`, then approve the ideas worth making from the digest (up to 3 a run).
 
-**The new format** (built 2026-11-10 → 11-14, live from the relaunch): AI-video shots (FLUX
+**The new format** (built 2026-11-10 → 11-14, **live since 2026-11-13**): AI-video shots (FLUX
 stills animated by Kling 2.5 Turbo through Higgsfield), Hinglish narration with English
 subtitles, for Indian viewers, about 20 reels a month. Design:
 [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md).
@@ -82,7 +82,7 @@ See [STATUS.md](STATUS.md) for live detail; latest release notes in [CHANGELOG.m
 - [x] **Premium auto-editing** — crossfade transitions, cinematic grade, music ducking, brand-logo bug, loop-friendly endings
 - [x] **News-niche compliance** — ≥ 2 source links per idea, every script fact-checked against live search before voicing, on-screen source citation, AI-disclosure + synthetic-content flag, licence-clean visuals/own words
 - [x] **On-demand operation**: `/makeshort` or the `make-short` workflow → ideas → Telegram digest → approve → render → published link
-- [x] **The new format, built:** AI-video shots, Hinglish narration, English subtitles, stories for Indian viewers (stages 0-4, PRs #17-#24); the relaunch waits for the operator's go-ahead
+- [x] **The new format, live:** AI-video shots, Hinglish narration, English subtitles, stories for Indian viewers (stages 0-4, PRs #17-#24; relaunched 2026-11-13, v0.19.0)
 - [ ] **Volume:** about 0.7 Shorts a day so far; the goal from the relaunch is about 20 a month
 
 ---
