@@ -17,11 +17,16 @@ def _key(monkeypatch):
     monkeypatch.setenv("HF_API_KEY", "abc123:def456")
 
 
-def _ledger(monkeypatch, rows) -> list:
+def _ledger(monkeypatch, rows, failing_updates=()) -> list:
     updates = []
+
+    def update(row_id, **fields):
+        if row_id in failing_updates:
+            raise RuntimeError("statement timeout")
+        updates.append((row_id, fields))
+
     monkeypatch.setattr(db, "open_ai_video_jobs", lambda days=7: rows)
-    monkeypatch.setattr(db, "update_ai_video_job",
-                        lambda row_id, **fields: updates.append((row_id, fields)))
+    monkeypatch.setattr(db, "update_ai_video_job", update)
     return updates
 
 
@@ -40,30 +45,49 @@ def _answers(monkeypatch, answers: dict) -> list:
 
 
 def test_the_sweep_settles_what_it_can(monkeypatch):
+    """A failure that belongs to one row (Higgsfield has no such request; the row's write fails)
+    leaves that row for the next sweep, and the rows after it are still settled."""
     rows = [{"id": i, "request_id": f"job-000{i}", "status": s, "cost_usd": 0.179}
             for i, s in enumerate(["submitted", "late", "submitted", "late", "submitted",
-                                   "submitted"], start=1)]
+                                   "submitted", "late"], start=1)]
     _answers(monkeypatch, {
         "job-0001": {"status": "completed", "video": {"url": "https://cdn.example/v1.mp4"}},
-        "job-0002": {"status": "failed", "error": "Generation failed"},
-        "job-0003": {"status": "nsfw"},
-        "job-0004": {"status": "canceled"},
-        "job-0005": {"status": "in_progress"},
-        "job-0006": higgsfield.HiggsfieldError("unavailable", "read timed out"),
+        "job-0002": higgsfield.HiggsfieldError("refused", "status -> HTTP 404: not found",
+                                               status=404),
+        "job-0003": {"status": "failed", "error": "Generation failed"},
+        "job-0004": {"status": "completed", "video": {"url": "https://cdn.example/v4.mp4"}},
+        "job-0005": {"status": "nsfw"},
+        "job-0006": {"status": "canceled"},
+        "job-0007": {"status": "in_progress"},
     })
-    updates = _ledger(monkeypatch, rows)
+    updates = _ledger(monkeypatch, rows, failing_updates={4})
 
-    assert ai_video.sweep() == {"settled": 4, "left": 1, "errors": 1}
+    assert ai_video.sweep() == {"settled": 4, "left": 1, "errors": 2}
     settled = dict(updates)
     # Completed was paid for: it keeps its quote and gains the URL a later reel may reuse.
     assert settled[1]["status"] == "completed"
     assert settled[1]["result_url"] == "https://cdn.example/v1.mp4"
     assert "cost_usd" not in settled[1]
-    for row_id, status in ((2, "failed"), (3, "nsfw"), (4, "canceled")):
+    for row_id, status in ((3, "failed"), (5, "nsfw"), (6, "canceled")):
         assert (settled[row_id]["status"], settled[row_id]["cost_usd"]) == (status, 0)
     for fields in settled.values():
         assert datetime.fromisoformat(fields["settled_at"]).tzinfo is not None
-    assert 5 not in settled and 6 not in settled  # still running, or unreadable: next sweep
+    assert not {2, 4, 7} & set(settled)  # unreadable, unwritten, still running: next sweep
+
+
+@pytest.mark.parametrize("kind", ["unavailable", "busy", "funds"])
+def test_an_outage_stops_the_sweep(monkeypatch, kind):
+    """With Higgsfield down, each remaining row would wait out its 30 s timeout, at the start and
+    the end of every run (review I-4): the first failure of the service, not of a row, leaves the
+    rest for the next sweep."""
+    rows = [{"id": i, "request_id": f"job-000{i}", "status": "submitted"} for i in (1, 2, 3, 4)]
+    asked = _answers(monkeypatch, {
+        "job-0001": {"status": "completed", "video": {"url": "https://cdn.example/v1.mp4"}},
+        "job-0002": higgsfield.HiggsfieldError(kind, "read timed out"),
+        "job-0003": {"status": "failed"}, "job-0004": {"status": "failed"}})
+    _ledger(monkeypatch, rows)
+    assert ai_video.sweep() == {"settled": 1, "left": 2, "errors": 1}
+    assert asked == ["job-0001", "job-0002"]
 
 
 def test_a_reserved_row_is_not_read(monkeypatch):

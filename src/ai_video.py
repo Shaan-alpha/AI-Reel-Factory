@@ -25,6 +25,8 @@ _NOT_CHARGED = frozenset({"failed", "nsfw", "canceled"})
 # Paid and not on screen: a job that finished after its reel moved on (late), or whose submit
 # never answered (reserved, counted at its quote because it may have been charged).
 _PAID_UNUSED = frozenset({"late", "reserved", "submitted"})
+# HiggsfieldError kinds that say the service, not one request, failed (see higgsfield.py).
+_SERVICE_FAILED = frozenset({"auth", "funds", "busy", "unavailable"})
 
 
 def _have_key() -> bool:
@@ -51,9 +53,11 @@ def sweep() -> dict:
 
     Every `submitted` or `late` row under 7 days old is re-read: `completed` gets its URL (it was
     paid for, so it keeps its cost, and a later reel of the same idea may reuse the clip), and
-    `failed`, `nsfw` or `canceled` cost 0. A job still running, or one whose status call fails,
-    is left for the next sweep. Status calls are free. Runs only when HF_API_KEY is set, and is
-    bookkeeping: it never raises."""
+    `failed`, `nsfw` or `canceled` cost 0. A job still running, or one whose read or write fails,
+    is left for the next sweep. The first failure of Higgsfield itself (a timeout, an outage, a
+    refused key) leaves all the rest too, so an outage costs one timeout, not one per row.
+    Status calls are free. Runs only when HF_API_KEY is set, and is bookkeeping: it never
+    raises."""
     counts = {"settled": 0, "left": 0, "errors": 0}
     if not _have_key():
         return counts
@@ -77,7 +81,9 @@ def sweep() -> dict:
             counts["errors"] += 1
             log.warning("ai_video: sweep left job %s open (%s)", row.get("id"),
                         higgsfield.redact(e))
-            if getattr(e, "kind", None) == "auth":  # every further call would be refused too
+            if getattr(e, "kind", None) in _SERVICE_FAILED:
+                # Higgsfield itself failed, not this row: each further call would be refused or
+                # wait out its timeout, at the start and the end of the run. Leave them for later.
                 counts["left"] += len(rows) - done - 1
                 break
     if any(counts.values()):
