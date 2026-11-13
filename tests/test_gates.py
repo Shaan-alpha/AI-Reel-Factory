@@ -123,7 +123,7 @@ def test_tsv_bytes_cp1252_cannot_read_are_replaced(monkeypatch, tmp_path):
 
 def test_a_dark_middle_is_dark(monkeypatch, tmp_path):
     _ocr(monkeypatch)
-    assert gates.still_problems(_still(tmp_path, middle=30)) == ["dark: 30 < 60"]
+    assert gates.still_problems(_still(tmp_path, middle=30)) == ["dark: 30.0 < 60"]
 
 
 def test_letterbox_bars_are_found(monkeypatch, tmp_path):
@@ -331,3 +331,10 @@ def test_real_ffmpeg_a_reel_with_sound_passes(tmp_path):
                    check=True, capture_output=True, timeout=120)
     assert gates.reel_problems(str(reel), 5.0) == []
     assert gates.reel_problems(str(reel), 4.0)[0].startswith("length: 5.0")
+
+
+def test_the_darkness_message_shows_the_measured_value(monkeypatch, tmp_path):
+    """The 4b render logged "dark: 60 < 60" for a still measured just under 60."""
+    _ocr(monkeypatch)
+    (problem,) = gates.still_problems(_still(tmp_path, middle=59))
+    assert problem.startswith("dark: 59.") and problem.endswith("< 60")
