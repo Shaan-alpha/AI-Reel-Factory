@@ -214,3 +214,129 @@ def test_tests_never_reach_higgsfield(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
     with pytest.raises(RuntimeError, match="Higgsfield"):
         higgsfield.submit(higgsfield.KLING, {"prompt": "p"}, "key-1")
+
+
+# --- Stage 3b: the shot planner (design 6.5) ------------------------------------------------------
+
+import json  # noqa: E402
+
+from src import llm, visuals  # noqa: E402
+
+SCRIPT = ("Sunita Williams returned to Earth after 286 days in orbit. NASA says [short pause] the "
+          "capsule splashed down safely. Here's why it matters: India's own crew flight is next.")
+DUR6 = [4.906, 5.0, 3.146, 4.654, 5.0, 4.049]
+STYLE = ("Style: cinematic 3D animated film still, stylized shapes, rich saturated color, bright "
+         "clear lighting.")
+
+
+def _req(**kw) -> "ai_video.ReelRequest":
+    fields = dict(idea_id=7, script_body=SCRIPT, title="Back after 286 days", tone="plain",
+                  setting="India", story="Sunita Williams comes home after 286 days.",
+                  audio_path="narr.wav", duration=26.755, pauses=[], work_dir="work",
+                  deadline=None)
+    fields.update(kw)
+    return ai_video.ReelRequest(**fields)
+
+
+def _shot(i: int, still: str | None = None, search: str | None = "space capsule") -> dict:
+    shot = {"still": still or (f"A small white capsule {i} bobs on calm blue water, large and "
+                               f"centred, under a bright even sky; all surfaces plain."),
+            "motion": "The capsule rocks gently. The water ripples. The camera stays static."}
+    if search is not None:
+        shot["search"] = search
+    return shot
+
+
+def _reply(shots: list[dict], mood: str = "hopeful, curious") -> str:
+    return json.dumps({"mood": mood, "shots": shots})
+
+
+def _llm(monkeypatch, replies: list) -> list:
+    """llm.generate answers from `replies` in turn (an Exception is raised); returns the prompts."""
+    prompts = []
+
+    def generate(prompt, **kw):
+        prompts.append((prompt, kw))
+        reply = replies[min(len(prompts), len(replies)) - 1]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(llm, "generate", generate)
+    return prompts
+
+
+def test_a_good_plan_is_used(monkeypatch):
+    shots = [_shot(i) for i in range(6)]
+    shots[3]["still"] = "A capsule on the sea. " * 150  # far over the cap
+    prompts = _llm(monkeypatch, [_reply(shots)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(plan) == 6
+    assert all(s["still"].endswith(f"{STYLE} Mood: hopeful, curious.") for s in plan)
+    assert len(plan[3]["still"]) <= 1800
+    assert all(s["motion"] and s["search"] == "space capsule" for s in plan)
+    ((prompt, kw),) = prompts
+    assert kw.get("json") is True
+    assert "SHOTS: 6" in prompt and "4.9 s, 5.0 s, 3.1 s, 4.7 s, 5.0 s, 4.0 s" in prompt
+    assert "SETTING: India" in prompt and "[short pause]" not in prompt
+    assert "minimal motion" not in prompt  # the somber rule is for somber stories only
+
+    prompts = _llm(monkeypatch, [_reply([_shot(i) for i in range(6)], mood="")])
+    plan, ok = ai_video.plan_shots(_req(tone="somber"), DUR6)
+    assert ok and "calm, symbolic scenes and minimal motion" in prompts[0][0]
+    assert plan[0]["still"].endswith("Mood: calm, quiet, respectful.")
+
+
+def test_ai_video_style_overrides_the_look(monkeypatch):
+    monkeypatch.setenv("AI_VIDEO_STYLE", "flat paper-cut collage, soft daylight.")
+    _llm(monkeypatch, [_reply([_shot(i) for i in range(6)])])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and plan[0]["still"].endswith(
+        "Style: flat paper-cut collage, soft daylight. Mood: hopeful, curious.")
+
+
+def test_a_name_from_the_story_rejects_the_plan(monkeypatch):
+    named = [_shot(i) for i in range(6)]
+    named[2]["still"] = "Sunita Williams floating inside a capsule window, centred, bright light."
+    prompts = _llm(monkeypatch, [_reply(named), _reply([_shot(i) for i in range(6)])])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert ok and len(prompts) == 2
+    assert "Sunita, Williams" in prompts[1][0]  # the offending names, quoted back
+    assert not any("Sunita" in s["still"] for s in plan)
+
+    names = ai_video._story_names([SCRIPT, "The Indian team in Delhi watched Earth. India's "
+                                           "crew waits."])
+    assert {"Sunita", "Williams", "NASA"} <= names
+    assert not names & {"India", "Delhi", "Earth", "The", "Indian", "Here"}
+
+
+def test_a_second_failure_buys_nothing(monkeypatch):
+    named = [_shot(i, still="NASA engineers cheer as Sunita Williams waves.") for i in range(6)]
+    prompts = _llm(monkeypatch, [_reply(named), _reply(named)])
+    monkeypatch.setattr(visuals, "extract_keywords", lambda body, n=5: ["space capsule", "ocean"])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert not ok and len(prompts) == 2
+    kws = ["space capsule", "ocean"]
+    assert [s["still"] for s in plan] == [visuals._img_prompt(kws[i % 2], i, "India")
+                                          for i in range(6)]
+    assert {s["motion"] for s in plan} == {ai_video.FALLBACK_MOTION}
+    assert [s["search"] for s in plan] == [kws[i % 2] for i in range(6)]
+
+
+def test_a_broken_reply_buys_nothing(monkeypatch):
+    monkeypatch.setattr(visuals, "extract_keywords", lambda body, n=5: ["space capsule"])
+    prompts = _llm(monkeypatch, [_reply([_shot(i) for i in range(5)])])  # five, not six, twice
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert not ok and len(prompts) == 2 and len(plan) == 6
+    _llm(monkeypatch, [RuntimeError("every provider failed")])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    assert not ok and len(plan) == 6 and plan[0]["motion"] == ai_video.FALLBACK_MOTION
+
+
+def test_search_words_never_come_from_the_still(monkeypatch):
+    shots = [_shot(i, search=None) for i in range(6)]
+    shots[1]["search"] = "  "
+    _llm(monkeypatch, [_reply(shots)])
+    plan, ok = ai_video.plan_shots(_req(), DUR6)
+    words = visuals._keywords_heuristic(ai_video._plain(SCRIPT), 6)
+    assert ok and [s["search"] for s in plan] == [words[i % len(words)] for i in range(6)]
