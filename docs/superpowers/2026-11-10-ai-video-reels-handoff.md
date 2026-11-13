@@ -107,8 +107,11 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
 - **Stage 3b's final review is done** (4 important findings and 4 re-graded minors fixed
   test-first, 1116 pass; details and the deferred minors in STATUS.md's 2026-11-13 log).
 
-**Next:** the operator's go-ahead for push and merge
-and for one test render (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
+- **Stage 3b is merged** (PR #21, 2026-11-13; CI green), with `tools/try_ai_video.py`, one test
+  render that is never uploaded.
+
+**Next:** the operator runs the SQL at the end of docs/03 §4 (the `ai_video_jobs` table was still
+missing after the merge); then the approved test render (about $0.95, no upload). Then stage 4 (picture and sound: the gates, the
 number card, the banner hold, the music level, the vignette and stings) and the relaunch (design
 section 14).
 

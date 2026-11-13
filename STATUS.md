@@ -64,10 +64,11 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
   **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
   fresh final review and its fixes); **stage 2 (Hinglish) is merged** (PR #19, behind
-  `NARRATION_LANGUAGE`). Stage 3 (AI video) comes in two plans: **3a (the Higgsfield client,
-  the ledger, the sweep) is merged** (PR #20); **3b (the shots, the cut list, the wiring) is
-  built** on `feat/stage-3b-ai-video-shots`, behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13
-  log). Stage 4 (picture and sound: the gates, the number card, the music level) is next. State and decisions are in
+  `NARRATION_LANGUAGE`). Stage 3 (AI video) came in two plans: **3a (the Higgsfield client,
+  the ledger, the sweep) is merged** (PR #20) and **3b (the shots, the cut list, the wiring) is
+  merged** (PR #21), behind `VISUAL_SOURCE=ai_video` (see the 2026-11-13 log). Next: one test
+  render (`tools/try_ai_video.py`, about $0.95, approved) once the SQL below is run, then stage 4
+  (picture and sound: the gates, the number card, the music level). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ⚠️ **Operator, for stages 0-3:** run the new SQL at the end of docs/03 §4 in Supabase (two
   columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; three on
@@ -141,7 +142,7 @@ off. Two scheduled digests ran on 2026-09-28 and were removed the next day (GitH
 
 ## Log
 
-### 2026-11-13 — Stage 3b: AI-video reels behind VISUAL_SOURCE=ai_video (built, not pushed)
+### 2026-11-13 — Stage 3b: AI-video reels behind VISUAL_SOURCE=ai_video (merged as PR #21)
 
 Stage 3a was merged as PR #20. Stage 3b was built inline on `feat/stage-3b-ai-video-shots` from
 its plan, `docs/superpowers/plans/2026-11-13-stage-3b-ai-video-shots.md` (8 tasks, each test-first;
@@ -200,6 +201,12 @@ reel to the `ai` path; an `OSError` after a reserve escapes to the `ai` path wit
 quote; late shots' stills render inside the 240 s tail.
 
 Suite: **1116 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
+
+**Merged as PR #21** (merge 27b2f43; CI green on both pushes) with the operator's go-ahead, with
+`tools/try_ai_video.py`: one test render through a reel's steps into `test-videos/`, never
+uploaded, about $0.95 of clips. It refuses without `--yes-spend`, and without the
+`ai_video_jobs` table before anything is spent. The operator agreed to run the SQL (docs/03 §4)
+so the render can buy clips; checked after the merge, the table is still missing.
 
 ### 2026-11-13 — Stage 3a: the Higgsfield client, the ledger and the sweep (merged as PR #20)
 
