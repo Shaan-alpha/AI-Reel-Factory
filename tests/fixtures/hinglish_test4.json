@@ -1,0 +1,97 @@
+{
+ "source": "test 4 (2026-11-10), research_notes/Spikes 2026-11-10",
+ "detector": "silencedetect=noise=-38dB:d=0.12",
+ "duration": 27.04,
+ "pauses": [
+  [
+   0.0,
+   0.285
+  ],
+  [
+   1.328,
+   1.518
+  ],
+  [
+   2.269,
+   2.398
+  ],
+  [
+   3.169,
+   3.341
+  ],
+  [
+   5.116,
+   5.265
+  ],
+  [
+   6.159,
+   6.302
+  ],
+  [
+   7.254,
+   7.381
+  ],
+  [
+   10.212,
+   10.437
+  ],
+  [
+   13.206,
+   13.468
+  ],
+  [
+   15.425,
+   15.61
+  ],
+  [
+   17.839,
+   18.143
+  ],
+  [
+   19.262,
+   19.759
+  ],
+  [
+   24.913,
+   25.045
+  ],
+  [
+   26.449,
+   26.808
+  ]
+ ],
+ "units": [
+  {
+   "spoken": "Eighteen November को Voyager 1, Earth से पूरे एक light-day दूर पहुँचने वाली, इंसान की बनाई पहली चीज़ बन जाएगा।",
+   "en": "On November 18, Voyager 1 becomes the first human-made object one full light-day from Earth."
+  },
+  {
+   "spoken": "यानी twenty-five point nine billion kilometres।",
+   "en": "That's 25.9 billion kilometres."
+  },
+  {
+   "spoken": "इसे message भेजो, तो reply आने में दो दिन लगते हैं।",
+   "en": "Send it a message, and the reply takes two days."
+  },
+  {
+   "spoken": "ये decaying plutonium पर चलता है, और हर साल करीब चार watts खो रहा है।",
+   "en": "It runs on decaying plutonium, losing about four watts a year."
+  },
+  {
+   "spoken": "और ये matter क्यों करता है?",
+   "en": "Here's why it matters:"
+  },
+  {
+   "spoken": "Interstellar space तक पहुँची इकलौती machines nineteen seventy-seven में launch हुई थीं, और आज भी हमसे बात कर रही हैं।",
+   "en": "The only machines in interstellar space launched in 1977, and they're still talking to us."
+  }
+ ],
+ "hand_placed_ends": [
+  7.32,
+  10.3,
+  13.35,
+  18.0,
+  19.5,
+  26.6
+ ]
+}

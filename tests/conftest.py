@@ -101,3 +101,15 @@ def _no_live_demand(request, monkeypatch):
     from src import demand
 
     monkeypatch.setattr(demand, "demand_lines", lambda: [])
+
+
+@pytest.fixture(autouse=True)
+def _before_the_tts_shutdown(monkeypatch):
+    """The Developer API's TTS models shut down on 2026-11-17 (voice._DEV_TTS_SHUTDOWN), and the
+    voice skips them from that day. Tests run as on 2026-11-12, so the daily test run does not
+    turn red by the calendar alone; tests of the shutdown pass their own date."""
+    from datetime import date
+
+    from src import voice
+
+    monkeypatch.setattr(voice, "_today", lambda: date(2026, 11, 12))

@@ -116,7 +116,9 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
     RSS search topping up sources (a Claude Routine may feed ideas first, but it is optional and
     dormant); scripts **Claude (writing from Gemini's grounded draft) → that grounded draft →
     ungrounded Gemini → Groq**; voice **Gemini TTS (one voice: Developer API → Vertex)
-    → Chirp 3 HD → edge-tts → Kokoro**; visuals **FLUX.2 klein → FLUX.1 schnell (Cloudflare
+    → Chirp 3 HD → edge-tts → Kokoro**, and for Hinglish text (behind `NARRATION_LANGUAGE`)
+    **Gemini → Chirp's Hindi voice → English narration** (Hindi rendering: **Claude → Gemini →
+    Groq**); visuals **FLUX.2 klein → FLUX.1 schnell (Cloudflare
     Workers AI) → Pexels photos → Pexels/Pixabay video**. A single upstream failure must never
     kill a run.
 12. **Idempotent, safe reruns.** Runs can and will repeat (a re-run, a second `/makeshort`).
@@ -190,8 +192,9 @@ workflow button) and approve the ideas worth making from the Telegram digest, up
   operator kept 3.1 over both `gemini-3.8-flash-tts` models by ear and asked for the move at once,
   so wherever Vertex is set up the voice comes from Vertex (billed, cents a reel) and the
   Developer API is not asked for those two models (`voice._DEV_TTS_RETIRING`).
-- **In progress since 2026-11-10: stage 0 merged (PR #17), stage 1 built on
-  `feat/stage-1-stories-script`.** The operator chose a new format: AI-video
+- **In progress since 2026-11-10: stages 0 and 1 merged (PRs #17, #18), stage 2 (Hinglish,
+  behind `NARRATION_LANGUAGE`) built on `feat/stage-2-hinglish`.** The operator chose a new
+  format: AI-video
   shots (Kling 2.5 Turbo through **Higgsfield**), Hinglish narration with English subtitles,
   for Indian viewers. Higgsfield is approved by the operator as a billed service for this
   (about $1 a reel, about 20 reels a month, **no spend cap in code by the operator's choice**),

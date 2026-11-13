@@ -7,7 +7,7 @@
 **Phase:** 1 — MVP, live (goal: 4–5 captioned YouTube Shorts/day; about 0.7/day so far, ~81 public Shorts)
 **Version:** 0.18.0 (last tag, 2026-09-04) + **untagged on `main`**: the 2026-09-13 fixes, the 2026-09-27/28 audit (PR #12), the 2026-09-29 follow-ups, the 2026-10-09 audit, the 2026-10-22 Claude scriptwriter (PR #13) and the apt cache + job clock (PR #14) (CHANGELOG `[Unreleased]`) · CI **741 pass, 5 skipped** (run 39793591290 on `main`; the 5 are opt-in live tests)
 **2026-10-09:** production was **down 2026-10-01 → 10-09** (PyAV 19 broke captions). Fixed: the first run on the new code published 2 Shorts (`rJjqfdltLvg`, `KbWEI-G61dA`). The Vercel bot was **redeployed** the same day (`dpl_ExGu8QdF735Bk9kkQDJi353ZAWeK`, account shaan-alpha). See the log entry below.
-**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) built** on branch `feat/stage-1-stories-script`, not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
+**In progress, the new format:** AI-video shots, Hinglish narration with English subtitles, for Indian viewers. Research and a full reach audit done (2026-11-10); the audit checked and the design rewritten (2026-11-12); **stage 0 merged** (PR #17); **stage 1 (1a stories, 1b script and packaging) merged** (PR #18, 2026-11-12, CI 870 pass); **stage 2 (Hinglish) built** on `feat/stage-2-hinglish`, behind `NARRATION_LANGUAGE` ([plan](docs/superpowers/plans/2026-11-12-stage-2-hinglish.md)), not yet pushed. **Start at [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).** Everything below still describes what is live.
 **Last updated:** 2026-11-12 · **Fact-check:** `FACTCHECK_STRICT=true`, **2 samples**, a repair pass, on `gemini-3.5-flash` → `3.5-flash-lite` (Vertex)
 **Voice:** Gemini TTS `gemini-3.1-flash-tts-preview` · **Zubenelgenubi** ("Casual") · style prompt ON (operator, 2026-09-27) in labelled sections
   ↳ same-voice chain (since 2026-11-12): **Vertex 3.1 → Vertex 2.5 GA**, then Chirp → edge-tts → Kokoro (all male) · somber read for tragedies · whoosh removed
@@ -62,9 +62,10 @@ Legend: ✅ done · 🟡 scaffolded (stub/contract) · ⬜ not started
 - **New format:** AI-video shots, Hinglish narration, English subtitles, Indian viewers. The
   audit is checked and the design rewritten (2026-11-12,
   [docs/superpowers/specs/2026-11-10-ai-video-reels-design.md](docs/superpowers/specs/2026-11-10-ai-video-reels-design.md));
-  **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is built** (1a and 1b) on
-  `feat/stage-1-stories-script`. Next: the final review of stage 1, then push and a PR with the
-  operator's go-ahead; then stage 2 (Hinglish). State and decisions are in
+  **stage 0 is merged** (PR #17, see the 2026-11-12 log); **stage 1 is merged** (PR #18, after a
+  fresh final review and its fixes); **stage 2 (Hinglish) is built** on `feat/stage-2-hinglish`,
+  behind `NARRATION_LANGUAGE`. Next: its final review, then push with the operator's go-ahead;
+  then stage 3 (AI video). State and decisions are in
   [docs/superpowers/2026-11-10-ai-video-reels-handoff.md](docs/superpowers/2026-11-10-ai-video-reels-handoff.md).
 - ⚠️ **Operator, for stages 0 and 1:** run the new SQL at the end of docs/03 §4 in Supabase (two
   columns on `posts`, tables `post_metrics` and `reel_attempts`; two on `ideas`; two on
@@ -218,6 +219,51 @@ follow-up through; untapped ideas end `expired`, not banned; election matter is 
   `#Shorts`; tags: the writer's six plus the brand; category 28 for science, space and tech.
 852 pass, 5 skipped; with every `.env` key blanked, 841 pass and only the known `NICHE` artifact
 fails. SQL: two `scripts` columns at the end of docs/03 §4 (the code runs without them).
+
+**Stage 2 built (Hinglish narration, English subtitles)** on `feat/stage-2-hinglish`, behind
+`NARRATION_LANGUAGE=hinglish` ([plan](docs/superpowers/plans/2026-11-12-stage-2-hinglish.md)); with the
+default `english` nothing changes:
+- `src/hinglish.py`:
+  - the fact-checked English script becomes numbered two-text lines, rendered by Claude
+    (structured output, the refusal fallback on, purpose `hinglish` in the spend ledger), then
+    Gemini, then Groq;
+  - code checks the lines: count, numbers kept as digits and no Hindi number word, names in Latin,
+    scripts, and a spoken length of 24-36 s at 2.9 words a second;
+  - a model from another provider checks the meaning;
+  - one retry, then English;
+  - code reads the digits out as English words for the voice.
+- `src/voice.py`: Devanagari text goes only to Gemini (test 4's style prompt) and Chirp's Hindi Charon,
+  never edge-tts or Kokoro. Each render is trimmed and must last 0.75-1.30 times the English
+  script's length. The Developer API's retiring models are never asked from 2026-11-17. The code's
+  voices are now Charon; the workflows keep Zubenelgenubi until the relaunch.
+- `src/subtitles.py`: no speech recognition on Hinglish reels. Sentence ends are assigned to the
+  narration's pauses all together (on test 4: within 0.02 s of the hand-placed ends). The
+  renderer's parts become blocks in spoken order, else the whole sentence; white, at most two rows.
+- `src/production.py`: the stage `hinglish`, audio language `hi`, `scripts.spoken`; any failure
+  narrates in English, records `english-narration` and tells the operator.
+- **Live checks:**
+  - Chirp's Hindi Charon read test 4's narration in 23.56 s against an expected 26.82 s (ratio
+    0.88), so it joined the chain.
+  - One end-to-end run with no upload: Claude's first rendering used "दो" for "two", and the check
+    and retry fixed it. Gemini passed the meaning. The voice took 27.86 s (ratio 1.04), and there
+    were 12 subtitle blocks. About $0.10.
+- **SQL:** `scripts.spoken` (end of docs/03 §4).
+- **Final review of stage 2** by a fresh reviewer found no critical issue and 5 important ones,
+  all fixed test-first:
+  - the voice tests would have turned the daily CI red on 2026-11-17 by the date alone;
+  - subtitle parts could drop words ("did not ban" shown as "ban");
+  - a blank Hinglish line passed the checks;
+  - line numbers given as text blanked the meaning check;
+  - rupee figures with compound scales were garbled.
+  Five minor ones were fixed too:
+  - "Rs", "5G", "10x", "21वीं", decades and times read wrongly;
+  - "°" and "+" were refused;
+  - a verdict of "true" as text failed;
+  - a sentence end with no pause drifted 2.5 s;
+  - a pause-reading timeout could lose the reel.
+
+  963 pass, 5 skipped; with `.env` blanked only the `NICHE` artifact fails. Deferred minors are
+  in the handoff.
 
 **Final review of stage 1 (1a and 1b)** by a fresh reviewer: no critical issue, 8 important, all
 fixed test-first:

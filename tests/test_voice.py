@@ -956,8 +956,10 @@ def test_live_gemini_tts(tmp_path):
 
 
 def test_default_engine_and_voice_are_the_chosen_ones(monkeypatch, tmp_path):
-    """The voice identity was picked by ear (Zubenelgenubi, 'Casual') and the engine that carries
-    it is Gemini. Pinned so neither silently drifts back to an incidental default."""
+    """The engine that carries the voice is Gemini, and the code's voice is Charon, the new
+    format's narrator (design 7.5). The production workflows still pass Zubenelgenubi, the voice
+    picked by ear in July, until the relaunch sets GEMINI_TTS_VOICE (design 15), so the live
+    English voice does not change at merge. Pinned so neither drifts by accident."""
     for k in ("VOICE_ENGINE", "GEMINI_TTS_VOICE", "GEMINI_TTS_MODEL"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "gk")
@@ -974,8 +976,11 @@ def test_default_engine_and_voice_are_the_chosen_ones(monkeypatch, tmp_path):
     voice.synthesize("Sure. [sarcastic] Brilliant.", str(tmp_path))
     assert order == ["gemini"], "Gemini must be the primary engine, not a fallback"
     vc = cap["config"].speech_config.voice_config.prebuilt_voice_config
-    assert vc.voice_name == "Zubenelgenubi"
+    assert vc.voice_name == "Charon"
     assert cap["model"] == "gemini-3.1-flash-tts-preview"  # free, and the one picked by ear
+    for workflow in ("make-short.yml", "production.yml"):
+        with open(os.path.join(".github", "workflows", workflow), encoding="utf-8") as f:
+            assert "vars.GEMINI_TTS_VOICE || 'Zubenelgenubi'" in f.read(), workflow
 
 
 def test_chirp_is_still_the_first_fallback(monkeypatch, tmp_path):
@@ -1106,3 +1111,132 @@ def test_the_english_style_prompt_is_informative():
     contradict the script. Test 3's approved narrator, with an Indian English accent."""
     p = voice._DEFAULT_STYLE_PROMPT
     assert "informative" in p and "Indian English accent" in p and "unimpressed" not in p
+
+
+# --- stage 2: the Hindi route, the length band, the trim (design 7.5) ------------------------
+
+import shutil as _shutil  # noqa: E402
+import subprocess as _subprocess  # noqa: E402
+from datetime import date as _date  # noqa: E402
+
+_HINGLISH = "इसे message भेजो, तो reply आने में two दिन लगते हैं।"
+
+
+def _fake_render(seconds, calls, name):
+    def _engine(text, out_dir, *a, **k):
+        calls.append((name, k))
+        path = os.path.join(out_dir, f"{name}.wav")
+        open(path, "wb").close()
+        return path, seconds
+    return _engine
+
+
+def test_devanagari_never_reaches_edge_or_kokoro(monkeypatch, tmp_path):
+    def _down(*a, **k):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(voice, "_synthesize_gemini", _down)
+    monkeypatch.setattr(voice, "_synthesize_google", _down)
+    for engine in ("_engine_edge", "_engine_kokoro", "_synthesize_edge_tts", "_synthesize_kokoro"):
+        monkeypatch.setattr(voice, engine, lambda *a, **k: pytest.fail("Hindi text reached it"))
+    with pytest.raises(RuntimeError, match="Hindi"):
+        voice.synthesize(_HINGLISH, str(tmp_path), expected_seconds=4.5)
+
+
+def test_the_hindi_route_uses_the_hinglish_style_and_the_hindi_chirp_voice(monkeypatch, tmp_path):
+    monkeypatch.delenv("GOOGLE_TTS_VOICE_HI", raising=False)
+    monkeypatch.delenv("VOICE_STYLE_PROMPT", raising=False)
+    calls = []
+
+    def _gemini_down(text, out_dir, meta=None, tone=None, **k):
+        calls.append(("gemini", k))
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(voice, "_synthesize_gemini", _gemini_down)
+    monkeypatch.setattr(voice, "_synthesize_google", _fake_render(4.4, calls, "google"))
+    monkeypatch.setattr(voice, "trim_silence", lambda path: 4.4)
+    meta = {}
+    voice.synthesize(_HINGLISH, str(tmp_path), meta=meta, expected_seconds=4.5)
+    assert calls[0][1]["style"] == voice._HINGLISH_STYLE_PROMPT
+    assert calls[1][1] == {"voice_name": "hi-IN-Chirp3-HD-Charon", "language": "hi-IN"}
+    assert meta["route"] == "hi" and meta["engine"] == "google"
+    assert voice._gemini_voice_name() == "Charon" or os.environ.get("GEMINI_TTS_VOICE")
+
+
+def test_a_render_outside_the_length_band_moves_on(monkeypatch, tmp_path):
+    calls = []
+    lengths = {"gemini": 0.67 * 10, "google": 1.01 * 10}
+    monkeypatch.setattr(voice, "_synthesize_gemini", _fake_render(lengths["gemini"], calls, "gemini"))
+    monkeypatch.setattr(voice, "_synthesize_google", _fake_render(lengths["google"], calls, "google"))
+    monkeypatch.setattr(voice, "trim_silence",
+                        lambda path: lengths[os.path.basename(path).split(".")[0]])
+    meta = {}
+    path, dur = voice.synthesize(_HINGLISH, str(tmp_path), meta=meta, expected_seconds=10)
+    assert meta["engine"] == "google" and dur == pytest.approx(10.1)
+    lengths["google"] = 1.56 * 10
+    with pytest.raises(RuntimeError, match="1.56"):
+        voice.synthesize(_HINGLISH, str(tmp_path), expected_seconds=10)
+
+
+@pytest.mark.skipif(not _shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_trim_silence_cuts_head_and_tail(tmp_path):
+    path = str(tmp_path / "tone.wav")
+    _subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                     "sine=frequency=440:duration=2", "-af", "adelay=1000|1000,apad=pad_dur=1",
+                     "-ar", "24000", "-ac", "1", path], check=True, timeout=60)
+    assert voice.trim_silence(path) == pytest.approx(2.0, abs=0.15)
+
+
+def test_a_failed_trim_keeps_the_file(monkeypatch, tmp_path):
+    path = str(tmp_path / "x.wav")
+    open(path, "wb").close()
+    monkeypatch.setattr(voice.subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no ffmpeg")))
+    monkeypatch.setattr(voice, "_wav_seconds", lambda p: 3.0)
+    assert voice.trim_silence(path) == 3.0 and os.path.exists(path)
+
+
+def test_the_hinglish_prompts():
+    assert voice._HINGLISH_STYLE_PROMPT.startswith(
+        "You are a confident science explainer recording a short video for viewers in India.")
+    somber = voice._HINGLISH_SOMBER_STYLE_PROMPT
+    assert "Hinglish" in somber and "Indian English accent" in somber
+    assert "calm" in somber.lower() and "unhurried" in somber.lower()
+
+
+def test_the_retiring_developer_api_models_are_skipped_after_the_shutdown(monkeypatch):
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "false")
+    before = voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", True,
+                                        today=_date(2026, 11, 16))
+    assert ("dev", "gemini-3.1-flash-tts-preview") in before
+    after = voice._gemini_tts_attempts("gemini-3.1-flash-tts-preview", True,
+                                       today=_date(2026, 11, 17))
+    assert not any(m in voice._DEV_TTS_RETIRING for _b, m in after)
+
+
+def test_english_text_takes_todays_chain(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(voice, "_engine_gemini", lambda t, d, meta=None: calls.append("gemini")
+                        or (os.path.join(d, "a.wav"), 5.0))
+    meta = {}
+    voice.synthesize("ISRO's rocket landed itself.", str(tmp_path), meta=meta,
+                     expected_seconds=99)
+    assert calls == ["gemini"] and "route" not in meta
+
+
+# --- final review of stage 2 (2026-11-12) -----------------------------------------------------
+
+def test_the_suite_runs_as_if_before_the_tts_shutdown():
+    """The daily test run would turn red on 2026-11-17 by the calendar alone: the Developer API
+    tests ran on today's date. They run as on 2026-11-12; shutdown tests pass their own date."""
+    assert voice._today() < _date(*voice._DEV_TTS_SHUTDOWN)
+
+
+def test_a_retired_model_without_vertex_says_so(monkeypatch, tmp_path):
+    monkeypatch.setattr(voice, "_today", lambda: _date(2026, 12, 1))
+    monkeypatch.setenv("GEMINI_API_KEY", "gk")
+    monkeypatch.setenv("GEMINI_USE_VERTEX", "false")
+    for k in ("GEMINI_TTS_MODEL", "GEMINI_TTS_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(RuntimeError, match="retired"):
+        voice._synthesize_gemini("Hello there.", str(tmp_path))

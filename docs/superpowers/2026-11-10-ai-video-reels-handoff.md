@@ -59,7 +59,27 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   - 9.1's warning for six or more words copied from a prompt example is not built;
   - "Today's Wordle solution" passes the puzzle filter.
 
-**Next:** stage 2 (Hinglish), then stages 3-4 and the relaunch (design section 14).
+- **Stage 1 is merged** (PR #18). **Stage 2 (Hinglish) is built** on `feat/stage-2-hinglish`, behind
+  `NARRATION_LANGUAGE=hinglish` (9 tasks; plan
+  `docs/superpowers/plans/2026-11-12-stage-2-hinglish.md`; live checks in STATUS.md). Deferred
+  from the design: the Gemini 3.8 TTS request shape (7.5), since the operator kept 3.1, which
+  Vertex serves.
+
+- **Stage 2's final review is done** (5 important findings and 5 re-graded minors fixed
+  test-first, 963 pass). **Deferred minors from it:**
+  - the Claude ledger settles from the top-level usage, not `usage.iterations`, so a rescued call
+    is under-counted, and the Opus 5 and 4.8 prices are missing, so a rescue is over-counted;
+  - a Hinglish call that times out keeps its $0.41 worst case reserved;
+  - missing Hindi number words: 31-99, लाखों, करोड़ों, हज़ारों, सैकड़ों, डेढ़, ढाई and आधा;
+  - दो as the verb "give" fails as a number word;
+  - "-5%" loses its sign;
+  - a 0.5 s sentence with 4 parts can yield an inverted block;
+  - the 36 s code band and the voice's 1.30x band disagree;
+  - English text with any Devanagari takes the Hindi route;
+  - the Hinglish step has no deadline of its own.
+
+**Next:** push stage 2 with the operator's go-ahead, then stages 3-4 and the relaunch (design
+section 14).
 
 ## 1. What the operator wants
 

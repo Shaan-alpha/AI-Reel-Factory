@@ -296,6 +296,9 @@ alter table ideas add column if not exists rank_score numeric; -- the score that
 -- 2026-11-12, script and packaging (AI-video design, stage 1b; safe to run twice).
 alter table scripts add column if not exists structure text;   -- what-happened | number | belief
 alter table scripts add column if not exists grounding jsonb;  -- citations: draft and each gate sample
+
+-- 2026-11-12, Hinglish narration (AI-video design, stage 2; safe to run twice).
+alter table scripts add column if not exists spoken jsonb;     -- language, and each line's en/hi/said
 ```
 
 ---

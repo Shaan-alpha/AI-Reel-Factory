@@ -251,6 +251,19 @@ def set_post_status(post_id: int, status: str) -> None:
     get_client().table("posts").update({"status": status}).eq("id", post_id).execute()
 
 
+def set_script_spoken(script_id: int, spoken: dict) -> None:
+    """Store what was spoken (scripts.spoken, jsonb; design 7.1, 13): the language and, for a
+    Hinglish reel, each line's English, its Hinglish and what the voice said, with the renderer
+    and the checker. A missing column costs the record, never a reel."""
+    try:
+        get_client().table("scripts").update({"spoken": spoken}).eq("id", script_id).execute()
+    except Exception as e:  # noqa: BLE001 — only a missing column is tolerated
+        if not _missing_schema(e):
+            raise
+        _warn_once("scripts.spoken", "scripts.spoken is missing (run the SQL in docs/03); what "
+                                     "was spoken is not stored")
+
+
 def set_script_grounding(script_id: int, grounding: dict) -> None:
     """Store what grounding did for the draft and the gate (scripts.grounding, jsonb; design
     9.7), so "the draft searched" is measured. A missing column costs the record, never a reel."""

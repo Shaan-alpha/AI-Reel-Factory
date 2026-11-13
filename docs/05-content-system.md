@@ -29,6 +29,17 @@ It is the only template the scriptwriter runs. The prompt lives in `src/scriptwr
 mirrors [templates/template-N-news-impact.md](../templates/template-N-news-impact.md); it
 describes moves and carries no example phrases to copy.
 
+**Hinglish narration** (behind `NARRATION_LANGUAGE=hinglish`, off until the relaunch;
+`src/hinglish.py`): after the fact-check, every English sentence becomes one line with two texts.
+`en` is the checked English, which the subtitles show; `hi` is the same sentence as spoken
+Hinglish, which the narrator says.
+- **Script:** Hindi in Devanagari, English words and names in Latin.
+- **Numbers:** they stay digits as in the English (never Hindi number words), and code reads them
+  out as English words.
+- **What it says:** nothing is added or dropped. Code checks the lines, then a second model checks
+  the meaning; one retry, then the reel is narrated in English.
+- **Subtitles:** English, in the narration's word order, timed from its pauses.
+
 ### Template A — Hook → Problem → Solution → Twist → CTA
 General-purpose teaching/value content (use for evergreen explainers).
 

@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 
+from collections import Counter
 from functools import lru_cache
 
 from src import config
@@ -329,6 +330,9 @@ def _caption_groups(words: list[tuple[float, float, str]],
 
 # The longest pause a caption is held across (seconds).
 _HOLD_GAP = 0.6
+# English subtitles on Hinglish reels (design 7.7): plain white, smaller than the karaoke, at the
+# karaoke's height, clear of the action rail and of the Source line below them.
+_SUB_PX = 86
 
 
 def _cs(seconds: float) -> int:
@@ -375,6 +379,7 @@ Style: Karaoke,{font},104,{hilite},&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100
 Style: Hook,{font},94,&H0000FFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,8,3,8,60,60,300,1
 Style: Card,{font},90,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,5,40,40,0,1
 Style: Source,{font},46,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,3,2,2,40,40,440,1
+Style: Sub,{font},{_SUB_PX},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,2,90,150,640,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -617,6 +622,261 @@ def burn_captions(video_path: str, audio_path: str, out_path: str,
         log.warning("subtitles: card-overlay burn failed; retrying with ASS text cards.")
         _burn(video_path, fallback_ass, out_path, cards=None)
 
+    if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
+    return out_path
+
+
+# --- Hinglish reels: English subtitles timed from the narration (design 7.7) -----------------
+# No speech recognition here: on test 4's narration Whisper invented English (a different
+# invention each run). The sentence ends come from the narration's own pauses instead.
+
+# The detector settings test 4's sentence ends were placed with (2026-11-10).
+_PAUSE_FILTER = "silencedetect=noise=-38dB:d=0.12"
+# A boundary that is not at a pause costs this much share error, so a pause is taken only when it
+# lies within about 6% of the narration of where the characters put the end (1.6 s of 27 s). At
+# 0.25 a real end with no pause was pulled to a breath 2.5 s away; test 4's ends are unchanged
+# at 0.06 (final review, 2026-11-12).
+_ESTIMATE_COST = 0.06
+_MIN_SENTENCE_SECONDS = 0.5
+# A part boundary moves to a pause this close (seconds).
+_PART_SNAP_SECONDS = 0.3
+
+
+def _audio_seconds(path: str) -> float:
+    try:
+        import wave
+
+        with wave.open(path, "rb") as w:
+            return w.getnframes() / float(w.getframerate())
+    except Exception:  # noqa: BLE001 — not a WAV: ask ffprobe
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                              "-of", "default=nw=1:nk=1", path],
+                             capture_output=True, text=True, timeout=60).stdout
+        return float(out.strip())
+
+
+def pauses(audio_path: str) -> list[tuple[float, float]]:
+    """The narration's pauses as (start, end) seconds, from FFmpeg's silencedetect. [] when they
+    cannot be read: the subtitles then fall back to the character-share estimates (rule 14)."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", audio_path,
+                              "-af", _PAUSE_FILTER, "-f", "null", "-"],
+                             capture_output=True, text=True, timeout=60).stderr
+    except Exception as e:  # noqa: BLE001 — estimate timing beats a lost reel
+        log.warning("subtitles: could not read the narration's pauses (%s); timing by estimate", e)
+        return []
+    starts = [max(0.0, float(x)) for x in re.findall(r"silence_start: (-?[\d.]+)", out)]
+    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", out)]
+    if len(ends) < len(starts):  # a pause running to the end of the file has no end line
+        ends.append(_audio_seconds(audio_path))
+    return list(zip(starts, ends))
+
+
+def _speech_span(pause_list: list[tuple[float, float]], duration: float) -> tuple[float, float]:
+    """When speech starts (after a leading pause) and ends (at a trailing one)."""
+    t0 = next((e for s, e in pause_list if s <= 0.05), 0.0)
+    t1 = next((s for s, e in pause_list if e >= duration - 0.05 and s > t0), duration)
+    return t0, t1
+
+
+def sentence_ends(pause_list: list[tuple[float, float]], weights: list[int],
+                  duration: float) -> list[float]:
+    """When each sentence ends: every end but the last at a pause's middle, chosen for all the
+    sentences together, in order, so each sentence's share of the spoken characters (`weights`)
+    stays as close as possible to its share of the time (design 7.7). This global assignment
+    placed 5 of 5 ends on both test narrations, where snapping each estimate to its nearest
+    pause missed 2 of 5. With too few pauses an end falls back to its estimate; every sentence
+    keeps at least half a second."""
+    n = len(weights)
+    t0, t1 = _speech_span(pause_list, duration)
+    if n <= 1:
+        return [t1] * n
+    span = max(t1 - t0, 1e-6)
+    inner = [(s + e) / 2 for s, e in pause_list if s > t0 + 0.05 and e < t1 - 0.05]
+    total = float(sum(weights)) or 1.0
+    shares = [sum(weights[:k + 1]) / total for k in range(n - 1)]
+    cands = [sorted([(t, abs((t - t0) / span - share)) for t in inner]
+                    + [(t0 + share * span, _ESTIMATE_COST)]) for share in shares]
+    inf = float("inf")
+    best = [[(inf, -1)] * len(c) for c in cands]
+    for j, (t, cost) in enumerate(cands[0]):
+        if t - t0 >= _MIN_SENTENCE_SECONDS:
+            best[0][j] = (cost, -1)
+    for k in range(1, n - 1):
+        for j, (t, cost) in enumerate(cands[k]):
+            for i, (prev, _c) in enumerate(cands[k - 1]):
+                total_cost = best[k - 1][i][0] + cost
+                if t - prev >= _MIN_SENTENCE_SECONDS and total_cost < best[k][j][0]:
+                    best[k][j] = (total_cost, i)
+    last = [j for j, (t, _c) in enumerate(cands[-1])
+            if best[-1][j][0] < inf and t1 - t >= _MIN_SENTENCE_SECONDS]
+    if not last:  # too short a narration for its sentences: share the time by characters
+        return [t0 + share * span for share in shares] + [t1]
+    j = min(last, key=lambda x: best[-1][x][0])
+    times = []
+    for k in range(n - 2, -1, -1):
+        times.append(cands[k][j][0])
+        j = best[k][j][1]
+    return times[::-1] + [t1]
+
+
+def _spoken_chars(text: str) -> int:
+    from src import hinglish
+
+    return max(1, len(re.sub(r"\s+", "", hinglish.say_numbers(text or ""))))
+
+
+def _usable_parts(line: dict) -> list[dict] | None:
+    """The renderer's parts when they can be trusted: their Hinglish joins to the line's, their
+    English uses only the sentence's own words, and together they carry all its numbers and
+    names. None means the whole sentence shows instead."""
+    from src import hinglish
+
+    parts = [p for p in line.get("parts") or [] if p.get("hi") and p.get("en")]
+    if not parts:
+        return None
+    joined_hi = re.sub(r"\s+", " ", " ".join(p["hi"] for p in parts)).strip()
+    if joined_hi != re.sub(r"\s+", " ", line.get("hi") or "").strip():
+        return None
+    en = line.get("en") or ""
+    joined_en = " ".join(p["en"] for p in parts)
+
+    def words(text: str) -> Counter:
+        return Counter(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+
+    # Exactly the sentence's own words, regrouped (design 7.7): a subset let "did not" vanish,
+    # and the screen read "The court in 2024 / ban the film" for "did not ban". Equal words also
+    # carry every number and name.
+    if words(joined_en) != words(en):
+        return None
+    if not hinglish.numbers_in(en) <= hinglish.numbers_in(joined_en):
+        return None
+    return parts
+
+
+def _sub_width(text: str) -> float:
+    return _caption_px(text) * _SUB_PX / _KARAOKE_PX
+
+
+def _sub_rows(text: str) -> list[str]:
+    """Wrapped to the safe width, with no single word left alone on the last row."""
+    rows = _wrap_px(text.split())
+    if len(rows) >= 2 and len(rows[-1].split()) == 1 and len(rows[-2].split()) >= 3:
+        head = rows[-2].split()
+        rows[-2], rows[-1] = " ".join(head[:-1]), f"{head[-1]} {rows[-1]}"
+    return rows
+
+
+def _wrap_px(words: list[str]) -> list[str]:
+    rows, cur = [], ""
+    for word in words:
+        trial = f"{cur} {word}".strip()
+        if cur and _sub_width(trial) > _MAX_CAPTION_PX:
+            rows.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        rows.append(cur)
+    return rows
+
+
+def _fit(start: float, end: float, text: str) -> list[tuple[float, float, str]]:
+    """One block if it fits in two rows; else halves by characters, each with its share of the
+    time."""
+    words = text.split()
+    if len(_sub_rows(text)) <= 2 or len(words) < 2:
+        return [(start, end, text)]
+    total = sum(len(w) + 1 for w in words)
+    acc, cut = 0, 1
+    for k, w in enumerate(words):
+        acc += len(w) + 1
+        if acc >= total / 2:
+            cut = max(1, min(len(words) - 1, k + 1))
+            break
+    head, tail = " ".join(words[:cut]), " ".join(words[cut:])
+    mid = start + (end - start) * (len(head) + 1) / (total or 1)
+    return _fit(start, mid, head) + _fit(mid, end, tail)
+
+
+def _part_blocks(parts: list[dict], start: float, end: float,
+                 pause_list: list[tuple[float, float]]) -> list[tuple[float, float, str]]:
+    """One block per part, in spoken order, each boundary at the parts' share of the spoken
+    characters, moved to a pause within 0.3 s."""
+    chars = [_spoken_chars(p["hi"]) for p in parts]
+    total = float(sum(chars))
+    mids = [(s + e) / 2 for s, e in pause_list if start < s and e < end]
+    times = [start]
+    acc = 0
+    for c in chars[:-1]:
+        acc += c
+        t = start + (end - start) * acc / total
+        near = min(mids, key=lambda m: abs(m - t), default=None)
+        if near is not None and abs(near - t) <= _PART_SNAP_SECONDS:
+            t = near
+        times.append(max(t, times[-1] + 0.2))
+    times.append(end)
+    out = []
+    for i, part in enumerate(parts):
+        out += _fit(times[i], times[i + 1], part["en"])
+    return out
+
+
+def subtitle_blocks(lines: list[dict], pause_list: list[tuple[float, float]],
+                    duration: float) -> list[tuple[float, float, str]]:
+    """(start, end, English text) for every subtitle block of a Hinglish narration: the lines'
+    sentence times from the pauses, then each line's parts in spoken order, or the whole
+    sentence when its parts cannot be trusted."""
+    weights = [_spoken_chars(line.get("said") or line.get("hi") or "") for line in lines]
+    ends = sentence_ends(pause_list, weights, duration)
+    t0, _t1 = _speech_span(pause_list, duration)
+    starts = [t0] + ends[:-1]
+    blocks: list[tuple[float, float, str]] = []
+    for line, start, end in zip(lines, starts, ends):
+        parts = _usable_parts(line)
+        if parts:
+            blocks += _part_blocks(parts, start, end, pause_list)
+        else:
+            if line.get("parts"):
+                log.info("subtitles: line %r's parts do not match it; showing the whole sentence",
+                         (line.get("en") or "")[:60])
+            blocks += _fit(start, end, line.get("en") or "")
+    return blocks
+
+
+def _hinglish_ass(blocks: list[tuple[float, float, str]], hook_text: str | None,
+                  duration: float, source_label: str | None) -> str:
+    """The banner and the source line as on every reel, then the English blocks: plain white,
+    at most two rows each, each held until the next starts."""
+    lines = [_build_ass([], hook_text, None, duration, source_label).rstrip("\n")]
+    for i, (start, end, text) in enumerate(blocks):
+        until = blocks[i + 1][0] if i + 1 < len(blocks) else max(end, duration)
+        rows = [_ass_escape(_NON_RENDERABLE.sub("", row)) for row in _sub_rows(text)]
+        lines.append(f"Dialogue: 0,{_format_ts(start)},{_format_ts(until)},Sub,,0,0,0,,"
+                     + "\\N".join(r for r in rows if r))
+    return "\n".join(lines) + "\n"
+
+
+def burn_hinglish(video_path: str, audio_path: str, out_path: str, lines: list[dict],
+                  hook_text: str | None = None, source_label: str | None = None) -> str:
+    """Burn English subtitles for a Hinglish narration: no speech recognition; the timing comes
+    from the narration's pauses and the text from the checked lines (design 7.7)."""
+    if not os.path.exists(video_path):
+        raise ValueError(f"subtitles: video not found: {video_path}")
+    if not os.path.exists(audio_path):
+        raise ValueError(f"subtitles: audio not found: {audio_path}")
+    duration = _audio_seconds(audio_path)
+    blocks = subtitle_blocks(lines, pauses(audio_path), duration)
+    out_dir = os.path.dirname(os.path.abspath(out_path))
+    os.makedirs(out_dir, exist_ok=True)
+    digest = hashlib.sha1(os.path.abspath(audio_path).encode("utf-8")).hexdigest()[:12]
+    ass_path = os.path.join(out_dir, f"subs_{digest}.ass")
+    with open(ass_path, "w", encoding="utf-8") as f:
+        f.write(_hinglish_ass(blocks, hook_text, duration, source_label))
+    log.info("subtitles: burning %d English blocks for a Hinglish narration into %s",
+             len(blocks), out_path)
+    _burn(video_path, ass_path, out_path)
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("subtitles: ffmpeg reported success but produced no output file.")
     return out_path

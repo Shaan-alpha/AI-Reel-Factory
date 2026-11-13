@@ -782,19 +782,29 @@ def _anthropic_client():
                                timeout=_llm_timeout_ms() / 1000, max_retries=0)
 
 
-def _claude_create(**kwargs):
-    """messages.create, retried once on 429 or a 5xx (overloaded): an error status is never billed."""
+def _claude_create(beta: bool = False, **kwargs):
+    """messages.create, retried once on 429 or a 5xx (overloaded): an error status is never billed.
+    `beta` sends it through the beta messages API, which carries the refusal fallback."""
     import anthropic
 
+    def _api():
+        client = _anthropic_client()
+        return client.beta.messages if beta else client.messages
+
     try:
-        return _anthropic_client().messages.create(**kwargs)
+        return _api().create(**kwargs)
     except anthropic.APIStatusError as e:
         if not (e.status_code == 429 or e.status_code >= 500):
             raise
         log.warning("llm: Claude answered %s; retrying once in %.0fs", e.status_code,
                     _CLAUDE_RETRY_WAIT)
         time.sleep(_CLAUDE_RETRY_WAIT)
-        return _anthropic_client().messages.create(**kwargs)
+        return _api().create(**kwargs)
+
+
+# A declined request re-runs server side on the model Anthropic recommends for its category
+# (claude-api skill, Claude Opus 5.5 refusal handling). Beta, so it rides on the beta API.
+_CLAUDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 def _release_reservation(db, row_id: int) -> None:
@@ -820,8 +830,14 @@ def claude_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
 
 
-def generate_claude(prompt: str, *, purpose: str = "script") -> str:
+def generate_claude(prompt: str, *, purpose: str = "script", schema: dict | None = None,
+                    fallbacks: bool = False) -> str:
     """One Claude call, held to the monthly budget. Returns the reply's text.
+
+    `schema` asks for structured output (a JSON Schema the reply must match). `fallbacks`
+    switches on the server-side refusal fallback: a declined request is answered by another
+    model in the same call, so its worst case is priced at the highest list price and the
+    settled cost at the price of the model that answered.
 
     Reserve, check, call, settle. The call's WORST case (the prompt at about 3 characters a
     token, which overestimates English, and every one of max_tokens) is written to
@@ -847,7 +863,9 @@ def generate_claude(prompt: str, *, purpose: str = "script") -> str:
         raise ClaudeUnavailable(f"ANTHROPIC_EFFORT={effort!r} is not one of "
                                 f"{', '.join(_CLAUDE_MAX_TOKENS)}", "config")
     model, budget = _ANTHROPIC_MODEL, claude_budget_usd()
-    worst = claude_cost_usd(model, len(prompt) // 3 + 1, max_tokens)
+    # With the fallback another model may answer, so the worst case is priced at the highest
+    # list price (an unknown model name prices there).
+    worst = claude_cost_usd("" if fallbacks else model, len(prompt) // 3 + 1, max_tokens)
     try:
         row_id = db.reserve_claude_spend(model=model, purpose=purpose, cost_usd=worst)
     except Exception as e:  # noqa: BLE001 — any ledger failure refuses the call
@@ -862,10 +880,14 @@ def generate_claude(prompt: str, *, purpose: str = "script") -> str:
         raise ClaudeUnavailable(f"${spent - worst:.2f} of the ${budget:.2f} monthly budget is "
                                 f"spent and this call could cost up to ${worst:.2f}", "budget")
 
+    output_config: dict = {"effort": effort}
+    if schema is not None:
+        output_config["format"] = {"type": "json_schema", "schema": schema}
+    extra = {"betas": [_CLAUDE_FALLBACK_BETA], "fallbacks": "default"} if fallbacks else {}
     try:
-        resp = _claude_create(model=model, max_tokens=max_tokens,
-                              output_config={"effort": effort},
-                              messages=[{"role": "user", "content": prompt}])
+        resp = _claude_create(beta=fallbacks, model=model, max_tokens=max_tokens,
+                              output_config=output_config,
+                              messages=[{"role": "user", "content": prompt}], **extra)
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError,
             anthropic.NotFoundError, anthropic.BadRequestError) as e:
         _release_reservation(db, row_id)
@@ -880,7 +902,10 @@ def generate_claude(prompt: str, *, purpose: str = "script") -> str:
     usage = resp.usage
     input_tokens = (usage.input_tokens + (usage.cache_creation_input_tokens or 0)
                     + (usage.cache_read_input_tokens or 0))
-    cost = claude_cost_usd(model, input_tokens, usage.output_tokens)
+    # Priced as the model that answered: a fallback model may differ from the one asked for.
+    served = str(getattr(resp, "model", "") or model)
+    cost = claude_cost_usd(model if served.startswith(model) else served, input_tokens,
+                           usage.output_tokens)
     try:
         db.settle_claude_spend(row_id, input_tokens=input_tokens,
                                output_tokens=usage.output_tokens, cost_usd=cost)
@@ -895,6 +920,20 @@ def generate_claude(prompt: str, *, purpose: str = "script") -> str:
     text = "".join(b.text for b in resp.content if b.type == "text")
     if not text.strip():
         raise RuntimeError("claude returned no text")
+    return text
+
+
+def generate_with(provider: str, prompt: str, *, json: bool = False,
+                  max_tokens: int = 1024) -> str:
+    """One named provider, "gemini" or "groq", with the usual retry; raises when it fails or
+    answers empty. For a step that must not use the provider another step used (the Hinglish
+    meaning check, design 7.4); everything else uses `generate`'s failover."""
+    workers = {"gemini": _gen_gemini, "groq": _gen_groq}
+    if provider not in workers:
+        raise ValueError(f"llm.generate_with: unknown provider {provider!r}")
+    text = _call_with_retry(provider, workers[provider], prompt, json=json, max_tokens=max_tokens)
+    if not text or not text.strip():
+        raise RuntimeError(f"llm.generate_with: {provider} returned an empty response")
     return text
 
 
