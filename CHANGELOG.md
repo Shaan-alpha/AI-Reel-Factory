@@ -23,6 +23,13 @@ reels left the channel voice for Chirp, and loudness was never set. Separately, 
   narration, and it shows large in the upper middle, scaling in, while it is said.
 - `tools/try_ai_video.py --key-number`.
 
+- **After the final review:** the number card matches the figure as written ("40%" never shows
+  at "40 districts"), refuses a number without its unit or sign ("2,000" for "Rs 2,000 crore"),
+  breaks a long number into rows before it scales in, and leaves short units' case alone; the
+  fact-check sees the key number and no hidden cards.
+- **Today's English reels change at once** with these defaults (no vignette, stings or cards, the
+  bed 7 LU up, the banner hold, the source line and karaoke in the safe area, the key number).
+
 ### Fixed (2026-11-14: found by stage 4b's render)
 - The shot planner was told that "a title and subtitles sit there" and wrote it into its
   stills, so the lettering check refused nearly every plan, and the image model may draw what it

@@ -187,8 +187,41 @@ the retry says the same, and "display" left the word list (a live false alarm: "
 Three live plans afterwards: one clean at once, one fixed by its retry (a real "notebook"), one
 flagged only for "display". Also: the darkness message shows the measured value ("59.6 < 60").
 
-Suite: **1207 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
-Next: the final review, then the push with the operator's go-ahead.
+**Final review** (a fresh reviewer over `3f3c65c..e24097d`): no critical finding; the plan's five
+review-focus cases hold. Fixed test-first:
+- **the card could show over another number:** its moment was matched on digits alone, so "40%"
+  showed while "40 districts" was said, and "14" at "1.4 billion". Figures are compared as written;
+- **a key number could lose its unit or sign:** "2,000" passed for "Rs 2,000 crore" (off by ten
+  million), "5" for "$5 billion", and a typographic minus was stripped by the font. A number next
+  to a unit, a magnitude word, a currency or a minus is refused, and a card the renderer would
+  change is not drawn;
+- **a long number jumped from one row to two during its scale-in:** rows are broken in code (at
+  most two of 12 characters) and libass's wrapping is off;
+- **capitals changed units:** "5 m" (metres) read "5 M"; only words of 3+ letters are capitalised;
+- **the fact-check checked cards no one sees** and not the key number that is shown; it now sees
+  what is on screen.
+
+**Decided (review finding 4): merging changes today's English reels at once.** They lose the
+vignette, the stings and the key-point cards; their bed comes up 7 LU; the logo is smaller; the
+banner holds for the first sentence; the source line moves under it; the karaoke moves 42 px left
+and 32 px up into the safe box; and a key number appears when the writer names one. Design 12 makes
+these global defaults, and the judging rule is not touched: its baseline is a fixed count (18 of
+the 40 Shorts since 2026-07-27) and its cohort needs Hinglish, format version 2 and video shots, so
+English reels made before the relaunch count in neither.
+
+**For the relaunch** (found while checking that): `production.FORMAT_VERSION` is still 1, while the
+judging rule counts posts stamped version 2, so it must become 2 with the relaunch; and the
+rule's Telegram verdict (design 10.2) is not built yet.
+
+**Deferred minors:** the source line has no upper bound (a one-sentence script keeps it up the
+whole reel); PNG cards still start at `HOOK_SECONDS`; a shadowed variable in `_build_ass`'s card
+loop; cards and a two-row number can overlap when cards are switched on; the writer is still asked
+for key points; any phrase with a digit counts as a key number ("G20"); "display" left the
+lettering list entirely; no test for a number said inside the first sentence or for the
+first-sentence end on the ASR fallback.
+
+Suite: **1213 passed, 5 skipped**; with every `.env` name blanked, the known NICHE artifact only.
+Next: the push with the operator's go-ahead, then the relaunch.
 
 ### 2026-11-13 — Stage 4a: the picture gates (merged as PR #23 on 2026-11-14)
 

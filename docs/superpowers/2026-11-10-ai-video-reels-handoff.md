@@ -145,9 +145,14 @@ no file under `src/`, `tests/` or `.github/` has changed, and nothing is committ
   96 px logo; one key number from the writer, shown when said. Its render (script 441, $0 of
   clips) also fixed the planner echoing "title and subtitles" into its stills.
 
-**Next:** stage 4b's final review, then its push and PR with the operator's go-ahead. Then the
-relaunch (design sections 14-15): the repository variables, one real reel end to end,
-`WINNERS_SINCE`.
+- **Stage 4b's final review is done** (4 important findings and 2 re-graded minors fixed
+  test-first, 1213 pass: the number card matches the figure as written, refuses a number without
+  its unit or sign, breaks long numbers into rows; the fact-check sees what is on screen).
+  Merging changes today's English reels at once; that was decided and recorded in STATUS.md.
+
+**Next:** stage 4b's push and PR with the operator's go-ahead. Then the relaunch (design
+sections 14-15): `FORMAT_VERSION` to 2 (the judging rule counts version 2), the repository
+variables, one real reel end to end, `WINNERS_SINCE`; the rule's Telegram verdict is not built.
 
 ## 1. What the operator wants
 
